@@ -1,5 +1,5 @@
 {
-  "originHash" : "736da63e69d7c7d5dd7aac3a02db75e21797e27580c5b204bf8f264f7d8e95ae",
+  "originHash" : "ba625ab600c325b767317784eed4db392a5c9a54b416ec14fcc737d854969f03",
   "pins" : [
     {
       "identity" : "openfoundationmodels",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/1amageek/OpenFoundationModels.git",
       "state" : {
         "branch" : "main",
-        "revision" : "7e04826197c233afc1c6fecef47f273761545208"
+        "revision" : "095bf08762072673df4232c7e07f623458158446"
       }
     },
     {
@@ -16,25 +16,25 @@
       "location" : "https://github.com/apple/swift-argument-parser.git",
       "state" : {
         "branch" : "main",
-        "revision" : "d67151befa39533a6a449136c7992537cbf8ec99"
+        "revision" : "d075877f3a7a06e75d46b3c3275dcba0ac9c9f9b"
       }
     },
     {
       "identity" : "swift-async-algorithms",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-async-algorithms",
+      "location" : "https://github.com/apple/swift-async-algorithms.git",
       "state" : {
-        "revision" : "4c3ea81f81f0a25d0470188459c6d4bf20cf2f97",
-        "version" : "1.0.3"
+        "revision" : "042e1c4d9d19748c9c228f8d4ebc97bb1e339b0b",
+        "version" : "1.0.4"
       }
     },
     {
       "identity" : "swift-collections",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-collections",
+      "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "671108c96644956dddcd89dd59c203dcdb36cec7",
-        "version" : "1.1.4"
+        "revision" : "c1805596154bb3a265fd91b8ac0c4433b4348fb0",
+        "version" : "1.2.0"
       }
     },
     {

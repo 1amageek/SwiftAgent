@@ -33,15 +33,15 @@ public struct GitTool: OpenFoundationModels.Tool {
     }
     
     public func call(arguments: GitInput) async throws -> ToolOutput {
-        // Validate repository path
-        if let repo = arguments.repository {
-            guard FileManager.default.fileExists(atPath: repo) else {
-                return ToolOutput("Git Operation [Failed]\nOutput: Repository not found: \(repo)\nMetadata:\n  error: Repository not found")
+        // Validate repository path if specified
+        if !arguments.repository.isEmpty {
+            guard FileManager.default.fileExists(atPath: arguments.repository) else {
+                return ToolOutput("Git Operation [Failed]\nOutput: Repository not found: \(arguments.repository)\nMetadata:\n  error: Repository not found")
             }
             
-            let gitDir = URL(fileURLWithPath: repo).appendingPathComponent(".git").path
+            let gitDir = URL(fileURLWithPath: arguments.repository).appendingPathComponent(".git").path
             guard FileManager.default.fileExists(atPath: gitDir) else {
-                return ToolOutput("Git Operation [Failed]\nOutput: Not a Git repository: \(repo)\nMetadata:\n  error: Not a Git repository")
+                return ToolOutput("Git Operation [Failed]\nOutput: Not a Git repository: \(arguments.repository)\nMetadata:\n  error: Not a Git repository")
             }
         }
         
@@ -69,13 +69,13 @@ public struct GitTool: OpenFoundationModels.Tool {
         process.executableURL = URL(fileURLWithPath: gitPath)
         
         var arguments = [input.command]
-        if let args = input.args {
-            arguments.append(contentsOf: args.split(separator: " ").map(String.init))
+        if !input.args.isEmpty {
+            arguments.append(contentsOf: input.args.split(separator: " ").map(String.init))
         }
         process.arguments = arguments
         
-        if let repository = input.repository {
-            process.currentDirectoryURL = URL(fileURLWithPath: repository)
+        if !input.repository.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: input.repository)
         }
         
         let pipe = Pipe()
@@ -102,7 +102,7 @@ public struct GitTool: OpenFoundationModels.Tool {
                 exitCode: Int(exitCode),
                 metadata: [
                     "command": input.command,
-                    "repository": input.repository ?? "current directory",
+                    "repository": input.repository.isEmpty ? "current directory" : input.repository,
                     "exit_code": String(exitCode)
                 ]
             )
@@ -127,13 +127,13 @@ public struct GitInput: Codable, Sendable, ConvertibleFromGeneratedContent {
     @Guide(description: "The Git command to execute", .enumeration(["status", "log", "diff", "add", "commit", "push", "pull", "branch", "checkout", "merge", "fetch", "remote", "tag", "reset", "revert", "stash", "show", "clone", "init"]))
     public let command: String
     
-    /// Optional path to the Git repository.
-    @Guide(description: "Optional path to the Git repository")
-    public let repository: String?
+    /// Path to the Git repository (empty string means current directory).
+    @Guide(description: "Path to the Git repository (empty string means current directory)")
+    public let repository: String
     
-    /// Additional arguments for the Git command (space-separated).
-    @Guide(description: "Additional arguments for the Git command (space-separated)")
-    public let args: String?
+    /// Additional arguments for the Git command (space-separated, empty string if none).
+    @Guide(description: "Additional arguments for the Git command (space-separated, empty string if none)")
+    public let args: String
 }
 
 /// Output structure for Git operations.

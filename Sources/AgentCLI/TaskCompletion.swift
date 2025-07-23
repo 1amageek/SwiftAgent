@@ -13,8 +13,8 @@ import OpenFoundationModels
 public struct TaskCompletion {
     @Guide(description: "Whether the task is completed")
     let isComplete: Bool
-    @Guide(description: "ID of the next task to execute")
-    let nextTaskId: String?
-    @Guide(description: "Error message if any")
-    let error: String?
+    @Guide(description: "ID of the next task to execute (empty string if none)")
+    let nextTaskId: String
+    @Guide(description: "Error message (empty string if no error)")
+    let error: String
 }

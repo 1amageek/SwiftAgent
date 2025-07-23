@@ -63,10 +63,10 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
             let result = try await readFile(at: normalizedPath)
             return ToolOutput(result.description)
         case "write":
-            guard let content = arguments.content else {
+            if arguments.content.isEmpty {
                 return ToolOutput("FileSystem Operation [Failed]\nContent: Missing content for write operation\nMetadata:\n  operation: \(arguments.operation)\n  error: Missing content for write operation")
             }
-            let result = try await writeFile(content: content, to: normalizedPath)
+            let result = try await writeFile(content: arguments.content, to: normalizedPath)
             return ToolOutput(result.description)
         default:
             return ToolOutput("FileSystem Operation [Failed]\nContent: Invalid operation: \(arguments.operation)\nMetadata:\n  error: Invalid operation")  
@@ -87,9 +87,9 @@ public struct FileSystemInput: Codable, Sendable, ConvertibleFromGeneratedConten
     @Guide(description: "Path to the file or directory")
     public let path: String
     
-    /// The content to write (used only for `write` operations).
-    @Guide(description: "Content to write (for write operation only)")
-    public let content: String?
+    /// The content to write (used only for `write` operations, empty string if not applicable).
+    @Guide(description: "Content to write (for write operation only, empty string if not applicable)")
+    public let content: String
 }
 
 /// The output structure for file system operations.

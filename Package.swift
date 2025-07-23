@@ -41,5 +41,9 @@ let package = Package(
             name: "SwiftAgentTests",
             dependencies: ["SwiftAgent", "AgentTools"]
         ),
+        .testTarget(
+            name: "AgentsTests",
+            dependencies: ["SwiftAgent", "AgentTools"]
+        ),
     ]
 )

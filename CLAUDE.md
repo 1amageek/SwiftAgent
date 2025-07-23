@@ -87,6 +87,23 @@ run() メソッドで自動的に適用される：
 - 具体的なAIプロバイダー実装（OpenAI、Anthropic等）はユーザー側で選択
 - SwiftAgentはプロバイダー中立なフレームワークとして機能
 
+## モデルプロバイダーの使用方法
+SwiftAgent で異なるAIモデルプロバイダーを使用するには、LanguageModelSession を作成して ModelStep/StringModelStep に渡します：
+
+```swift
+// OpenAI の場合
+let session = LanguageModelSession(
+    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+    instructions: Instructions("You are a helpful assistant.")
+)
+
+ModelStep<String, Output>(session: session) { input in
+    input
+}
+```
+
+この設計により、SwiftAgent は特定のプロバイダーに依存せず、ユーザーが自由にモデルを選択できます。
+
 ## 注意事項
 
 ### @Generableマクロの制限

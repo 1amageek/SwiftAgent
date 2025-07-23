@@ -29,6 +29,7 @@ public struct ModelStep<Input: Sendable, Output: Sendable & Generable>: Step {
         self.transform = transform
     }
     
+    
     /// Creates a new ModelStep with default SystemLanguageModel
     /// - Parameters:
     ///   - tools: Tools to be used by the model
@@ -87,6 +88,7 @@ public struct StringModelStep<Input: Sendable>: Step {
         self.session = session
         self.transform = transform
     }
+    
     
     /// Creates a new StringModelStep with default SystemLanguageModel
     /// - Parameters:

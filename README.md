@@ -29,6 +29,26 @@ public protocol Step<Input, Output> {
 }
 ```
 
+### Foundation Models Integration
+
+SwiftAgent integrates seamlessly with Apple's Foundation Models through the OpenFoundationModels library:
+
+```swift
+// Use Apple's Foundation Models with SwiftAgent
+let agent = FoundationModelAgent(
+    tools: [ExecuteCommandTool(), FileSystemTool()],
+    instructions: "You are a helpful coding assistant"
+)
+
+// Generate structured data using Foundation Models
+let step = FoundationModelGenerationStep.generate(
+    type: Novel.self,
+    instructions: "Generate a novel structure"
+) { prompt in
+    prompt
+}
+```
+
 ### Transform
 
 The `Transform` step provides a simple way to convert data:
@@ -203,6 +223,53 @@ struct NovelQualityAssessment: Codable {
 }
 ```
 
+## Foundation Models Integration
+
+SwiftAgent provides first-class support for Apple's Foundation Models through the OpenFoundationModels library, offering:
+
+### Key Features
+
+- **100% API Compatibility**: Full compatibility with Apple's Foundation Models API
+- **Cross-Platform Support**: Works on iOS, macOS, and beyond Apple's ecosystem
+- **Structured Data Generation**: Built-in support for type-safe data generation
+- **Tool Integration**: Seamless integration with SwiftAgent's tool system
+- **Conversation Management**: Advanced conversation state management
+
+### Usage Examples
+
+```swift
+// Basic Foundation Model usage
+let agent = FoundationModelAgent(
+    instructions: "You are a helpful assistant specialized in Swift development"
+)
+
+let response = try await agent.run("How do I implement a custom SwiftUI view?")
+```
+
+```swift
+// Structured data generation
+struct CodeSuggestion: Codable, FoundationModelGenerable {
+    let code: String
+    let explanation: String
+    let complexity: String
+    
+    static var generationSchema: GenerationSchema {
+        return .object([
+            "code": .string,
+            "explanation": .string,
+            "complexity": .string
+        ])
+    }
+}
+
+let step = FoundationModelGenerationStep.generate(
+    type: CodeSuggestion.self,
+    instructions: "Generate code suggestions with explanations"
+) { prompt in
+    "Generate a Swift function for: \(prompt)"
+}
+```
+
 ## Requirements
 
 - Swift 6.0+
@@ -210,6 +277,7 @@ struct NovelQualityAssessment: Codable {
 - OpenAI API key (for OpenAI integration)
 - Anthropic API key (for Claude integration)
 - Ollama installation (for local model support)
+- Foundation Models support (built-in with OpenFoundationModels)
 
 ## Installation and Development Setup
 

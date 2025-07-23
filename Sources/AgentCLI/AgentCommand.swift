@@ -8,7 +8,6 @@
 import Foundation
 import ArgumentParser
 import SwiftAgent
-import OllamaKit
 import AgentTools
 
 /// A command-line interface for interacting with AI agents.
@@ -27,17 +26,25 @@ import AgentTools
 /// # Query with quiet mode
 /// agent ask --quiet "Summarize this document"
 /// ```
+
 @main
 struct AgentCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent",
         abstract: "AI Agent Command Line Tool",
         version: "1.0.0",
-        subcommands: [Ask.self]
+        subcommands: [Ask.self, Config.self]
     )
+    
+    @Flag(name: .shortAndLong, help: "Enable verbose logging")
+    var verbose: Bool = false
     
     // メインコマンドの実装（サブコマンドなしの場合）
     mutating func run() async throws {
+        if verbose {
+            ConfigurationManager.shared.log("Starting interactive session")
+        }
+        
         print("Starting interactive AI agent session. Type 'exit' to quit.\n")
         _ = try await MainAgent().run("")
     }
@@ -55,10 +62,18 @@ struct AgentCommand: AsyncParsableCommand {
         @Flag(name: .shortAndLong, help: "Show only the final answer")
         var quiet: Bool = false
         
+        @Flag(name: .shortAndLong, help: "Enable verbose logging")
+        var verbose: Bool = false
+        
         mutating func run() async throws {
             guard !prompt.isEmpty else {
                 throw ValidationError("Question cannot be empty")
-            }        
+            }
+            
+            if verbose {
+                ConfigurationManager.shared.log("Processing query: \(prompt)")
+            }
+            
             let output = try await AskAgent().run(prompt)
             print(output)
         }

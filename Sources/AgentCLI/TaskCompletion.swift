@@ -6,23 +6,15 @@
 //
 
 import Foundation
-import JSONSchema
+import OpenFoundationModels
 
 /// タスクの完了状態を表す構造体
-public struct TaskCompletion: Codable, Sendable {
-    let isComplete: Bool           // タスクが完了したか
-    let nextTaskId: String?        // 次のタスクID
-    let error: String?            // エラーメッセージ（あれば）
+@Generable
+public struct TaskCompletion {
+    @Guide(description: "Whether the task is completed")
+    let isComplete: Bool
+    @Guide(description: "ID of the next task to execute")
+    let nextTaskId: String?
+    @Guide(description: "Error message if any")
+    let error: String?
 }
-
-/// TaskCompletionのJSONSchema定義
-public let TaskCompletionSchema: JSONSchema = .object(
-    description: "Task completion status check",
-    properties: [
-        "isComplete": .boolean(description: "Whether the task is completed"),
-        "nextTaskId": .string(description: "ID of the next task to execute"),
-        "error": .string(description: "Error message if any")
-    ],
-    required: ["isComplete"],
-    additionalProperties: .boolean(false)
-)

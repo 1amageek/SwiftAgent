@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftAgent
+import OpenFoundationModels
 
 /// A tool for executing shell commands in a controlled environment.
 ///
@@ -21,13 +21,13 @@ import SwiftAgent
 /// - Does not support long-running processes.
 /// - Does not allow interactive commands.
 /// - Cannot execute commands requiring user input.
-public struct ExecuteCommandTool: Tool {
-    public typealias Input = ExecuteCommandInput
-    public typealias Output = ExecuteCommandOutput
+public struct ExecuteCommandTool: OpenFoundationModels.Tool {
+    public typealias Arguments = ExecuteCommandInput
     
-    public let name = "execute"
+    public static let name = "execute"
+    public var name: String { Self.name }
     
-    public let description = """
+    public static let description = """
     A tool for executing shell commands in a controlled environment.
     
     Use this tool to:
@@ -41,146 +41,18 @@ public struct ExecuteCommandTool: Tool {
     - Cannot execute commands requiring user input
     """
     
-    public let guide: String? = """
-    # execute Guide
-    
-    function_name: execute
-    
-    ## Description
-    `execute` is a utility for executing shell commands or scripts in a controlled and safe manner. It ensures basic input validation and sanitization to prevent misuse or unsafe behavior.
-    
-    ### Key Features
-    - Run shell commands or scripts in a non-interactive environment.
-    - Provides validation and sanitization for safer command execution.
-    - Captures output and metadata from the executed command.
-    
-    ### Limitations
-    - Does not support commands requiring user input.
-    - Interactive commands like `vim` or `ssh` are not allowed.
-    - Long-running processes are not supported.
-    
-    ## Parameters
-    ### Required Parameters
-    - **command**:
-      - **Type**: `String`
-      - **Description**: The shell command to execute.
-      - **Requirements**: Must not be empty. Commands should be valid and safe to execute.
-    
-    ## Usage
-    ### General Guidelines
-    - Validate commands before execution to ensure safety.
-    - Avoid using commands that modify system-critical files or directories.
-    - Ensure commands are non-interactive and short-running.
-    
-    ### Common Scenarios
-    1. **Listing Files**: Use commands like `ls -la` to list files in a directory.
-    2. **Checking System Information**: Commands such as `uname -a` can provide system details.
-    3. **Simple File Operations**: Commands like `cat filename.txt` can read file contents.
-    
-    ## Examples
-    
-    ### Example 1: List Files in a Directory
-    ```json
-    {
-      "command": "ls -la"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": true,
-      "output": "drwxr-xr-x  5 user group 160 Jan 11 12:34 .\n-rw-r--r--  1 user group  12 Jan 11 12:34 file.txt",
-      "metadata": {
-        "status": "0",
-        "command": "ls -la"
-      }
-    }
-    ```
-    
-    ### Example 2: Display System Information
-    ```json
-    {
-      "command": "uname -a"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": true,
-      "output": "Darwin hostname.local 22.3.0 Darwin Kernel Version 22.3.0: Thu Jan 12 20:41:10 PST 2023; root:xnu-8792.81.3~1/RELEASE_ARM64_T8103 arm64",
-      "metadata": {
-        "status": "0",
-        "command": "uname -a"
-      }
-    }
-    ```
-    
-    ### Example 3: Invalid Command
-    ```json
-    {
-      "command": "invalid_command"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": false,
-      "output": "zsh: command not found: invalid_command",
-      "metadata": {
-        "status": "127",
-        "command": "invalid_command"
-      }
-    }
-    ```
-    
-    ### Example 4: Unsafe Command
-    ```json
-    {
-      "command": "rm -rf /"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": false,
-      "output": "Unsafe command detected: rm -rf /",
-      "metadata": {
-        "error": "Unsafe command detected: rm -rf /"
-      }
-    }
-    ```
-    """
-    
-    public let parameters: JSONSchema = .object(
-        description: "Schema for command execution",
-        properties: [
-            "command": .string(description: "The shell command to execute")
-        ],
-        required: ["command"]
-    )
+    public var description: String { Self.description }
     
     public init() {}
     
-    public func run(_ input: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
-        guard !input.command.isEmpty else {
-            return ExecuteCommandOutput(
-                success: false,
-                output: "Command cannot be empty",
-                metadata: [
-                    "error": "Command cannot be empty"
-                ]
-            )
+    public func call(arguments: ExecuteCommandInput) async throws -> ToolOutput {
+        guard !arguments.command.isEmpty else {
+            return ToolOutput("Command Execution [Failed]\nOutput: Command cannot be empty\nMetadata:\n  error: Command cannot be empty")
         }
         
-        let sanitizedCommand = sanitizeCommand(input.command)
+        let sanitizedCommand = sanitizeCommand(arguments.command)
         guard validateCommand(sanitizedCommand) else {
-            return ExecuteCommandOutput(
-                success: false,
-                output: "Unsafe command detected: \(input.command)",
-                metadata: [
-                    "error": "Unsafe command detected: \(input.command)"
-                ]
-            )
+            return ToolOutput("Command Execution [Failed]\nOutput: Unsafe command detected: \(arguments.command)\nMetadata:\n  error: Unsafe command detected: \(arguments.command)")
         }
         
         return try await executeCommand(sanitizedCommand)
@@ -191,8 +63,10 @@ public struct ExecuteCommandTool: Tool {
 // MARK: - Input/Output Types
 
 /// The input structure for command execution.
-public struct ExecuteCommandInput: Codable, Sendable {
+@Generable
+public struct ExecuteCommandInput: Codable, Sendable, ConvertibleFromGeneratedContent {
     /// The shell command to execute.
+    @Guide(description: "The shell command to execute")
     public let command: String
     
     /// Creates a new instance of `ExecuteCommandInput`.
@@ -203,39 +77,6 @@ public struct ExecuteCommandInput: Codable, Sendable {
     }
 }
 
-/// The output structure for command execution.
-public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
-    /// Whether the command was executed successfully.
-    public let success: Bool
-    
-    /// The output produced by the command.
-    public let output: String
-    
-    /// Additional metadata about the command execution.
-    public let metadata: [String: String]
-    
-    /// Creates a new instance of `ExecuteCommandOutput`.
-    ///
-    /// - Parameters:
-    ///   - success: Indicates if the command was executed successfully.
-    ///   - output: The output of the command.
-    ///   - metadata: Additional details about the execution.
-    public init(success: Bool, output: String, metadata: [String: String]) {
-        self.success = success
-        self.output = output
-        self.metadata = metadata
-    }
-    
-    public var description: String {
-        let status = success ? "Success" : "Failed"
-        let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
-        
-        return """
-        Command Execution [\(status)]
-        Output: \(output)\(metadataString)
-        """
-    }
-}
 
 // MARK: - Private Methods
 
@@ -245,7 +86,7 @@ private extension ExecuteCommandTool {
     /// - Parameter command: The sanitized shell command to execute.
     /// - Returns: The result of the command execution.
     /// - Throws: `ToolError` if the command fails.
-    func executeCommand(_ command: String) async throws -> ExecuteCommandOutput {
+    func executeCommand(_ command: String) async throws -> ToolOutput {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
@@ -261,31 +102,28 @@ private extension ExecuteCommandTool {
                     let output = String(data: data, encoding: .utf8) ?? ""
                     
                     if process.terminationStatus == 0 {
-                        continuation.resume(returning: ExecuteCommandOutput(
-                            success: true,
-                            output: output,
-                            metadata: [
-                                "status": "\(process.terminationStatus)",
-                                "command": command
-                            ]
+                        continuation.resume(returning: ToolOutput(
+                            "Command Execution [Success]\n" +
+                            "Output: \(output)\n" +
+                            "Metadata:\n" +
+                            "  status: \(process.terminationStatus)\n" +
+                            "  command: \(command)"
                         ))
                     } else {
-                        continuation.resume(returning: ExecuteCommandOutput(
-                            success: false,
-                            output: output,
-                            metadata: [
-                                "status": "\(process.terminationStatus)",
-                                "command": command
-                            ]
+                        continuation.resume(returning: ToolOutput(
+                            "Command Execution [Failed]\n" +
+                            "Output: \(output)\n" +
+                            "Metadata:\n" +
+                            "  status: \(process.terminationStatus)\n" +
+                            "  command: \(command)"
                         ))
                     }
                 } catch {
-                    continuation.resume(returning: ExecuteCommandOutput(
-                        success: false,
-                        output: "Failed to execute command: \(error.localizedDescription)",
-                        metadata: [
-                            "error": "Failed to execute command: \(error.localizedDescription)"
-                        ]
+                    continuation.resume(returning: ToolOutput(
+                        "Command Execution [Failed]\n" +
+                        "Output: Failed to execute command: \(error.localizedDescription)\n" +
+                        "Metadata:\n" +
+                        "  error: Failed to execute command: \(error.localizedDescription)"
                     ))
                 }
             }
@@ -293,12 +131,11 @@ private extension ExecuteCommandTool {
             do {
                 try process.run()
             } catch {
-                continuation.resume(returning: ExecuteCommandOutput(
-                    success: false,
-                    output: "Failed to start command: \(error.localizedDescription)",
-                    metadata: [
-                        "error": "Failed to start command: \(error.localizedDescription)"
-                    ]
+                continuation.resume(returning: ToolOutput(
+                    "Command Execution [Failed]\n" +
+                    "Output: Failed to start command: \(error.localizedDescription)\n" +
+                    "Metadata:\n" +
+                    "  error: Failed to start command: \(error.localizedDescription)"
                 ))
             }
         }

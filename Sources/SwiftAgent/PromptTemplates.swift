@@ -1,4 +1,5 @@
 import Foundation
+import OpenFoundationModels
 
 /// A structure to generate system prompts for AI agents.
 public struct PromptTemplates {
@@ -11,7 +12,7 @@ public struct PromptTemplates {
     ///   - systemInfo: The system information.
     /// - Returns: A formatted system prompt as a `String`.
     public static func systemPrompt(
-        tools: [any Tool],
+        tools: [any OpenFoundationModels.Tool],
         workingDirectory: String,
         systemInfo: SystemInfo
     ) -> String {
@@ -60,7 +61,7 @@ public struct PromptTemplates {
     ///
     /// - Parameter tools: An array of available tools.
     /// - Returns: A formatted guide for available tools and usage rules.
-    static func toolUsageGuide(tools: [any Tool]) -> String {
+    static func toolUsageGuide(tools: [any OpenFoundationModels.Tool]) -> String {
         """
         [AVAILABLE TOOLS]:
         \(formatToolDescriptions(tools))
@@ -100,9 +101,14 @@ public struct PromptTemplates {
     ///
     /// - Parameter tools: An array of available tools.
     /// - Returns: A formatted string containing tool descriptions.
-    static func formatToolDescriptions(_ tools: [any Tool]) -> String {
+    static func formatToolDescriptions(_ tools: [any OpenFoundationModels.Tool]) -> String {
         tools
-            .compactMap { $0.guide }
+            .map { tool in
+                """
+                **\(tool.name)**
+                \(tool.description)
+                """
+            }
             .joined(separator: "\n\n")
     }
 }

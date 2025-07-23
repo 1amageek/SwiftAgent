@@ -7,18 +7,22 @@
 
 import Foundation
 import SwiftAgent
-import Agents
-import LLMChatOpenAI
 
 public struct MainAgent: Agent {
+    
+    public init() {}
 
     public var body: some Step<String, String> {
         Loop { _ in
             WaitForInput(prompt: "You: ")
-            AnthropicAgent()
-                .onOutput { message in
-                    print(message)
-                }
+            StringModelStep<String>(
+                instructions: "You are a helpful assistant. Have a conversation with the user."
+            ) { input in
+                input
+            }
+            .onOutput { message in
+                print("Assistant: \(message)")
+            }
         }
     }
 }

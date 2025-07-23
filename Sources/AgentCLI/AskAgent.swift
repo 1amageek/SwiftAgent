@@ -7,20 +7,24 @@
 
 import Foundation
 import SwiftAgent
-import Agents
-import LLMChatOpenAI
 
 public struct AskAgent: Agent {
     
+    public init() {}
+    
     public var body: some Step<String, String> {
         Loop(max: 3) { _ in
-            GeminiAgent()
-                .onOutput { message in
-                    print(message)
-                }
+            StringModelStep<String>(
+                instructions: "You are a helpful assistant."
+            ) { input in
+                input
+            }
+            .onOutput { message in
+                print(message)
+            }
         } until: {
             Transform<String, Bool> { message in
-                return true
+                message.lowercased().contains("exit") || message.lowercased().contains("quit")
             }
         }
     }

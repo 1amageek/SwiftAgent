@@ -1,5 +1,5 @@
 import Foundation
-import SwiftAgent
+import OpenFoundationModels
 
 /// A tool for fetching data from a URL.
 ///
@@ -40,14 +40,14 @@ import SwiftAgent
 /// ```
 ///
 /// Always confirm that the user genuinely needs external data from the provided URL before using `URLFetchTool`.
-public struct URLFetchTool: Tool {
+public struct URLFetchTool: OpenFoundationModels.Tool {
     
-    public typealias Input = FetchInput
-    public typealias Output = FetchOutput
+    public typealias Arguments = FetchInput
     
-    public let name = "url_fetch"
+    public static let name = "url_fetch"
+    public var name: String { Self.name }
     
-    public let description = """
+    public static let description = """
     A tool for fetching data from a URL. Use this tool to retrieve content from web pages or APIs.
     Limitations:
     - Only supports HTTP and HTTPS URLs.
@@ -55,177 +55,69 @@ public struct URLFetchTool: Tool {
     - Cannot handle POST requests or custom headers.
     """
     
-    /// A more detailed guide for the `url_fetch` tool.
-    ///
-    /// Emphasizes that examples are for reference only and clarifies the limitations.
-    public let guide: String? = """
-    # url_fetch Guide
-    
-    function_name: url_fetch
-    
-    ## Description
-    `url_fetch` retrieves data from a specified URL via HTTP GET requests.
-    
-    ### Key Features
-    - Simple interface for fetching web resources.
-    - Ensures the URL is valid before making a request.
-    
-    ### Limitations
-    - Only supports HTTP and HTTPS URLs.
-    - Limited to plain text responses.
-    
-    ## Parameters
-    - **url**:
-      - **Type**: `String`
-      - **Description**: The URL to fetch data from.
-      - **Requirements**: Must be a valid HTTP or HTTPS URL.
-    
-    ## Examples
-    
-    ### Example 1: Fetching a JSON API
-    ```json
-    {
-      "url": "https://api.example.com/data"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": true,
-      "output": "{\"key\": \"value\"}",
-      "metadata": {
-        "status": "200",
-        "url": "https://api.example.com/data"
-      }
-    }
-    ```
-    
-    ### Example 2: Invalid URL
-    ```json
-    {
-      "url": "ftp://example.com"
-    }
-    ```
-    **Expected Output**:
-    ```json
-    {
-      "success": false,
-      "output": "Invalid URL",
-      "metadata": {
-        "error": "URL must use HTTP or HTTPS"
-      }
-    }
-    ```
-    """
-    
-    /// Defines the JSON schema for inputs to this tool.
-    ///
-    /// - url: The URL (HTTP or HTTPS) from which to fetch data.
-    public let parameters: JSONSchema = .object(
-        description: "Schema for URL fetching",
-        properties: [
-            "url": .string(description: "The URL to fetch data from")
-        ],
-        required: ["url"]
-    )
+    public var description: String { Self.description }
     
     public init() {}
     
-    /// Executes the fetch operation asynchronously.
-    ///
-    /// - Parameter input: A `FetchInput` containing a valid HTTP/HTTPS URL.
-    /// - Returns: A `FetchOutput` containing success status, raw output text, and metadata.
-    ///
-    /// This function will return `success: false` if the URL is invalid or if the request fails.
-    public func run(_ input: FetchInput) async throws -> FetchOutput {
-        // Validate the URL scheme
-        guard let url = URL(string: input.url), url.scheme == "http" || url.scheme == "https" else {
-            return FetchOutput(
-                success: false,
-                output: "Invalid URL",
-                metadata: ["error": "URL must use HTTP or HTTPS"]
-            )
+    public func call(arguments: FetchInput) async throws -> ToolOutput {
+        guard let url = URL(string: arguments.url) else {
+            return ToolOutput("URLFetch [Failed]\nOutput: Invalid URL: \(arguments.url)\nMetadata:\n  error: Invalid URL")
         }
         
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        guard url.scheme == "http" || url.scheme == "https" else {
+            return ToolOutput("URLFetch [Failed]\nOutput: Unsupported URL scheme: \(url.scheme ?? "nil")\nMetadata:\n  error: Unsupported URL scheme")
+        }
         
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(from: url)
             
-            // Ensure we have a valid HTTP response
             guard let httpResponse = response as? HTTPURLResponse else {
-                return FetchOutput(
-                    success: false,
-                    output: "Invalid response",
-                    metadata: ["error": "Response is not HTTP"]
-                )
+                return ToolOutput("URLFetch [Failed]\nOutput: Invalid response type\nMetadata:\n  error: Invalid response type")
             }
             
-            // Convert data to String (UTF-8). If conversion fails, we fallback to empty.
-            let outputText = String(data: data, encoding: .utf8) ?? ""
+            let outputText = String(data: data, encoding: .utf8) ?? "<Non-UTF8 data>"
+            let statusCode = httpResponse.statusCode
             
-            // Successful if status code is 200
-            let isSuccess = (httpResponse.statusCode == 200)
-            
-            return FetchOutput(
-                success: isSuccess,
-                output: outputText,
-                metadata: [
-                    "status": "\(httpResponse.statusCode)",
-                    "url": input.url
-                ]
-            )
+            if (200..<300).contains(statusCode) {
+                return ToolOutput("""
+                URLFetch [Success]
+                Output: \(outputText)
+                Metadata:
+                  status: \(statusCode)
+                  url: \(url.absoluteString)
+                """)
+            } else {
+                return ToolOutput("""
+                URLFetch [Failed]
+                Output: \(outputText)
+                Metadata:
+                  status: \(statusCode)
+                  url: \(url.absoluteString)
+                  error: HTTP error \(statusCode)
+                """)
+            }
         } catch {
-            // Handle general errors (e.g., network unreachable, timeouts)
-            return FetchOutput(
-                success: false,
-                output: "Failed to fetch data: \(error.localizedDescription)",
-                metadata: ["error": error.localizedDescription]
-            )
+            return ToolOutput("""
+            URLFetch [Failed]
+            Output: \(error.localizedDescription)
+            Metadata:
+              url: \(url.absoluteString)
+              error: \(error.localizedDescription)
+            """)
         }
     }
 }
 
-// MARK: - Input/Output Types
-
-/// The input structure for fetching data.
-public struct FetchInput: Codable, Sendable {
-    /// The URL to fetch data from (must be HTTP or HTTPS).
+/// Input structure for URL fetching operations.
+@Generable
+public struct FetchInput: ConvertibleFromGeneratedContent {
+    /// The URL (HTTP or HTTPS) from which to fetch data.
     public let url: String
     
+    /// Creates a new instance of `FetchInput`.
+    ///
+    /// - Parameter url: The URL to fetch data from.
     public init(url: String) {
         self.url = url
-    }
-}
-
-/// The output structure for fetched data.
-public struct FetchOutput: Codable, Sendable, CustomStringConvertible {
-    /// Whether the fetch operation succeeded (status 200).
-    public let success: Bool
-    
-    /// The fetched data as a string (raw text).
-    public let output: String
-    
-    /// Additional metadata about the fetch operation (status code, url, etc.).
-    public let metadata: [String: String]
-    
-    public init(success: Bool, output: String, metadata: [String: String]) {
-        self.success = success
-        self.output = output
-        self.metadata = metadata
-    }
-    
-    /// A human-readable description of the fetch result.
-    public var description: String {
-        let statusText = success ? "Success" : "Failed"
-        let metadataInfo = metadata.isEmpty
-        ? ""
-        : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
-        
-        return """
-        Fetch [\(statusText)]
-        Output: \(output)\(metadataInfo)
-        """
     }
 }

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-@_exported import JSONSchema
+@_exported import OpenFoundationModels
 
 /// A protocol representing a single step in a process.
 ///
@@ -28,127 +28,6 @@ public protocol Step<Input, Output> {
     /// - Returns: The output produced by the step.
     /// - Throws: An error if the step fails to execute or the input is invalid.
     func run(_ input: Input) async throws -> Output
-}
-
-/// A protocol that defines a tool with input, output, and functionality.
-///
-/// `Tool` provides a standardized interface for tools that operate on specific input types
-/// to produce specific output types asynchronously.
-public protocol Tool: Identifiable, Step where Input: Codable, Output: Codable & CustomStringConvertible {
-    
-    /// A unique name identifying the tool.
-    ///
-    /// - Note: The `name` should be unique across all tools to avoid conflicts.
-    var name: String { get }
-    
-    /// A description of what the tool does.
-    ///
-    /// - Note: Use this property to provide detailed information about the tool's purpose and functionality.
-    var description: String { get }
-    
-    /// The JSON schema defining the structure of the tool's input and output.
-    ///
-    /// - Note: This schema ensures the tool's input and output adhere to a predefined format.
-    var parameters: JSONSchema { get }
-    
-    /// Detailed guide providing comprehensive information about how to use the tool.
-    ///
-    /// - Note:
-    ///   The `guide` should include the following sections:
-    ///
-    ///   1. **Tool Name**:
-    ///      - The unique name of the tool.
-    ///      - This name should be descriptive and clearly indicate the tool's purpose.
-    ///
-    ///   2. **Description**:
-    ///      - A concise explanation of the tool's purpose and functionality.
-    ///      - This section should help users understand what the tool does at a high level.
-    ///
-    ///   3. **Parameters**:
-    ///      - A list of all input parameters required or optional for using the tool.
-    ///      - For each parameter:
-    ///        - **Name**: The parameter name.
-    ///        - **Type**: The data type (e.g., `String`, `Int`).
-    ///        - **Description**: A short description of the parameter's role.
-    ///        - **Requirements**: Any constraints, such as valid ranges or allowed values.
-    ///
-    ///   4. **Usage**:
-    ///      - Instructions or guidelines for using the tool effectively.
-    ///      - This section should include any constraints, best practices, and common pitfalls.
-    ///      - For example, explain how to handle invalid inputs or edge cases.
-    ///
-    ///   5. **Examples**:
-    ///      - Provide practical examples demonstrating how to use the tool in real scenarios.
-    ///      - Examples should include valid inputs and expected outputs, formatted as code snippets.
-    ///
-    ///   Here is an example of what the `guide` might look like:
-    ///   ```markdown
-    ///   # Tool Name
-    ///   ExampleTool
-    ///   function_name: `name`
-    ///
-    ///   ## Description
-    ///   This tool calculates the length of a string.
-    ///
-    ///   ## Parameters
-    ///   - `input`: The string whose length will be calculated.
-    ///     - **Type**: `String`
-    ///     - **Description**: The input text to process.
-    ///     - **Requirements**: Must not be empty or null.
-    ///
-    ///   ## Usage
-    ///   - Input strings must be UTF-8 encoded.
-    ///   - Ensure the string contains at least one character.
-    ///   - Avoid using strings containing unsupported characters.
-    ///
-    ///   ## Examples
-    ///   ### Basic Usage
-    ///   ```xml
-    ///   <example_tool>
-    ///   <input>Hello, world!</input>
-    ///   </example_tool>
-    ///   ```
-    ///
-    ///   ### Edge Case
-    ///   ```xml
-    ///   <example_tool>
-    ///   <input> </input> <!-- Invalid: whitespace-only string -->
-    ///   </example_tool>
-    ///   ```
-    ///   ```
-    var guide: String? { get }
-}
-
-extension Tool {
-    
-    public var id: String { name }
-    
-    public func call(_ arguments: any Encodable) async throws -> String {
-        do {
-            let jsonData = try JSONEncoder().encode(arguments)
-            let args: Self.Input = try JSONDecoder().decode(
-                Input.self,
-                from: jsonData
-            )
-            let result = try await run(args)
-            return "\(result)"
-        } catch {
-            return "[\(name)] has Error: \(error)"
-        }
-    }
-    
-    public func call(data: Data) async throws -> String {
-        do {
-            let args: Self.Input = try JSONDecoder().decode(
-                Input.self,
-                from: data
-            )
-            let result = try await run(args)
-            return "\(result)"
-        } catch {
-            return "[\(name)] has Error: \(error)"
-        }
-    }
 }
 
 /// Errors that can occur during tool execution.
@@ -189,7 +68,7 @@ public protocol Model: Step {
     /// A collection of tools available to the model for assisting in its operations.
     ///
     /// - Note: Tools can be used by the model to perform specialized tasks.
-    var tools: [any Tool] { get }
+    var tools: [any OpenFoundationModels.Tool] { get }
 }
 
 /// A protocol representing an agent, which acts as a composite step by combining multiple steps.
@@ -207,17 +86,65 @@ public protocol Agent: Step where Input == Body.Input, Output == Body.Output {
     ///
     /// - Note: The body determines how the agent processes its input and generates its output.
     @StepBuilder var body: Self.Body { get }
+    
+    /// Maximum number of execution turns for this agent
+    var maxTurns: Int { get }
+    
+    /// Guardrails to apply to this agent's execution
+    var guardrails: [any Guardrail] { get }
+    
+    /// Tracer for monitoring this agent's execution
+    var tracer: AgentTracer? { get }
 }
 
 extension Agent {
     
-    /// Executes the agent's operation by delegating to its body.
+    /// Default maximum number of turns
+    public var maxTurns: Int { 10 }
+    
+    /// Default guardrails (empty)
+    public var guardrails: [any Guardrail] { [] }
+    
+    /// Default tracer (none)
+    public var tracer: AgentTracer? { nil }
+    
+    /// Executes the agent's operation by delegating to its body with applied configuration.
     ///
     /// - Parameter input: The input for the agent.
     /// - Returns: The output produced by the agent's body.
     /// - Throws: An error if the agent's body fails to execute.
     public func run(_ input: Input) async throws -> Output {
-        try await body.run(input)
+        // Apply guardrails if present
+        if !guardrails.isEmpty {
+            let guardrailStep = GuardrailStep(
+                step: body,
+                inputGuardrails: guardrails,
+                outputGuardrails: guardrails
+            )
+            
+            // Apply tracing if present
+            if let tracer = tracer {
+                let tracingStep = TracingStep(
+                    step: guardrailStep,
+                    tracer: tracer,
+                    operationName: String(describing: type(of: self))
+                )
+                return try await tracingStep.run(input)
+            } else {
+                return try await guardrailStep.run(input)
+            }
+        } else if let tracer = tracer {
+            // Apply only tracing
+            let tracingStep = TracingStep(
+                step: body,
+                tracer: tracer,
+                operationName: String(describing: type(of: self))
+            )
+            return try await tracingStep.run(input)
+        } else {
+            // No additional configuration, run body directly
+            return try await body.run(input)
+        }
     }
 }
 

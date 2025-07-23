@@ -7,12 +7,12 @@ SwiftAgent is a powerful Swift framework for building AI agents using a declarat
 - 🎯 **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
 - 🔄 **Composable Steps**: Chain multiple steps together seamlessly
 - 🛠️ **Type-Safe Tools**: Define and use tools with compile-time type checking
-- 🤖 **LLM Integration**: Built-in support for OpenAI, Anthropic, and Ollama
+- 🤖 **Model-Agnostic**: Works with any AI model through OpenFoundationModels
 - 📦 **Modular Design**: Create reusable agent components
 - 🔄 **Async/Await Support**: Built for modern Swift concurrency
 - 🎭 **Protocol-Based**: Flexible and extensible architecture
 - 📊 **State Management**: Memory and Relay for state handling
-- 🔍 **Monitoring**: Built-in monitoring and debugging capabilities
+- 🔍 **Monitoring**: Built-in tracing and guardrails support
 
 ## Core Components
 
@@ -29,39 +29,100 @@ public protocol Step<Input, Output> {
 }
 ```
 
-### Foundation Models Integration
+### Agents
 
-SwiftAgent integrates seamlessly with Apple's Foundation Models through the OpenFoundationModels library:
+Agents are high-level abstractions that combine steps to create complex workflows:
 
 ```swift
-// Use Apple's Foundation Models with SwiftAgent
-let agent = FoundationModelAgent(
-    tools: [ExecuteCommandTool(), FileSystemTool()],
-    instructions: "You are a helpful coding assistant"
-)
-
-// Generate structured data using Foundation Models
-let step = FoundationModelGenerationStep.generate(
-    type: Novel.self,
-    instructions: "Generate a novel structure"
-) { prompt in
-    prompt
+public protocol Agent: Step {
+    associatedtype Body: Step
+    
+    @StepBuilder var body: Self.Body { get }
+    var maxTurns: Int { get }
+    var guardrails: [any Guardrail] { get }
+    var tracer: AgentTracer? { get }
 }
 ```
 
-### Transform
+## AI Model Integration
 
-The `Transform` step provides a simple way to convert data:
+SwiftAgent uses OpenFoundationModels for AI model integration, supporting any model provider:
+
+### Using Different Model Providers
 
 ```swift
-Transform<String, [ChatMessage]> { input -> [ChatMessage] in
-    [ChatMessage(role: .user, content: [.text(input)])]
+import SwiftAgent
+import OpenFoundationModels
+import OpenFoundationModelsOpenAI
+
+// Create a session with OpenAI
+let session = LanguageModelSession(
+    model: OpenAIModelFactory.gpt4o(apiKey: "your-api-key"),
+    instructions: Instructions("You are a helpful assistant.")
+)
+
+// Use in a ModelStep
+let step = ModelStep<String, Story>(session: session) { input in
+    input
+}
+```
+
+### Supported Providers
+
+Through OpenFoundationModels, SwiftAgent supports:
+- OpenAI (GPT-4o, GPT-4o Mini, o1, o3)
+- Anthropic (Claude 3 Opus, Sonnet, Haiku)
+- Google (Gemini Pro, Flash)
+- Ollama (Local models)
+- Apple's Foundation Models (via SystemLanguageModel)
+
+## Built-in Steps
+
+### Transform
+
+Convert data from one type to another:
+
+```swift
+Transform<String, Int> { input in
+    Int(input) ?? 0
+}
+```
+
+### ModelStep
+
+Generate structured output using AI models:
+
+```swift
+@Generable
+struct Story {
+    @Guide(description: "The story title")
+    let title: String
+    @Guide(description: "The story content")
+    let content: String
+}
+
+ModelStep<String, Story>(
+    session: session
+) { input in
+    "Write a story about: \(input)"
+}
+```
+
+### StringModelStep
+
+Generate string output using AI models:
+
+```swift
+StringModelStep<String>(
+    instructions: "You are a creative writer."
+) { input in
+    input
 }
 ```
 
 ### Loop
 
-The `Loop` step enables iterative processing with a condition:
+Iterate with a condition:
 
 ```swift
 Loop(max: 5) { input in
@@ -73,213 +134,125 @@ Loop(max: 5) { input in
 
 ### Map
 
-The `Map` step processes collections by applying a transformation to each element:
+Process collections:
 
 ```swift
-Map<[Chapter], [String]> { chapter, index in
-    Transform { chapter in
-        // Process each chapter
+Map<[String], [Int]> { item, index in
+    Transform { str in
+        str.count
     }
 }
 ```
 
-### Join
+### Parallel
 
-The `Join` step concatenates an array of strings:
+Execute steps concurrently:
 
 ```swift
-Join(separator: "\n")  // Combines strings with newlines
+Parallel<String, Int> {
+    CountWordsStep()
+    CountCharactersStep()
+    CountLinesStep()
+}
 ```
 
-## Example: AI Novelist
+## Built-in Tools
 
-Here's a complete example showing how to create an AI novelist agent that generates and refines stories:
+SwiftAgent includes several pre-built tools:
+
+### FileSystemTool
+
+Read and write files:
 
 ```swift
-public struct Novelist: Agent {
+@Generable
+struct FileSystemInput {
+    @Guide(description: "Operation: 'read' or 'write'")
+    let operation: String
+    @Guide(description: "File path")
+    let path: String
+    @Guide(description: "Content to write (for write operation)")
+    let content: String?
+}
+```
+
+### ExecuteCommandTool
+
+Execute shell commands:
+
+```swift
+@Generable
+struct ExecuteCommandInput {
+    @Guide(description: "Command to execute")
+    let command: String
+    @Guide(description: "Optional timeout in seconds")
+    let timeout: Int?
+}
+```
+
+### URLFetchTool
+
+Fetch content from URLs:
+
+```swift
+@Generable
+struct URLInput {
+    @Guide(description: "URL to fetch")
+    let url: String
+}
+```
+
+### GitTool
+
+Git operations:
+
+```swift
+@Generable
+struct GitInput {
+    @Guide(description: "Git command")
+    let command: String
+    @Guide(description: "Additional arguments")
+    let args: String?
+}
+```
+
+## Example: Simple Writer Agent
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+
+public struct Writer: Agent {
     public typealias Input = String
     public typealias Output = String
     
+    public init() {}
+    
     public var body: some Step<Input, Output> {
-        Loop(max: 2) { request in
-            // Convert request to chat message
-            Transform { input -> [ChatMessage] in
-                [ChatMessage(role: .user, content: [.text(input)])]
-            }
-            
-            // Generate chapter structure
-            OpenAIModel<Novel>(schema: ChaptersJSONSchema) { _ in
+        StringModelStep<String>(
+            instructions: """
+                You are a creative writer. 
+                Write a compelling story based on the user's request.
+                Include interesting characters, plot, and theme.
                 """
-                You are a novelist. Please output a detailed 
-                chapter structure in JSON based on the following requirements:
-                
-                - Include compelling characters, effective foreshadowing, 
-                  and impactful dialogue
-                - Describe character growth and development
-                - Maintain consistent themes throughout the story
-                """
-            }
-            
-            // Extract chapters
-            Transform<Novel, [Chapter]> { novel in
-                novel.chapters
-            }
-            
-            // Convert each chapter to narrative
-            Map<[Chapter], [String]> { chapter, index in
-                Transform<Chapter, [ChatMessage]> { chapter in
-                    [ChatMessage(role: .user, content: [.text(
-                        createPrompt(for: chapter)
-                    )])]
-                }
-                OpenAIModel { _ in
-                    "Write the chapter following the plot outline"
-                }
-            }
-            
-            // Combine chapters
-            Join()
-        } until: {
-            // Evaluate novel quality
-            Transform<String, [ChatMessage]> { novel in
-                [ChatMessage(role: .user, content: [.text(
-                    "Please evaluate this novel: \(novel)"
-                )])]
-            }
-            
-            OpenAIModel<NovelQualityAssessment>(
-                schema: NovelQualityAssessmentSchema
-            ) { _ in
-                """
-                Evaluate the novel's quality based on:
-                - Character development
-                - Plot progression
-                - Thematic consistency
-                - Overall quality
-                """
-            }
-            
-            Transform<NovelQualityAssessment, Bool> { assessment in
-                assessment.hasGoodCharacters &&
-                assessment.hasGoodPlot &&
-                assessment.hasGoodTheme &&
-                assessment.isHighQuality
-            }
+        ) { input in
+            input
         }
     }
 }
-```
 
-The Novelist agent demonstrates several key features:
-- Iterative refinement using `Loop`
-- JSON schema validation for structured data
-- Collection processing with `Map`
-- String concatenation with `Join`
-- Quality assessment with custom evaluation criteria
-
-### Supporting Types
-
-The agent uses several supporting types for structure:
-
-```swift
-struct Novel: Codable {
-    var chapters: [Chapter]
-}
-
-struct Chapter: Codable {
-    struct Setting: Codable {
-        let location: String
-        let timePeriod: String
-    }
-    
-    struct Character: Codable {
-        let name: String
-        let role: String
-    }
-    
-    struct PlotPoint: Codable {
-        let scene: Int
-        let description: String
-    }
-    
-    let number: Int
-    let title: String
-    let summary: String
-    let setting: Setting
-    let characters: [Character]
-    let plotPoints: [PlotPoint]
-    let theme: String
-}
-```
-
-Quality assessment is handled by:
-
-```swift
-struct NovelQualityAssessment: Codable {
-    let hasGoodCharacters: Bool
-    let hasGoodPlot: Bool
-    let hasGoodTheme: Bool
-    let isHighQuality: Bool
-}
-```
-
-## Foundation Models Integration
-
-SwiftAgent provides first-class support for Apple's Foundation Models through the OpenFoundationModels library, offering:
-
-### Key Features
-
-- **100% API Compatibility**: Full compatibility with Apple's Foundation Models API
-- **Cross-Platform Support**: Works on iOS, macOS, and beyond Apple's ecosystem
-- **Structured Data Generation**: Built-in support for type-safe data generation
-- **Tool Integration**: Seamless integration with SwiftAgent's tool system
-- **Conversation Management**: Advanced conversation state management
-
-### Usage Examples
-
-```swift
-// Basic Foundation Model usage
-let agent = FoundationModelAgent(
-    instructions: "You are a helpful assistant specialized in Swift development"
-)
-
-let response = try await agent.run("How do I implement a custom SwiftUI view?")
-```
-
-```swift
-// Structured data generation
-struct CodeSuggestion: Codable, FoundationModelGenerable {
-    let code: String
-    let explanation: String
-    let complexity: String
-    
-    static var generationSchema: GenerationSchema {
-        return .object([
-            "code": .string,
-            "explanation": .string,
-            "complexity": .string
-        ])
-    }
-}
-
-let step = FoundationModelGenerationStep.generate(
-    type: CodeSuggestion.self,
-    instructions: "Generate code suggestions with explanations"
-) { prompt in
-    "Generate a Swift function for: \(prompt)"
-}
+// Usage
+let writer = Writer()
+let story = try await writer.run("Write a story about a time-traveling scientist")
 ```
 
 ## Requirements
 
 - Swift 6.0+
 - iOS 18.0+ / macOS 15.0+
-- OpenAI API key (for OpenAI integration)
-- Anthropic API key (for Claude integration)
-- Ollama installation (for local model support)
-- Foundation Models support (built-in with OpenFoundationModels)
+- Xcode 15.0+
 
-## Installation and Development Setup
+## Installation
 
 ### Swift Package Manager
 
@@ -289,80 +262,105 @@ dependencies: [
 ]
 ```
 
-### Configure API Keys
+### Adding Model Providers
 
-API keys must be properly configured for language model integration. You have several options:
+To use specific AI models, add the corresponding OpenFoundationModels provider:
 
-#### Option 1: Xcode Environment Variables
-
-1. Open your Xcode project
-2. Go to Edit Scheme (⌘ + <)
-3. Select "Run" from the left sidebar
-4. Go to the "Arguments" tab
-5. Under "Environment Variables", add:
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - `ANTHROPIC_API_KEY`: Your Anthropic API key
-   - `OLLAMA_HOST`: Your Ollama host (optional, defaults to "http://localhost:11434")
-
-#### Option 2: Environment File
-
-Create a `.env` file in your project root:
-
-```bash
-OPENAI_API_KEY=your_openai_api_key_here
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-OLLAMA_HOST=http://localhost:11434
+```swift
+dependencies: [
+    .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
+    .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
+]
 ```
 
-#### Option 3: Shell Environment
+## Getting Started
 
-Add to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+1. **Add SwiftAgent to your project** using Swift Package Manager
 
-```bash
-export OPENAI_API_KEY=your_openai_api_key_here
-export ANTHROPIC_API_KEY=your_anthropic_api_key_here
-export OLLAMA_HOST=http://localhost:11434
+2. **Choose a model provider** and add its dependency
+
+3. **Create your first agent**:
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+
+struct MyAgent: Agent {
+    var body: some Step<String, String> {
+        StringModelStep<String>(
+            instructions: "You are a helpful assistant."
+        ) { input in
+            input
+        }
+    }
+}
 ```
 
-### Local Development Setup
+4. **Run your agent**:
 
-1. **Install Xcode 15.0+**
-   - Required for Swift 6.0 support
-   - Available from the Mac App Store or developer.apple.com
-
-2. **Install Ollama (Optional, for local model support)**
-   ```bash
-   curl https://ollama.ai/install.sh | sh
-   ```
-
-3. **Clone the Repository**
-   ```bash
-   git clone https://github.com/1amageek/SwiftAgent.git
-   cd SwiftAgent
-   ```
-
-4. **Install Dependencies**
-   ```bash
-   swift package resolve
-   ```
-
-5. **Open in Xcode**
-   ```bash
-   xed .
-   ```
-
-### Testing
-
-Run the test suite:
-
-```bash
-swift test
+```swift
+let agent = MyAgent()
+let result = try await agent.run("Hello, world!")
+print(result)
 ```
 
-Or run specific test targets:
+## Advanced Features
 
-```bash
-swift test --filter SwiftAgentTests.SpecificTestSuite
+### Guardrails
+
+Add safety checks to your agents:
+
+```swift
+struct ContentGuardrail: Guardrail {
+    func validate(_ content: String) throws {
+        if content.contains("inappropriate") {
+            throw GuardrailError.contentViolation
+        }
+    }
+}
+
+struct MyAgent: Agent {
+    var guardrails: [any Guardrail] {
+        [ContentGuardrail()]
+    }
+    
+    var body: some Step<String, String> {
+        // Agent implementation
+    }
+}
+```
+
+### Tracing
+
+Monitor agent execution:
+
+```swift
+struct MyAgent: Agent {
+    var tracer: AgentTracer? {
+        ConsoleTracer()
+    }
+    
+    var body: some Step<String, String> {
+        // Agent implementation
+    }
+}
+```
+
+### Memory
+
+Maintain state across agent runs:
+
+```swift
+struct StatefulAgent: Agent {
+    @Memory var conversationHistory: [String] = []
+    
+    var body: some Step<String, String> {
+        Transform { input in
+            conversationHistory.append(input)
+            return conversationHistory.joined(separator: "\n")
+        }
+    }
+}
 ```
 
 ## License

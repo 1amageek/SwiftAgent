@@ -61,8 +61,8 @@ let session = LanguageModelSession(
     instructions: Instructions("You are a helpful assistant.")
 )
 
-// Use in a ModelStep
-let step = ModelStep<String, Story>(session: session) { input in
+// Use in a Generate step
+let step = Generate<String, Story>(session: session) { input in
     input
 }
 ```
@@ -88,7 +88,7 @@ Transform<String, Int> { input in
 }
 ```
 
-### ModelStep
+### Generate
 
 Generate structured output using AI models:
 
@@ -101,19 +101,19 @@ struct Story {
     let content: String
 }
 
-ModelStep<String, Story>(
+Generate<String, Story>(
     session: session
 ) { input in
     "Write a story about: \(input)"
 }
 ```
 
-### StringModelStep
+### GenerateText
 
 Generate string output using AI models:
 
 ```swift
-StringModelStep<String>(
+GenerateText<String>(
     instructions: "You are a creative writer."
 ) { input in
     input
@@ -229,7 +229,7 @@ public struct Writer: Agent {
     public init() {}
     
     public var body: some Step<Input, Output> {
-        StringModelStep<String>(
+        GenerateText<String>(
             instructions: """
                 You are a creative writer. 
                 Write a compelling story based on the user's request.
@@ -287,7 +287,7 @@ import OpenFoundationModels
 
 struct MyAgent: Agent {
     var body: some Step<String, String> {
-        StringModelStep<String>(
+        GenerateText<String>(
             instructions: "You are a helpful assistant."
         ) { input in
             input

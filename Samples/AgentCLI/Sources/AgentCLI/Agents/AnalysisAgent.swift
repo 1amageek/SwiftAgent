@@ -19,7 +19,7 @@ public struct AnalysisAgent: Agent {
     }
     
     public var body: some Step<String, String> {
-        StringModelStep<String>(
+        GenerateText<String>(
             session: createLanguageModelSession(),
             transform: { input in
                 """

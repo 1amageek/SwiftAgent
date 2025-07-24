@@ -18,7 +18,7 @@ public struct Writer: Agent {
     
     public var body: some Step<Input, Output> {
         // Simply write a story based on the input
-        StringModelStep<String>(
+        GenerateText<String>(
             instructions: """
                 You are a creative writer. 
                 Write a compelling story based on the user's request.

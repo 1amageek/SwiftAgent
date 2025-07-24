@@ -11,7 +11,7 @@ SwiftAgentをOpenFoundationModelsに対応させ、既存のAIライブラリ依
 - ✅ Agent プロトコルに guardrails, tracer, maxTurns プロパティを追加済み
 - ✅ 宣言的な設計を維持（Agent 実装時に必要なプロパティのみオーバーライド）
 - ✅ すべての個別AIライブラリ依存を削除済み（OllamaKit、LLMChatOpenAI、JSONSchema等）
-- ✅ ModelStep, StringModelStep, StructuredGenerationStep を SwiftAgent モジュールに統合済み
+- ✅ Generate, GenerateText, StructuredGenerationStep を SwiftAgent モジュールに統合済み
 - ✅ MessageTransform.swift で ChatMessage 型を定義済み
 - ✅ プロジェクト全体のビルドが成功
 
@@ -68,8 +68,8 @@ run() メソッドで自動的に適用される：
 
 ### 2. ヘルパー実装の SwiftAgent モジュールへの統合
 - Agents モジュールを削除し、すべてのヘルパー実装を SwiftAgent モジュールに移動
-- ModelStep: Generable型の構造化出力を生成
-- StringModelStep: シンプルな文字列出力を生成
+- Generate: Generable型の構造化出力を生成
+- GenerateText: シンプルな文字列出力を生成
 - StructuredGenerationStep: 構造化データ生成のための汎用Step
 - MessageTransform: ChatMessage型と変換処理を提供
 
@@ -88,7 +88,7 @@ run() メソッドで自動的に適用される：
 - SwiftAgentはプロバイダー中立なフレームワークとして機能
 
 ## モデルプロバイダーの使用方法
-SwiftAgent で異なるAIモデルプロバイダーを使用するには、LanguageModelSession を作成して ModelStep/StringModelStep に渡します：
+SwiftAgent で異なるAIモデルプロバイダーを使用するには、LanguageModelSession を作成して Generate/GenerateText に渡します：
 
 ```swift
 // OpenAI の場合
@@ -97,7 +97,7 @@ let session = LanguageModelSession(
     instructions: Instructions("You are a helpful assistant.")
 )
 
-ModelStep<String, Output>(session: session) { input in
+Generate<String, Output>(session: session) { input in
     input
 }
 ```

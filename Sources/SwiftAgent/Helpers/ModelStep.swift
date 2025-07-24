@@ -9,7 +9,7 @@ import Foundation
 import OpenFoundationModels
 
 /// A step that integrates OpenFoundationModels' LanguageModelSession with SwiftAgent
-public struct ModelStep<Input: Sendable, Output: Sendable & Generable>: Step {
+public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
     
     public typealias Input = Input
     public typealias Output = Output
@@ -17,7 +17,7 @@ public struct ModelStep<Input: Sendable, Output: Sendable & Generable>: Step {
     private let session: LanguageModelSession
     private let transform: (Input) -> String
     
-    /// Creates a new ModelStep
+    /// Creates a new Generate step
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - transform: A closure to transform the input to a string prompt
@@ -30,7 +30,7 @@ public struct ModelStep<Input: Sendable, Output: Sendable & Generable>: Step {
     }
     
     
-    /// Creates a new ModelStep with default SystemLanguageModel
+    /// Creates a new Generate step with default SystemLanguageModel
     /// - Parameters:
     ///   - tools: Tools to be used by the model
     ///   - guardrails: Guardrails for content safety
@@ -69,7 +69,7 @@ public struct ModelStep<Input: Sendable, Output: Sendable & Generable>: Step {
 }
 
 /// A step that generates string output using OpenFoundationModels
-public struct StringModelStep<Input: Sendable>: Step {
+public struct GenerateText<Input: Sendable>: Step {
     
     public typealias Input = Input
     public typealias Output = String
@@ -77,7 +77,7 @@ public struct StringModelStep<Input: Sendable>: Step {
     private let session: LanguageModelSession
     private let transform: (Input) -> String
     
-    /// Creates a new StringModelStep
+    /// Creates a new GenerateText step
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - transform: A closure to transform the input to a string prompt
@@ -90,7 +90,7 @@ public struct StringModelStep<Input: Sendable>: Step {
     }
     
     
-    /// Creates a new StringModelStep with default SystemLanguageModel
+    /// Creates a new GenerateText step with default SystemLanguageModel
     /// - Parameters:
     ///   - tools: Tools to be used by the model
     ///   - guardrails: Guardrails for content safety

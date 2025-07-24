@@ -20,7 +20,7 @@ public struct MainAgent: Agent {
     public var body: some Step<String, String> {
         Loop { _ in
             WaitForInput(prompt: "You: ")
-            StringModelStep<String>(
+            GenerateText<String>(
                 session: createLanguageModelSession(),
                 transform: { input in
                     input

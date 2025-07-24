@@ -2,6 +2,74 @@
 
 SwiftAgent is a powerful Swift framework for building AI agents using a declarative SwiftUI-like syntax. It provides a type-safe, composable way to create complex agent workflows while maintaining Swift's expressiveness.
 
+## Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Core Protocols"
+        Step["Step<Input, Output>"]
+        Agent["Agent: Step"]
+        
+        Step --> Agent
+    end
+    
+    subgraph "OpenFoundationModels Integration"
+        Tool["Tool Protocol"]
+        LMS["LanguageModelSession"]
+        Generable["@Generable"]
+    end
+    
+    subgraph "Built-in Steps"
+        subgraph "Transform"
+            Transform["Transform"]
+            Map["Map"]
+            Reduce["Reduce"]
+            Join["Join"]
+        end
+        
+        subgraph "Control Flow"
+            Loop["Loop"]
+            Parallel["Parallel"]
+            Race["Race"]
+        end
+        
+        subgraph "AI Generation"
+            Generate["Generate<T>"]
+            GenerateText["GenerateText"]
+        end
+    end
+    
+    subgraph "Safety & Monitoring"
+        Guardrails["Guardrails"]
+        Tracer["AgentTracer"]
+    end
+    
+    subgraph "Tools"
+        FST["FileSystemTool"]
+        GT["GitTool"]
+        ECT["ExecuteCommandTool"]
+        UFT["URLFetchTool"]
+    end
+    
+    Step --> Transform
+    Step --> Map
+    Step --> Loop
+    Step --> Parallel
+    Step --> Generate
+    Step --> GenerateText
+    
+    Agent --> Guardrails
+    Agent --> Tracer
+    
+    Generate --> LMS
+    GenerateText --> LMS
+    
+    Tool --> FST
+    Tool --> GT
+    Tool --> ECT
+    Tool --> UFT
+```
+
 ## Features
 
 - 🎯 **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
@@ -69,12 +137,14 @@ let step = Generate<String, Story>(session: session) { input in
 
 ### Supported Providers
 
-Through OpenFoundationModels, SwiftAgent supports:
-- OpenAI (GPT-4o, GPT-4o Mini, o1, o3)
-- Anthropic (Claude 3 Opus, Sonnet, Haiku)
-- Google (Gemini Pro, Flash)
-- Ollama (Local models)
-- Apple's Foundation Models (via SystemLanguageModel)
+Currently supported:
+- **OpenAI** (GPT-4o, GPT-4o Mini, o1, o3) - ✅ Available now
+
+Coming soon through OpenFoundationModels:
+- **Anthropic** (Claude 3 Opus, Sonnet, Haiku) - 🚧 In development
+- **Google** (Gemini Pro, Flash) - 🚧 In development
+- **Ollama** (Local models) - 🚧 In development
+- **Apple's Foundation Models** (via SystemLanguageModel) - 🚧 In development
 
 ## Built-in Steps
 
@@ -216,7 +286,9 @@ struct GitInput {
 }
 ```
 
-## Example: Simple Writer Agent
+## Examples
+
+### Simple Writer Agent
 
 ```swift
 import SwiftAgent
@@ -246,6 +318,131 @@ let writer = Writer()
 let story = try await writer.run("Write a story about a time-traveling scientist")
 ```
 
+### Code Analysis Agent with Tools
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+import AgentTools
+
+struct CodeAnalyzer: Agent {
+    typealias Input = String
+    typealias Output = AnalysisResult
+    
+    let session: LanguageModelSession
+    
+    init(apiKey: String) {
+        self.session = LanguageModelSession(
+            model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+            tools: [FileSystemTool(), GitTool()],
+            instructions: Instructions("""
+                You are a code analysis expert.
+                Analyze the codebase and provide insights.
+                """)
+        )
+    }
+    
+    var body: some Step<Input, Output> {
+        Generate<String, AnalysisResult>(
+            session: session
+        ) { request in
+            "Analyze the following: \(request)"
+        }
+    }
+}
+
+@Generable
+struct AnalysisResult {
+    @Guide(description: "Summary of findings")
+    let summary: String
+    
+    @Guide(description: "List of issues found")
+    let issues: String  // Space-separated list
+    
+    @Guide(description: "Recommendations")
+    let recommendations: String
+}
+```
+
+### Multi-Step Research Agent
+
+```swift
+struct ResearchAgent: Agent {
+    typealias Input = String
+    typealias Output = ResearchReport
+    
+    let session: LanguageModelSession
+    
+    var body: some Step<Input, Output> {
+        // Step 1: Generate search queries
+        Transform<String, SearchQueries> { topic in
+            SearchQueries(topic: topic)
+        }
+        
+        // Step 2: Search in parallel
+        Map<SearchQueries, [SearchResult]> { query, _ in
+            URLFetchTool().call(URLInput(url: query.url))
+                .map { SearchResult(content: $0) }
+        }
+        
+        // Step 3: Analyze results
+        Generate<[SearchResult], ResearchReport>(
+            session: session
+        ) { results in
+            "Synthesize these search results into a comprehensive report: \(results)"
+        }
+    }
+    
+    var guardrails: [any Guardrail] {
+        [ContentSafetyGuardrail(), TokenLimitGuardrail(maxTokens: 4000)]
+    }
+    
+    var tracer: AgentTracer? {
+        ConsoleTracer()
+    }
+}
+```
+
+### Interactive Chat Agent with Memory
+
+```swift
+struct ChatAgent: Agent {
+    typealias Input = String
+    typealias Output = String
+    
+    @Memory var conversationHistory: [String] = []
+    let session: LanguageModelSession
+    
+    var body: some Step<Input, Output> {
+        Transform<String, String> { input in
+            // Add to conversation history
+            conversationHistory.append("User: \(input)")
+            
+            // Include context in prompt
+            let context = conversationHistory.suffix(10).joined(separator: "\n")
+            return """
+                Conversation history:
+                \(context)
+                
+                Current message: \(input)
+                """
+        }
+        
+        GenerateText<String>(
+            session: session
+        ) { contextualInput in
+            contextualInput
+        }
+        
+        Transform<String, String> { response in
+            // Save assistant response
+            conversationHistory.append("Assistant: \(response)")
+            return response
+        }
+    }
+}
+```
+
 ## Requirements
 
 - Swift 6.0+
@@ -262,33 +459,109 @@ dependencies: [
 ]
 ```
 
-### Adding Model Providers
+### Available Model Providers
 
-To use specific AI models, add the corresponding OpenFoundationModels provider:
+Currently available:
 
 ```swift
-dependencies: [
-    .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
-    .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
-]
+// OpenAI (GPT-4o, GPT-4o Mini, o1, o3)
+.package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
+```
+
+Coming soon:
+- Anthropic (Claude 3 Opus, Sonnet, Haiku)
+- Google (Gemini Pro, Flash)
+- Ollama (Local models)
+- Apple's Foundation Models
+
+### Quick Start Example
+
+```swift
+// Complete Package.swift example
+import PackageDescription
+
+let package = Package(
+    name: "MyAgentProject",
+    platforms: [.iOS(.v18), .macOS(.v15)],
+    products: [
+        .executable(name: "MyAgent", targets: ["MyAgent"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
+        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
+    ],
+    targets: [
+        .executableTarget(
+            name: "MyAgent",
+            dependencies: [
+                .product(name: "SwiftAgent", package: "SwiftAgent"),
+                .product(name: "AgentTools", package: "SwiftAgent"),
+                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI")
+            ]
+        )
+    ]
+)
 ```
 
 ## Getting Started
 
-1. **Add SwiftAgent to your project** using Swift Package Manager
+### 1. Add SwiftAgent to your Package.swift
 
-2. **Choose a model provider** and add its dependency
+```swift
+import PackageDescription
 
-3. **Create your first agent**:
+let package = Package(
+    name: "MyAgentApp",
+    platforms: [.iOS(.v18), .macOS(.v15)],
+    dependencies: [
+        // Core SwiftAgent framework
+        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
+        
+        // Choose your AI provider (example with OpenAI)
+        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
+    ],
+    targets: [
+        .target(
+            name: "MyAgentApp",
+            dependencies: [
+                .product(name: "SwiftAgent", package: "SwiftAgent"),
+                .product(name: "AgentTools", package: "SwiftAgent"),  // Optional: for built-in tools
+                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI")
+            ]
+        )
+    ]
+)
+```
+
+### 2. Set up your environment
+
+```bash
+# For OpenAI
+export OPENAI_API_KEY="your-api-key"
+
+# For Anthropic
+export ANTHROPIC_API_KEY="your-api-key"
+```
+
+### 3. Create your first agent
 
 ```swift
 import SwiftAgent
 import OpenFoundationModels
+import OpenFoundationModelsOpenAI
 
 struct MyAgent: Agent {
-    var body: some Step<String, String> {
+    typealias Input = String
+    typealias Output = String
+    
+    let session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!),
+        instructions: Instructions("You are a helpful assistant.")
+    )
+    
+    var body: some Step<Input, Output> {
         GenerateText<String>(
-            instructions: "You are a helpful assistant."
+            session: session
         ) { input in
             input
         }
@@ -296,12 +569,17 @@ struct MyAgent: Agent {
 }
 ```
 
-4. **Run your agent**:
+### 4. Run your agent
 
 ```swift
-let agent = MyAgent()
-let result = try await agent.run("Hello, world!")
-print(result)
+@main
+struct MyApp {
+    static func main() async throws {
+        let agent = MyAgent()
+        let result = try await agent.run("Hello, world!")
+        print(result)
+    }
+}
 ```
 
 ## Advanced Features

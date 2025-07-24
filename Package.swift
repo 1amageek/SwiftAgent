@@ -29,14 +29,6 @@ let package = Package(
             name: "AgentTools",
             dependencies: ["SwiftAgent"]
         ),
-        .executableTarget(
-            name: "AgentCLI",
-            dependencies: [
-                "SwiftAgent",
-                "AgentTools",
-                .product(name: "ArgumentParser", package: "swift-argument-parser")
-            ]
-        ),
         .testTarget(
             name: "SwiftAgentTests",
             dependencies: ["SwiftAgent", "AgentTools"]

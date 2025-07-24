@@ -1,9 +1,42 @@
+# macOS
 .DS_Store
+
+# Swift Package Manager
 /.build
 /Packages
-xcuserdata/
-DerivedData/
 .swiftpm/xcode/xcshareddata/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+
+# Samples specific
+Samples/**/.build
+Samples/**/.swiftpm
+Samples/**/Package.resolved
+
+# Environment files
+.env
+.env.local
+*.env
+
+# API Keys and Secrets
 .netrc
+**/api_keys.json
+**/secrets.json
+
+# Generated files
+.vscode/
+.idea/
+
+# Test artifacts
+*.xcresult
+
+# Temporary files
+*.tmp
+*.log
+*~

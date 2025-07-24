@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(swift build:*)",
+      "mcp__deepwiki__ask_question",
+      "Bash(find:*)",
+      "Bash(swift package:*)"
+    ],
+    "deny": []
+  }
+}

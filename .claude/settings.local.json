@@ -12,7 +12,8 @@
       "Bash(find:*)",
       "Bash(swift build)",
       "Bash(grep:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

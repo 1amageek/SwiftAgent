@@ -18,7 +18,7 @@ struct AgentsTests {
         
         @StepBuilder
         var body: some Step {
-            ModelStep<String, String>(
+            GenerateText<String>(
                 tools: tools,
                 instructions: instructions
             ) { input in

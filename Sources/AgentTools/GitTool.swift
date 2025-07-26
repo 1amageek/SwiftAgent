@@ -36,23 +36,41 @@ public struct GitTool: OpenFoundationModels.Tool {
         // Validate repository path if specified
         if !arguments.repository.isEmpty {
             guard FileManager.default.fileExists(atPath: arguments.repository) else {
-                return ToolOutput("Git Operation [Failed]\nOutput: Repository not found: \(arguments.repository)\nMetadata:\n  error: Repository not found")
+                let output = GitOutput(
+                    success: false,
+                    output: "Repository not found: \(arguments.repository)",
+                    exitCode: -1,
+                    metadata: ["error": "Repository not found"]
+                )
+                return ToolOutput(output)
             }
             
             let gitDir = URL(fileURLWithPath: arguments.repository).appendingPathComponent(".git").path
             guard FileManager.default.fileExists(atPath: gitDir) else {
-                return ToolOutput("Git Operation [Failed]\nOutput: Not a Git repository: \(arguments.repository)\nMetadata:\n  error: Not a Git repository")
+                let output = GitOutput(
+                    success: false,
+                    output: "Not a Git repository: \(arguments.repository)",
+                    exitCode: -1,
+                    metadata: ["error": "Not a Git repository"]
+                )
+                return ToolOutput(output)
             }
         }
         
         // Validate Git command
         guard isValidGitCommand(arguments.command) else {
-            return ToolOutput("Git Operation [Failed]\nOutput: Invalid or unsafe Git command: \(arguments.command)\nMetadata:\n  error: Invalid Git command")
+            let output = GitOutput(
+                success: false,
+                output: "Invalid or unsafe Git command: \(arguments.command)",
+                exitCode: -1,
+                metadata: ["error": "Invalid Git command"]
+            )
+            return ToolOutput(output)
         }
         
         // Execute Git command
         let result = await executeGitCommand(arguments)
-        return ToolOutput(result.description)
+        return ToolOutput(result)
     }
     
     private func isValidGitCommand(_ command: String) -> Bool {
@@ -172,5 +190,12 @@ public struct GitOutput: Codable, Sendable, CustomStringConvertible {
         Git Operation [\(status)]
         Output: \(output)\(metadataString)
         """
+    }
+}
+
+// Make GitOutput conform to PromptRepresentable for compatibility
+extension GitOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }

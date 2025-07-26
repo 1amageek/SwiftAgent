@@ -54,22 +54,34 @@ public struct ReasoningAgent: Agent {
     private func createModel() -> any LanguageModel {
         let modelName = configuration.model.lowercased()
         
-        // Prefer o1 models for reasoning tasks
-        if modelName == "o1-preview" || modelName == "o1-mini" {
-            switch modelName {
-            case "o1-preview":
-                return OpenAIModelFactory.o3(apiKey: configuration.apiKey)
-            case "o1-mini":
-                return OpenAIModelFactory.o4Mini(apiKey: configuration.apiKey)
-            default:
-                break
+        // Select appropriate reasoning model
+        let model: OpenAIModel
+        switch modelName {
+        case "o1":
+            model = .o1
+        case "o1-pro":
+            model = .o1Pro
+        case "o3":
+            model = .o3
+        case "o3-pro":
+            model = .o3Pro
+        case "o4-mini":
+            model = .o4Mini
+        case "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo":
+            // For reasoning tasks, suggest using a reasoning model
+            if configuration.verbose {
+                print("Note: Reasoning agent works best with reasoning models (o1, o3, etc.). Using o4-mini for optimal reasoning performance.")
             }
+            model = .o4Mini
+        default:
+            // Default to o4-mini for reasoning tasks
+            if configuration.verbose {
+                print("Reasoning agent works best with reasoning models. Using o4-mini for optimal reasoning performance.")
+            }
+            model = .o4Mini
         }
         
-        // Fallback to o1-mini if using other models
-        if configuration.verbose {
-            print("Reasoning agent works best with o1 models. Using o1-mini for optimal reasoning performance.")
-        }
-        return OpenAIModelFactory.o4Mini(apiKey: configuration.apiKey)
+        let openAIConfig = OpenAIConfiguration(apiKey: configuration.apiKey)
+        return OpenAILanguageModel(configuration: openAIConfig, model: model)
     }
 }

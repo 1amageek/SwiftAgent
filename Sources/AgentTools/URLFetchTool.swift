@@ -61,49 +61,70 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     
     public func call(arguments: FetchInput) async throws -> ToolOutput {
         guard let url = URL(string: arguments.url) else {
-            return ToolOutput("URLFetch [Failed]\nOutput: Invalid URL: \(arguments.url)\nMetadata:\n  error: Invalid URL")
+            let output = URLFetchOutput(
+                success: false,
+                output: "Invalid URL: \(arguments.url)",
+                metadata: ["error": "Invalid URL"]
+            )
+            return ToolOutput(output)
         }
         
         guard url.scheme == "http" || url.scheme == "https" else {
-            return ToolOutput("URLFetch [Failed]\nOutput: Unsupported URL scheme: \(url.scheme ?? "nil")\nMetadata:\n  error: Unsupported URL scheme")
+            let output = URLFetchOutput(
+                success: false,
+                output: "Unsupported URL scheme: \(url.scheme ?? "nil")",
+                metadata: ["error": "Unsupported URL scheme"]
+            )
+            return ToolOutput(output)
         }
         
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                return ToolOutput("URLFetch [Failed]\nOutput: Invalid response type\nMetadata:\n  error: Invalid response type")
+                let output = URLFetchOutput(
+                    success: false,
+                    output: "Invalid response type",
+                    metadata: ["error": "Invalid response type"]
+                )
+                return ToolOutput(output)
             }
             
             let outputText = String(data: data, encoding: .utf8) ?? "<Non-UTF8 data>"
             let statusCode = httpResponse.statusCode
             
             if (200..<300).contains(statusCode) {
-                return ToolOutput("""
-                URLFetch [Success]
-                Output: \(outputText)
-                Metadata:
-                  status: \(statusCode)
-                  url: \(url.absoluteString)
-                """)
+                let output = URLFetchOutput(
+                    success: true,
+                    output: outputText,
+                    metadata: [
+                        "status": String(statusCode),
+                        "url": url.absoluteString
+                    ]
+                )
+                return ToolOutput(output)
             } else {
-                return ToolOutput("""
-                URLFetch [Failed]
-                Output: \(outputText)
-                Metadata:
-                  status: \(statusCode)
-                  url: \(url.absoluteString)
-                  error: HTTP error \(statusCode)
-                """)
+                let output = URLFetchOutput(
+                    success: false,
+                    output: outputText,
+                    metadata: [
+                        "status": String(statusCode),
+                        "url": url.absoluteString,
+                        "error": "HTTP error \(statusCode)"
+                    ]
+                )
+                return ToolOutput(output)
             }
         } catch {
-            return ToolOutput("""
-            URLFetch [Failed]
-            Output: \(error.localizedDescription)
-            Metadata:
-              url: \(url.absoluteString)
-              error: \(error.localizedDescription)
-            """)
+            let output = URLFetchOutput(
+                success: false,
+                output: error.localizedDescription,
+                metadata: [
+                    "url": url.absoluteString,
+                    "error": error.localizedDescription
+                ]
+            )
+            return ToolOutput(output)
         }
     }
 }
@@ -119,5 +140,46 @@ public struct FetchInput: ConvertibleFromGeneratedContent {
     /// - Parameter url: The URL to fetch data from.
     public init(url: String) {
         self.url = url
+    }
+}
+
+/// Output structure for URL fetch operations.
+public struct URLFetchOutput: Codable, Sendable, CustomStringConvertible {
+    /// Whether the fetch was successful.
+    public let success: Bool
+    
+    /// The fetched content or error message.
+    public let output: String
+    
+    /// Additional metadata about the operation.
+    public let metadata: [String: String]
+    
+    /// Creates a new instance of `URLFetchOutput`.
+    ///
+    /// - Parameters:
+    ///   - success: Whether the fetch succeeded.
+    ///   - output: The fetched content or error message.
+    ///   - metadata: Additional metadata.
+    public init(success: Bool, output: String, metadata: [String: String]) {
+        self.success = success
+        self.output = output
+        self.metadata = metadata
+    }
+    
+    public var description: String {
+        let status = success ? "Success" : "Failed"
+        let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
+        
+        return """
+        URLFetch [\(status)]
+        Output: \(output)\(metadataString)
+        """
+    }
+}
+
+// Make URLFetchOutput conform to PromptRepresentable for compatibility
+extension URLFetchOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }

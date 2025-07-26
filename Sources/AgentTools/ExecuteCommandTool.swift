@@ -47,12 +47,22 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     
     public func call(arguments: ExecuteCommandInput) async throws -> ToolOutput {
         guard !arguments.command.isEmpty else {
-            return ToolOutput("Command Execution [Failed]\nOutput: Command cannot be empty\nMetadata:\n  error: Command cannot be empty")
+            let output = ExecuteCommandOutput(
+                success: false,
+                output: "Command cannot be empty",
+                metadata: ["error": "Command cannot be empty"]
+            )
+            return ToolOutput(output)
         }
         
         let sanitizedCommand = sanitizeCommand(arguments.command)
         guard validateCommand(sanitizedCommand) else {
-            return ToolOutput("Command Execution [Failed]\nOutput: Unsafe command detected: \(arguments.command)\nMetadata:\n  error: Unsafe command detected: \(arguments.command)")
+            let output = ExecuteCommandOutput(
+                success: false,
+                output: "Unsafe command detected: \(arguments.command)",
+                metadata: ["error": "Unsafe command detected: \(arguments.command)"]
+            )
+            return ToolOutput(output)
         }
         
         return try await executeCommand(sanitizedCommand)
@@ -77,6 +87,46 @@ public struct ExecuteCommandInput: Codable, Sendable, ConvertibleFromGeneratedCo
     }
 }
 
+/// Output structure for command execution operations.
+public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
+    /// Whether the command executed successfully.
+    public let success: Bool
+    
+    /// The output from the command.
+    public let output: String
+    
+    /// Additional metadata about the operation.
+    public let metadata: [String: String]
+    
+    /// Creates a new instance of `ExecuteCommandOutput`.
+    ///
+    /// - Parameters:
+    ///   - success: Whether the command succeeded.
+    ///   - output: The command output.
+    ///   - metadata: Additional metadata.
+    public init(success: Bool, output: String, metadata: [String: String]) {
+        self.success = success
+        self.output = output
+        self.metadata = metadata
+    }
+    
+    public var description: String {
+        let status = success ? "Success" : "Failed"
+        let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
+        
+        return """
+        Command Execution [\(status)]
+        Output: \(output)\(metadataString)
+        """
+    }
+}
+
+// Make ExecuteCommandOutput conform to PromptRepresentable for compatibility
+extension ExecuteCommandOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
+    }
+}
 
 // MARK: - Private Methods
 
@@ -102,41 +152,45 @@ private extension ExecuteCommandTool {
                     let output = String(data: data, encoding: .utf8) ?? ""
                     
                     if process.terminationStatus == 0 {
-                        continuation.resume(returning: ToolOutput(
-                            "Command Execution [Success]\n" +
-                            "Output: \(output)\n" +
-                            "Metadata:\n" +
-                            "  status: \(process.terminationStatus)\n" +
-                            "  command: \(command)"
-                        ))
+                        let result = ExecuteCommandOutput(
+                            success: true,
+                            output: output,
+                            metadata: [
+                                "status": String(process.terminationStatus),
+                                "command": command
+                            ]
+                        )
+                        continuation.resume(returning: ToolOutput(result))
                     } else {
-                        continuation.resume(returning: ToolOutput(
-                            "Command Execution [Failed]\n" +
-                            "Output: \(output)\n" +
-                            "Metadata:\n" +
-                            "  status: \(process.terminationStatus)\n" +
-                            "  command: \(command)"
-                        ))
+                        let result = ExecuteCommandOutput(
+                            success: false,
+                            output: output,
+                            metadata: [
+                                "status": String(process.terminationStatus),
+                                "command": command
+                            ]
+                        )
+                        continuation.resume(returning: ToolOutput(result))
                     }
                 } catch {
-                    continuation.resume(returning: ToolOutput(
-                        "Command Execution [Failed]\n" +
-                        "Output: Failed to execute command: \(error.localizedDescription)\n" +
-                        "Metadata:\n" +
-                        "  error: Failed to execute command: \(error.localizedDescription)"
-                    ))
+                    let result = ExecuteCommandOutput(
+                        success: false,
+                        output: "Failed to execute command: \(error.localizedDescription)",
+                        metadata: ["error": "Failed to execute command: \(error.localizedDescription)"]
+                    )
+                    continuation.resume(returning: ToolOutput(result))
                 }
             }
             
             do {
                 try process.run()
             } catch {
-                continuation.resume(returning: ToolOutput(
-                    "Command Execution [Failed]\n" +
-                    "Output: Failed to start command: \(error.localizedDescription)\n" +
-                    "Metadata:\n" +
-                    "  error: Failed to start command: \(error.localizedDescription)"
-                ))
+                let result = ExecuteCommandOutput(
+                    success: false,
+                    output: "Failed to start command: \(error.localizedDescription)",
+                    metadata: ["error": "Failed to start command: \(error.localizedDescription)"]
+                )
+                continuation.resume(returning: ToolOutput(result))
             }
         }
     }

@@ -24,6 +24,7 @@ import OpenFoundationModels
 /// - Does not allow modifications to system files
 public struct FileSystemTool: OpenFoundationModels.Tool {
     public typealias Arguments = FileSystemInput
+    public typealias Output = String
     
     public static let name = "filesystem"
     public var name: String { Self.name }
@@ -55,21 +56,42 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
     public func call(arguments: FileSystemInput) async throws -> ToolOutput {
         let normalizedPath = normalizePath(arguments.path)
         guard isPathSafe(normalizedPath) else {
-            return ToolOutput("FileSystem Operation [Failed]\nContent: Path is not within working directory: \(arguments.path)\nMetadata:\n  operation: \(arguments.operation)\n  error: Path is not within working directory: \(arguments.path)")
+            let output = FileSystemOutput(
+                success: false,
+                content: "Path is not within working directory: \(arguments.path)",
+                metadata: [
+                    "operation": arguments.operation,
+                    "error": "Path is not within working directory: \(arguments.path)"
+                ]
+            )
+            return ToolOutput(output)
         }
         
         switch arguments.operation {
         case "read":
             let result = try await readFile(at: normalizedPath)
-            return ToolOutput(result.description)
+            return ToolOutput(result)
         case "write":
             if arguments.content.isEmpty {
-                return ToolOutput("FileSystem Operation [Failed]\nContent: Missing content for write operation\nMetadata:\n  operation: \(arguments.operation)\n  error: Missing content for write operation")
+                let output = FileSystemOutput(
+                    success: false,
+                    content: "Missing content for write operation",
+                    metadata: [
+                        "operation": arguments.operation,
+                        "error": "Missing content for write operation"
+                    ]
+                )
+                return ToolOutput(output)
             }
             let result = try await writeFile(content: arguments.content, to: normalizedPath)
-            return ToolOutput(result.description)
+            return ToolOutput(result)
         default:
-            return ToolOutput("FileSystem Operation [Failed]\nContent: Invalid operation: \(arguments.operation)\nMetadata:\n  error: Invalid operation")  
+            let output = FileSystemOutput(
+                success: false,
+                content: "Invalid operation: \(arguments.operation)",
+                metadata: ["error": "Invalid operation"]
+            )
+            return ToolOutput(output)  
         }
     }
 }
@@ -123,6 +145,13 @@ public struct FileSystemOutput: Codable, Sendable, CustomStringConvertible {
         FileSystem Operation [\(status)]
         Content: \(content)\(metadataString)
         """
+    }
+}
+
+// Make FileSystemOutput conform to PromptRepresentable for compatibility
+extension FileSystemOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }
 

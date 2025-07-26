@@ -4,7 +4,8 @@
       "Bash(swift build:*)",
       "mcp__deepwiki__ask_question",
       "Bash(find:*)",
-      "Bash(swift package:*)"
+      "Bash(swift package:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

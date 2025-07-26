@@ -13,7 +13,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "main"),
-        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
+        .package(path: "../.."),
         .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
     ],
     targets: [

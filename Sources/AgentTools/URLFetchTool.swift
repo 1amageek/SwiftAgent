@@ -42,8 +42,8 @@ import SwiftAgent
 ///
 /// Always confirm that the user genuinely needs external data from the provided URL before using `URLFetchTool`.
 public struct URLFetchTool: OpenFoundationModels.Tool {
-    
     public typealias Arguments = FetchInput
+    public typealias Output = URLFetchOutput
     
     public static let name = "url_fetch"
     public var name: String { Self.name }
@@ -60,14 +60,14 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     
     public init() {}
     
-    public func call(arguments: FetchInput) async throws -> ToolOutput {
+    public func call(arguments: FetchInput) async throws -> URLFetchOutput {
         guard let url = URL(string: arguments.url) else {
             let output = URLFetchOutput(
                 success: false,
                 output: "Invalid URL: \(arguments.url)",
                 metadata: ["error": "Invalid URL"]
             )
-            return ToolOutput(output)
+            return output
         }
         
         guard url.scheme == "http" || url.scheme == "https" else {
@@ -76,7 +76,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
                 output: "Unsupported URL scheme: \(url.scheme ?? "nil")",
                 metadata: ["error": "Unsupported URL scheme"]
             )
-            return ToolOutput(output)
+            return output
         }
         
         do {
@@ -88,7 +88,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
                     output: "Invalid response type",
                     metadata: ["error": "Invalid response type"]
                 )
-                return ToolOutput(output)
+                return output
             }
             
             let outputText = String(data: data, encoding: .utf8) ?? "<Non-UTF8 data>"
@@ -103,7 +103,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
                         "url": url.absoluteString
                     ]
                 )
-                return ToolOutput(output)
+                return output
             } else {
                 let output = URLFetchOutput(
                     success: false,
@@ -114,7 +114,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
                         "error": "HTTP error \(statusCode)"
                     ]
                 )
-                return ToolOutput(output)
+                return output
             }
         } catch {
             let output = URLFetchOutput(
@@ -125,7 +125,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
                     "error": error.localizedDescription
                 ]
             )
-            return ToolOutput(output)
+            return output
         }
     }
 }

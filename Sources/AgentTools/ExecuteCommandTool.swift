@@ -24,6 +24,7 @@ import SwiftAgent
 /// - Cannot execute commands requiring user input.
 public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public typealias Arguments = ExecuteCommandInput
+    public typealias Output = ExecuteCommandOutput
     
     public static let name = "execute"
     public var name: String { Self.name }
@@ -46,14 +47,14 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     
     public init() {}
     
-    public func call(arguments: ExecuteCommandInput) async throws -> ToolOutput {
+    public func call(arguments: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
         guard !arguments.command.isEmpty else {
             let output = ExecuteCommandOutput(
                 success: false,
                 output: "Command cannot be empty",
                 metadata: ["error": "Command cannot be empty"]
             )
-            return ToolOutput(output)
+            return output
         }
         
         let sanitizedCommand = sanitizeCommand(arguments.command)
@@ -63,7 +64,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
                 output: "Unsafe command detected: \(arguments.command)",
                 metadata: ["error": "Unsafe command detected: \(arguments.command)"]
             )
-            return ToolOutput(output)
+            return output
         }
         
         return try await executeCommand(sanitizedCommand)
@@ -122,13 +123,6 @@ public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make ExecuteCommandOutput conform to PromptRepresentable for compatibility
-extension ExecuteCommandOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
-    }
-}
-
 // MARK: - Private Methods
 
 private extension ExecuteCommandTool {
@@ -137,7 +131,7 @@ private extension ExecuteCommandTool {
     /// - Parameter command: The sanitized shell command to execute.
     /// - Returns: The result of the command execution.
     /// - Throws: `ToolError` if the command fails.
-    func executeCommand(_ command: String) async throws -> ToolOutput {
+    func executeCommand(_ command: String) async throws -> ExecuteCommandOutput {
         return try await withThrowingTaskGroup(of: ExecuteCommandOutput.self) { group in
             let process = Process()
             let outputPipe = Pipe()
@@ -220,7 +214,7 @@ private extension ExecuteCommandTool {
                 throw ToolError.executionFailed("No result from command execution")
             }
             
-            return ToolOutput(result)
+            return result
         }
     }
     
@@ -320,5 +314,12 @@ private extension ExecuteCommandTool {
         }
         
         return filtered
+    }
+}
+
+// Make ExecuteCommandOutput conform to PromptRepresentable for compatibility
+extension ExecuteCommandOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }

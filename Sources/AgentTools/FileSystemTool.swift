@@ -25,7 +25,7 @@ import SwiftAgent
 /// - Does not allow modifications to system files
 public struct FileSystemTool: OpenFoundationModels.Tool {
     public typealias Arguments = FileSystemInput
-    public typealias Output = String
+    public typealias Output = FileSystemOutput
     
     public static let name = "filesystem"
     public var name: String { Self.name }
@@ -54,7 +54,7 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
         self.fsActor = FileSystemActor()
     }
     
-    public func call(arguments: FileSystemInput) async throws -> ToolOutput {
+    public func call(arguments: FileSystemInput) async throws -> FileSystemOutput {
         let normalizedPath = normalizePath(arguments.path)
         guard isPathSafe(normalizedPath) else {
             let output = FileSystemOutput(
@@ -65,13 +65,13 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
                     "error": "Path is not within working directory: \(arguments.path)"
                 ]
             )
-            return ToolOutput(output)
+            return output
         }
         
         switch arguments.operation {
         case "read":
             let result = try await readFile(at: normalizedPath)
-            return ToolOutput(result)
+            return result
         case "write":
             if arguments.content.isEmpty {
                 let output = FileSystemOutput(
@@ -82,20 +82,20 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
                         "error": "Missing content for write operation"
                     ]
                 )
-                return ToolOutput(output)
+                return output
             }
             let result = try await writeFile(content: arguments.content, to: normalizedPath)
-            return ToolOutput(result)
+            return result
         case "list":
             let result = try await listDirectory(at: normalizedPath)
-            return ToolOutput(result)
+            return result
         default:
             let output = FileSystemOutput(
                 success: false,
                 content: "Invalid operation: \(arguments.operation). Valid operations: read, write, list",
                 metadata: ["error": "Invalid operation"]
             )
-            return ToolOutput(output)  
+            return output  
         }
     }
 }
@@ -149,13 +149,6 @@ public struct FileSystemOutput: Codable, Sendable, CustomStringConvertible {
         FileSystem Operation [\(status)]
         Content: \(content)\(metadataString)
         """
-    }
-}
-
-// Make FileSystemOutput conform to PromptRepresentable for compatibility
-extension FileSystemOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }
 
@@ -433,5 +426,12 @@ private actor FileSystemActor {
         } catch {
             return "? Error \(URL(fileURLWithPath: path).lastPathComponent)"
         }
+    }
+}
+
+// Make FileSystemOutput conform to PromptRepresentable for compatibility
+extension FileSystemOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        return Prompt(segments: [Prompt.Segment(text: description)])
     }
 }

@@ -8,6 +8,7 @@ import SwiftAgent
 /// basic validation and safety checks.
 public struct GitTool: OpenFoundationModels.Tool {
     public typealias Arguments = GitInput
+    public typealias Output = GitOutput
     
     public static let name = "git_control"
     public var name: String { Self.name }
@@ -33,7 +34,7 @@ public struct GitTool: OpenFoundationModels.Tool {
         self.gitPath = gitPath
     }
     
-    public func call(arguments: GitInput) async throws -> ToolOutput {
+    public func call(arguments: GitInput) async throws -> GitOutput {
         // Validate repository path if specified
         if !arguments.repository.isEmpty {
             guard FileManager.default.fileExists(atPath: arguments.repository) else {
@@ -43,7 +44,7 @@ public struct GitTool: OpenFoundationModels.Tool {
                     exitCode: -1,
                     metadata: ["error": "Repository not found"]
                 )
-                return ToolOutput(output)
+                return output
             }
             
             let gitDir = URL(fileURLWithPath: arguments.repository).appendingPathComponent(".git").path
@@ -54,7 +55,7 @@ public struct GitTool: OpenFoundationModels.Tool {
                     exitCode: -1,
                     metadata: ["error": "Not a Git repository"]
                 )
-                return ToolOutput(output)
+                return output
             }
         }
         
@@ -66,12 +67,12 @@ public struct GitTool: OpenFoundationModels.Tool {
                 exitCode: -1,
                 metadata: ["error": "Invalid Git command"]
             )
-            return ToolOutput(output)
+            return output
         }
         
         // Execute Git command
         let result = await executeGitCommand(arguments)
-        return ToolOutput(result)
+        return result
     }
     
     private func isValidGitCommand(_ command: String) -> Bool {

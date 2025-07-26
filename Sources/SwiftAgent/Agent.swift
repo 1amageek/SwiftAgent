@@ -483,25 +483,50 @@ public struct ParallelStepBuilder {
     ///
     /// - Parameter step: The step to include
     /// - Returns: A single-element array containing the step
-    public static func buildBlock<S: Step & Sendable>(_ step: S) -> [S] where S: Sendable {
-        [step]
+    public static func buildBlock<S: Step & Sendable, In, Out>(_ step: S) -> [AnyStep<In, Out>] 
+    where S.Input == In, S.Output == Out, In: Sendable, Out: Sendable {
+        [AnyStep(step)]
     }
     
-    /// Combines multiple steps into an array using parameter packs.
+    /// Combines multiple steps into an array.
     ///
     /// - Parameter steps: The steps to combine
     /// - Returns: An array containing all steps
-    public static func buildBlock<each S: Step & Sendable>(_ steps: repeat each S) -> [any Step & Sendable] {
-        var collection: [any Step & Sendable] = []
-        repeat collection.append(each steps)
-        return collection
+    public static func buildBlock<In, Out>(_ steps: AnyStep<In, Out>...) -> [AnyStep<In, Out>] {
+        return steps
+    }
+    
+    /// Builds two steps into an array.
+    public static func buildBlock<S1: Step & Sendable, S2: Step & Sendable, In, Out>(
+        _ step1: S1, _ step2: S2
+    ) -> [AnyStep<In, Out>] 
+    where S1.Input == In, S1.Output == Out, S2.Input == In, S2.Output == Out, In: Sendable, Out: Sendable {
+        [AnyStep(step1), AnyStep(step2)]
+    }
+    
+    /// Builds three steps into an array.
+    public static func buildBlock<S1: Step & Sendable, S2: Step & Sendable, S3: Step & Sendable, In, Out>(
+        _ step1: S1, _ step2: S2, _ step3: S3
+    ) -> [AnyStep<In, Out>] 
+    where S1.Input == In, S1.Output == Out, S2.Input == In, S2.Output == Out, 
+          S3.Input == In, S3.Output == Out, In: Sendable, Out: Sendable {
+        [AnyStep(step1), AnyStep(step2), AnyStep(step3)]
+    }
+    
+    /// Builds four steps into an array.
+    public static func buildBlock<S1: Step & Sendable, S2: Step & Sendable, S3: Step & Sendable, S4: Step & Sendable, In, Out>(
+        _ step1: S1, _ step2: S2, _ step3: S3, _ step4: S4
+    ) -> [AnyStep<In, Out>] 
+    where S1.Input == In, S1.Output == Out, S2.Input == In, S2.Output == Out, 
+          S3.Input == In, S3.Output == Out, S4.Input == In, S4.Output == Out, In: Sendable, Out: Sendable {
+        [AnyStep(step1), AnyStep(step2), AnyStep(step3), AnyStep(step4)]
     }
     
     /// Handles optional steps.
     ///
     /// - Parameter step: The optional step
     /// - Returns: Array containing the step if present, empty array if nil
-    public static func buildOptional<S: Step & Sendable>(_ step: [S]?) -> [S] {
+    public static func buildOptional<In, Out>(_ step: [AnyStep<In, Out>]?) -> [AnyStep<In, Out>] {
         step ?? []
     }
     
@@ -509,7 +534,7 @@ public struct ParallelStepBuilder {
     ///
     /// - Parameter first: The steps to include if condition is true
     /// - Returns: The provided array of steps
-    public static func buildEither<S: Step & Sendable>(first: [S]) -> [S] {
+    public static func buildEither<In, Out>(first: [AnyStep<In, Out>]) -> [AnyStep<In, Out>] {
         first
     }
     
@@ -517,7 +542,7 @@ public struct ParallelStepBuilder {
     ///
     /// - Parameter second: The steps to include if condition is false
     /// - Returns: The provided array of steps
-    public static func buildEither<S: Step & Sendable>(second: [S]) -> [S] {
+    public static func buildEither<In, Out>(second: [AnyStep<In, Out>]) -> [AnyStep<In, Out>] {
         second
     }
     
@@ -525,7 +550,7 @@ public struct ParallelStepBuilder {
     ///
     /// - Parameter components: Array of arrays of steps
     /// - Returns: Flattened array containing all steps
-    public static func buildArray<S: Step & Sendable>(_ components: [[S]]) -> [S] {
+    public static func buildArray<In, Out>(_ components: [[AnyStep<In, Out>]]) -> [AnyStep<In, Out>] {
         components.flatMap { $0 }
     }
 }

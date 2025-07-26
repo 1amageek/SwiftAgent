@@ -9,13 +9,13 @@ import Foundation
 import OpenFoundationModels
 
 /// A step that integrates OpenFoundationModels' LanguageModelSession with SwiftAgent
-public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
+public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     
-    public typealias Input = Input
-    public typealias Output = Output
+    public typealias Input = In
+    public typealias Output = Out
     
     private let session: LanguageModelSession
-    private let transform: (Input) -> String
+    private let transform: (In) -> String
     
     /// Creates a new Generate step
     /// - Parameters:
@@ -23,7 +23,7 @@ public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: LanguageModelSession,
-        transform: @escaping (Input) -> String
+        transform: @escaping (In) -> String
     ) {
         self.session = session
         self.transform = transform
@@ -40,7 +40,7 @@ public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
         tools: [any OpenFoundationModels.Tool] = [],
         guardrails: LanguageModelSession.Guardrails? = nil,
         instructions: String? = nil,
-        transform: @escaping (Input) -> String
+        transform: @escaping (In) -> String
     ) {
         self.session = LanguageModelSession(
             model: SystemLanguageModel.default,
@@ -51,12 +51,12 @@ public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
         self.transform = transform
     }
     
-    public func run(_ input: Input) async throws -> Output {
+    public func run(_ input: In) async throws -> Out {
         let prompt = transform(input)
         
         do {
             let response = try await session.respond(
-                generating: Output.self,
+                generating: Out.self,
                 includeSchemaInPrompt: true
             ) {
                 Prompt(prompt)
@@ -69,13 +69,13 @@ public struct Generate<Input: Sendable, Output: Sendable & Generable>: Step {
 }
 
 /// A step that generates string output using OpenFoundationModels
-public struct GenerateText<Input: Sendable>: Step {
+public struct GenerateText<In: Sendable>: Step {
     
-    public typealias Input = Input
+    public typealias Input = In
     public typealias Output = String
     
     private let session: LanguageModelSession
-    private let transform: (Input) -> String
+    private let transform: (In) -> String
     
     /// Creates a new GenerateText step
     /// - Parameters:
@@ -83,7 +83,7 @@ public struct GenerateText<Input: Sendable>: Step {
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: LanguageModelSession,
-        transform: @escaping (Input) -> String
+        transform: @escaping (In) -> String
     ) {
         self.session = session
         self.transform = transform
@@ -100,7 +100,7 @@ public struct GenerateText<Input: Sendable>: Step {
         tools: [any OpenFoundationModels.Tool] = [],
         guardrails: LanguageModelSession.Guardrails? = nil,
         instructions: String? = nil,
-        transform: @escaping (Input) -> String
+        transform: @escaping (In) -> String
     ) {
         self.session = LanguageModelSession(
             model: SystemLanguageModel.default,
@@ -111,7 +111,7 @@ public struct GenerateText<Input: Sendable>: Step {
         self.transform = transform
     }
     
-    public func run(_ input: Input) async throws -> Output {
+    public func run(_ input: In) async throws -> String {
         let prompt = transform(input)
         
         do {

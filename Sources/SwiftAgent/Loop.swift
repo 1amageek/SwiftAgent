@@ -205,53 +205,11 @@ extension Loop {
 }
 
 // MARK: - Async Sequence Support
-
-extension Loop: AsyncSequence where S: AsyncSequence {
-    public typealias AsyncIterator = AsyncIteratorImpl
-    
-    public func makeAsyncIterator() -> AsyncIteratorImpl {
-        AsyncIteratorImpl(loop: self)
-    }
-    
-    public struct AsyncIteratorImpl: AsyncIteratorProtocol {
-        let loop: Loop
-        var current: Input?
-        var iteration = 0
-        
-        init(loop: Loop) {
-            self.loop = loop
-            self.current = nil
-        }
-        
-        public mutating func next() async throws -> Output? {
-            guard let input = current else {
-                return nil
-            }
-            
-            switch loop.loopType {
-            case .finite(let max):
-                guard iteration < max else {
-                    return nil
-                }
-                
-                let output = try await loop.step(input).run(input)
-                if let condition = loop.condition,
-                   try await condition().run(output) {
-                    return nil
-                }
-                
-                iteration += 1
-                current = output
-                return output
-                
-            case .infinite:
-                let output = try await loop.step(input).run(input)
-                current = output
-                return output
-            }
-        }
-    }
-}
+//
+// Note: AsyncSequence support has been temporarily removed due to 
+// incompatible constraints. Loop steps need S.Input == S.Output 
+// while AsyncSequence requires different semantics.
+// This can be re-implemented with a separate LoopSequence type if needed.
 
 // MARK: - Custom String Convertible
 

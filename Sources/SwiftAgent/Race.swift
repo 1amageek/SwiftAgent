@@ -13,15 +13,13 @@ import Foundation
 /// - Note: If a timeout is specified and no step completes before the timeout, the race fails with `.timeout`.
 public struct Race<Input: Sendable, Output: Sendable>: Step {
     
-    public typealias T = Step<Input, Output> & Sendable
-    
-    private let steps: [any T]
+    private let steps: [AnyStep<Input, Output>]
     private let timeout: Duration?
     
     /// Creates a `Race` without a timeout.
     ///
     /// - Parameter builder: A result builder that produces an array of steps to run in parallel.
-    public init(@ParallelStepBuilder builder: () -> [any T]) {
+    public init(@ParallelStepBuilder builder: () -> [AnyStep<Input, Output>]) {
         self.steps = builder()
         self.timeout = nil
     }
@@ -33,7 +31,7 @@ public struct Race<Input: Sendable, Output: Sendable>: Step {
     ///   - builder: A result builder that produces an array of steps to run in parallel.
     public init(
         timeout: Duration,
-        @ParallelStepBuilder builder: () -> [any T]
+        @ParallelStepBuilder builder: () -> [AnyStep<Input, Output>]
     ) {
         self.steps = builder()
         self.timeout = timeout

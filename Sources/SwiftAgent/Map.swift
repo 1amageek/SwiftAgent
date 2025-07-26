@@ -29,9 +29,12 @@ import Foundation
 ///     }
 /// }
 /// ```
-public struct Map<Input: Collection & Sendable, Output: Collection & Sendable>: Step where Input.Element: Sendable, Output.Element: Sendable {
+public struct Map<InElement: Sendable, OutElement: Sendable>: Step {
+    public typealias Input = [InElement]
+    public typealias Output = [OutElement]
+    
     /// A closure that produces a step to transform each element
-    private let transform: (Input.Element, Int) -> any Step<Input.Element, Output.Element>
+    private let transform: (InElement, Int) -> AnyStep<InElement, OutElement>
     
     /// Creates a new map step with the specified transformation
     ///
@@ -39,9 +42,9 @@ public struct Map<Input: Collection & Sendable, Output: Collection & Sendable>: 
     ///                       The closure receives the element and its index in the collection.
     public init(
         @StepBuilder transform: @escaping (
-            Input.Element,
+            InElement,
             Int
-        ) -> any Step<Input.Element, Output.Element>
+        ) -> AnyStep<InElement, OutElement>
     ) {
         self.transform = transform
     }
@@ -51,8 +54,8 @@ public struct Map<Input: Collection & Sendable, Output: Collection & Sendable>: 
     /// - Parameter input: The collection to transform
     /// - Returns: An array containing the transformed elements
     /// - Throws: Any error that occurs during the transformation of elements
-    public func run(_ input: Input) async throws -> [Output.Element] {
-        var results: [Output.Element] = []
+    public func run(_ input: Input) async throws -> Output {
+        var results: [OutElement] = []
         var index = 0
         
         for element in input {

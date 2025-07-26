@@ -22,14 +22,13 @@ import Foundation
 /// ```
 public struct Parallel<Input: Sendable, ElementOutput: Sendable>: Step {
     public typealias Output = [ElementOutput]
-    public typealias T = Step<Input, ElementOutput> & Sendable
     
-    private let steps: [any T]
+    private let steps: [AnyStep<Input, ElementOutput>]
     
     /// Creates a new parallel step with the given builder closure.
     ///
     /// - Parameter builder: A closure that builds the array of steps to execute in parallel
-    public init(@ParallelStepBuilder builder: () -> [any T]) {
+    public init(@ParallelStepBuilder builder: () -> [AnyStep<Input, ElementOutput>]) {
         self.steps = builder()
     }
     

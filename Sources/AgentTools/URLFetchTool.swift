@@ -1,5 +1,6 @@
 import Foundation
 import OpenFoundationModels
+import SwiftAgent
 
 /// A tool for fetching data from a URL.
 ///

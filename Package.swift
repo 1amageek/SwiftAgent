@@ -15,14 +15,17 @@ let package = Package(
             targets: ["AgentTools"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "main"),
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", branch: "main")
     ],
     targets: [
         .target(
             name: "SwiftAgent",
             dependencies: [
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels"),
+                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "Instrumentation", package: "swift-distributed-tracing")
             ]
         ),
         .target(

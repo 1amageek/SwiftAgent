@@ -56,6 +56,5 @@ struct AgentsTests {
         // デフォルト値のテスト
         #expect(agent.maxTurns == 10)
         #expect(agent.guardrails.isEmpty)
-        #expect(agent.tracer == nil)
     }
 }

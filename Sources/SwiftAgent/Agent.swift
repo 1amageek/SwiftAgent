@@ -92,9 +92,6 @@ public protocol Agent: Step where Input == Body.Input, Output == Body.Output {
     
     /// Guardrails to apply to this agent's execution
     var guardrails: [any Guardrail] { get }
-    
-    /// Tracer for monitoring this agent's execution
-    var tracer: AgentTracer? { get }
 }
 
 extension Agent {
@@ -104,9 +101,6 @@ extension Agent {
     
     /// Default guardrails (empty)
     public var guardrails: [any Guardrail] { [] }
-    
-    /// Default tracer (none)
-    public var tracer: AgentTracer? { nil }
     
     /// Executes the agent's operation by delegating to its body with applied configuration.
     ///
@@ -121,30 +115,10 @@ extension Agent {
                 inputGuardrails: guardrails,
                 outputGuardrails: guardrails
             )
-            
-            // Apply tracing if present
-            if let tracer = tracer {
-                let tracingStep = TracingStep(
-                    step: guardrailStep,
-                    tracer: tracer,
-                    operationName: String(describing: type(of: self))
-                )
-                return try await tracingStep.run(input)
-            } else {
-                return try await guardrailStep.run(input)
-            }
-        } else if let tracer = tracer {
-            // Apply only tracing
-            let tracingStep = TracingStep(
-                step: body,
-                tracer: tracer,
-                operationName: String(describing: type(of: self))
-            )
-            return try await tracingStep.run(input)
-        } else {
-            // No additional configuration, run body directly
-            return try await body.run(input)
+            return try await guardrailStep.run(input)
         }
+        
+        return try await body.run(input)
     }
 }
 

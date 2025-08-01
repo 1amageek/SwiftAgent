@@ -7,6 +7,8 @@
 
 import Foundation
 import OpenFoundationModels
+import Tracing
+import Instrumentation
 
 /// A step that integrates OpenFoundationModels' LanguageModelSession with SwiftAgent
 public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
@@ -52,18 +54,31 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     }
     
     public func run(_ input: In) async throws -> Out {
-        let prompt = transform(input)
-        
-        do {
-            let response = try await session.respond(
-                generating: Out.self,
-                includeSchemaInPrompt: true
-            ) {
-                Prompt(prompt)
+        try await withSpan(
+            "Generate.\(Out.self)",
+            ofKind: .client
+        ) { span in
+            // Set basic attributes for LLM call
+            span.attributes[SwiftAgentSpanAttributes.stepType] = "LLMGeneration"
+            
+            // Transform input to prompt
+            let prompt = transform(input)
+            span.addEvent("prompt_generated")
+            
+            do {
+                let response = try await session.respond(
+                    generating: Out.self,
+                    includeSchemaInPrompt: true
+                ) {
+                    Prompt(prompt)
+                }
+                
+                // Span is successful by default
+                return response.content
+            } catch {
+                span.recordError(error)
+                throw ModelError.generationFailed(error.localizedDescription)
             }
-            return response.content
-        } catch {
-            throw ModelError.generationFailed(error.localizedDescription)
         }
     }
 }
@@ -112,15 +127,28 @@ public struct GenerateText<In: Sendable>: Step {
     }
     
     public func run(_ input: In) async throws -> String {
-        let prompt = transform(input)
-        
-        do {
-            let response = try await session.respond {
-                Prompt(prompt)
+        try await withSpan(
+            "GenerateText",
+            ofKind: .client
+        ) { span in
+            // Set basic attributes for LLM call
+            span.attributes[SwiftAgentSpanAttributes.stepType] = "LLMTextGeneration"
+            
+            // Transform input to prompt
+            let prompt = transform(input)
+            span.addEvent("prompt_generated")
+            
+            do {
+                let response = try await session.respond {
+                    Prompt(prompt)
+                }
+                
+                // Span is successful by default
+                return response.content
+            } catch {
+                span.recordError(error)
+                throw ModelError.generationFailed(error.localizedDescription)
             }
-            return response.content
-        } catch {
-            throw ModelError.generationFailed(error.localizedDescription)
         }
     }
 }

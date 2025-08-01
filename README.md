@@ -43,7 +43,8 @@ graph TB
     
     subgraph "Safety & Monitoring"
         Guardrails["Guardrails"]
-        Tracer["AgentTracer"]
+        Monitor["Monitor"]
+        TracingStep["TracingStep"]
     end
     
     subgraph "Tools"
@@ -61,7 +62,8 @@ graph TB
     Step --> GenerateText
     
     Agent --> Guardrails
-    Agent --> Tracer
+    Step --> Monitor
+    Step --> TracingStep
     
     Generate --> LMS
     GenerateText --> LMS
@@ -82,7 +84,8 @@ graph TB
 - 🔄 **Async/Await Support**: Built for modern Swift concurrency
 - 🎭 **Protocol-Based**: Flexible and extensible architecture
 - 📊 **State Management**: Memory and Relay for state handling
-- 🔍 **Monitoring**: Built-in tracing and guardrails support
+- 🔍 **Monitoring**: Built-in monitoring and distributed tracing support
+- 📡 **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
 
 ## Core Components
 
@@ -110,7 +113,6 @@ public protocol Agent: Step {
     @StepBuilder var body: Self.Body { get }
     var maxTurns: Int { get }
     var guardrails: [any Guardrail] { get }
-    var tracer: AgentTracer? { get }
 }
 ```
 
@@ -398,10 +400,6 @@ struct ResearchAgent: Agent {
     var guardrails: [any Guardrail] {
         [ContentSafetyGuardrail(), TokenLimitGuardrail(maxTokens: 4000)]
     }
-    
-    var tracer: AgentTracer? {
-        ConsoleTracer()
-    }
 }
 ```
 
@@ -610,20 +608,74 @@ struct MyAgent: Agent {
 }
 ```
 
-### Tracing
+### Monitoring & Tracing
 
-Monitor agent execution:
+SwiftAgent provides two complementary ways to observe step execution:
+
+#### Monitor - Lightweight Debugging
+
+Use `Monitor` for simple debugging and logging during development:
 
 ```swift
-struct MyAgent: Agent {
-    var tracer: AgentTracer? {
-        ConsoleTracer()
-    }
-    
-    var body: some Step<String, String> {
-        // Agent implementation
-    }
+GenerateText { input in
+    "Process: \(input)"
 }
+.onInput { input in
+    print("Starting with: \(input)")
+}
+.onOutput { output in
+    print("Generated: \(output)")
+}
+.onError { error in
+    print("Failed: \(error)")
+}
+.onComplete { duration in
+    print("Took \(duration) seconds")
+}
+```
+
+#### Distributed Tracing - Production Monitoring
+
+Use `trace()` for production-grade distributed tracing with OpenTelemetry support:
+
+```swift
+GenerateText { input in
+    "Process: \(input)"
+}
+.trace("TextGeneration", kind: .client)
+
+// Combine monitoring and tracing
+GenerateText { input in
+    "Process: \(input)"
+}
+.onError { error in
+    logger.error("Generation failed: \(error)")
+}
+.trace("TextGeneration")
+```
+
+#### Integration with Vapor
+
+SwiftAgent automatically integrates with Vapor's distributed tracing:
+
+```swift
+app.post("analyze") { req async throws -> Response in
+    // SwiftAgent traces will be nested under Vapor's request trace
+    let agent = MyAgent()
+    let result = try await agent.run(input)
+    return result
+}
+```
+
+The trace hierarchy will look like:
+```
+[Trace] Request abc-123
+├─ [Span] POST /analyze (Vapor) - 2.5s
+│  ├─ [Span] MyAgent - 2.3s
+│  │  ├─ [Span] ContentSafetyGuardrail - 0.1s ✓
+│  │  ├─ [Span] GenerateText - 2.0s
+│  │  └─ [Span] OutputGuardrail - 0.2s ✓
+│  └─ [Span] Response serialization - 0.2s
 ```
 
 ### Memory

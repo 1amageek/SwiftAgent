@@ -50,7 +50,6 @@ public protocol Agent: Step {
     // 新規追加（デフォルト実装あり）
     var maxTurns: Int { get }           // デフォルト: 10
     var guardrails: [any Guardrail] { get }  // デフォルト: []
-    var tracer: AgentTracer? { get }    // デフォルト: nil
 }
 ```
 

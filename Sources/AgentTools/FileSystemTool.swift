@@ -104,9 +104,9 @@ public struct FileSystemTool: OpenFoundationModels.Tool {
 
 /// The input structure for file system operations.
 @Generable
-public struct FileSystemInput: Codable, Sendable, ConvertibleFromGeneratedContent {
+public struct FileSystemInput {
     /// The operation to perform (e.g., read, write, or list).
-    @Guide(description: "The operation to perform", .enumeration(["read", "write", "list"]))
+    @Guide(description: "The operation to perform (read, write, or list)")
     public let operation: String
     
     /// The path to the file or directory.
@@ -432,6 +432,6 @@ private actor FileSystemActor {
 // Make FileSystemOutput conform to PromptRepresentable for compatibility
 extension FileSystemOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
+        return Prompt(description)
     }
 }

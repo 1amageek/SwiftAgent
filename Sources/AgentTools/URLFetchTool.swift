@@ -132,16 +132,10 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
 
 /// Input structure for URL fetching operations.
 @Generable
-public struct FetchInput: ConvertibleFromGeneratedContent {
+public struct FetchInput {
     /// The URL (HTTP or HTTPS) from which to fetch data.
+    @Guide(description: "The URL (HTTP or HTTPS) from which to fetch data")
     public let url: String
-    
-    /// Creates a new instance of `FetchInput`.
-    ///
-    /// - Parameter url: The URL to fetch data from.
-    public init(url: String) {
-        self.url = url
-    }
 }
 
 /// Output structure for URL fetch operations.
@@ -181,6 +175,6 @@ public struct URLFetchOutput: Codable, Sendable, CustomStringConvertible {
 // Make URLFetchOutput conform to PromptRepresentable for compatibility
 extension URLFetchOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
+        return Prompt(description)
     }
 }

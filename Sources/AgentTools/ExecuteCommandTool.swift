@@ -76,17 +76,10 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
 
 /// The input structure for command execution.
 @Generable
-public struct ExecuteCommandInput: Codable, Sendable, ConvertibleFromGeneratedContent {
+public struct ExecuteCommandInput {
     /// The shell command to execute.
     @Guide(description: "The shell command to execute")
     public let command: String
-    
-    /// Creates a new instance of `ExecuteCommandInput`.
-    ///
-    /// - Parameter command: The shell command to execute.
-    public init(command: String) {
-        self.command = command
-    }
 }
 
 /// Output structure for command execution operations.
@@ -320,6 +313,6 @@ private extension ExecuteCommandTool {
 // Make ExecuteCommandOutput conform to PromptRepresentable for compatibility
 extension ExecuteCommandOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
+        return Prompt(description)
     }
 }

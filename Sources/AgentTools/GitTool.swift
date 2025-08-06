@@ -198,6 +198,6 @@ public struct GitOutput: Codable, Sendable, CustomStringConvertible {
 // Make GitOutput conform to PromptRepresentable for compatibility
 extension GitOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(segments: [Prompt.Segment(text: description)])
+        return Prompt(description)
     }
 }

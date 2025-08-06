@@ -5,13 +5,27 @@ import SwiftAgent
 import OpenFoundationModels
 
 @Generable
-struct TestInput: ConvertibleFromGeneratedContent {
+struct TestInput {
     @Guide(description: "Test value")
     let value: String
 }
 
+// Test output type that conforms to PromptRepresentable
+struct TestOutput: PromptRepresentable {
+    let message: String
+    
+    init(_ message: String) {
+        self.message = message
+    }
+    
+    var promptRepresentation: Prompt {
+        return Prompt(message)
+    }
+}
+
 struct TestTool: OpenFoundationModels.Tool {
     typealias Arguments = TestInput
+    typealias Output = TestOutput
     
     static let name = "test"
     var name: String { Self.name }
@@ -19,8 +33,8 @@ struct TestTool: OpenFoundationModels.Tool {
     static let description = "Test tool for unit testing"
     var description: String { Self.description }
     
-    func call(arguments: TestInput) async throws -> ToolOutput {
-        return ToolOutput("Processed: \(arguments.value)")
+    func call(arguments: TestInput) async throws -> TestOutput {
+        return TestOutput("Processed: \(arguments.value)")
     }
 }
 

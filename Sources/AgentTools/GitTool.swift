@@ -135,8 +135,25 @@ public struct GitTool: OpenFoundationModels.Tool {
             }
         }
         
-        // Parse arguments array from space-separated string
-        let args = arguments.args.split(separator: " ").map(String.init)
+        // Parse arguments from JSON array
+        let args: [String]
+        if arguments.argsJson.isEmpty || arguments.argsJson == "[]" {
+            args = []
+        } else {
+            guard let jsonData = arguments.argsJson.data(using: .utf8) else {
+                throw FileSystemError.operationFailed(
+                    reason: "Invalid UTF-8 in argsJson"
+                )
+            }
+            
+            do {
+                args = try JSONDecoder().decode([String].self, from: jsonData)
+            } catch {
+                throw FileSystemError.operationFailed(
+                    reason: "Invalid JSON array in argsJson. Expected format: [\"arg1\", \"arg2\"]. Error: \(error.localizedDescription)"
+                )
+            }
+        }
         
         // Execute Git command
         return try await executeGitCommand(
@@ -260,9 +277,9 @@ public struct GitInput {
     @Guide(description: "Path to the Git repository (empty string means current directory)")
     public let repository: String
     
-    /// Space-separated arguments for the Git command.
-    @Guide(description: "Space-separated arguments (e.g., '--oneline -n 10')")
-    public let args: String
+    /// JSON array of arguments for the Git command.
+    @Guide(description: "Arguments as JSON array (e.g., [\"--oneline\", \"-n\", \"10\"])")
+    public let argsJson: String
     
     /// Whether to allow mutating operations.
     @Guide(description: "Allow mutating operations: 'true' or 'false' (default: false)")

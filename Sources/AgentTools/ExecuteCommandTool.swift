@@ -134,8 +134,25 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
             )
         }
         
-        // Parse arguments (space-separated)
-        let args = arguments.arguments.split(separator: " ").map(String.init)
+        // Parse arguments from JSON array
+        let args: [String]
+        if arguments.argsJson.isEmpty || arguments.argsJson == "[]" {
+            args = []
+        } else {
+            guard let jsonData = arguments.argsJson.data(using: .utf8) else {
+                throw FileSystemError.operationFailed(
+                    reason: "Invalid UTF-8 in argsJson"
+                )
+            }
+            
+            do {
+                args = try JSONDecoder().decode([String].self, from: jsonData)
+            } catch {
+                throw FileSystemError.operationFailed(
+                    reason: "Invalid JSON array in argsJson. Expected format: [\"arg1\", \"arg2\"]. Error: \(error.localizedDescription)"
+                )
+            }
+        }
         
         // Execute command
         return try await executeCommand(
@@ -154,9 +171,9 @@ public struct ExecuteCommandInput {
     @Guide(description: "Command name (e.g., 'git', 'ls', 'swift')")
     public let executable: String
     
-    /// Space-separated arguments for the command.
-    @Guide(description: "Space-separated arguments (e.g., 'status --porcelain')")
-    public let arguments: String
+    /// JSON array of arguments for the command.
+    @Guide(description: "Arguments as JSON array (e.g., [\"status\", \"--porcelain\"])")
+    public let argsJson: String
 }
 
 /// Output structure for command execution operations.

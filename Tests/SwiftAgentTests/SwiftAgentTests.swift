@@ -53,10 +53,10 @@ func testToolCallSimplified() async throws {
     #expect(tool.description.contains("Test tool"))
 }
 
-@Test("FileSystemTool Creation")
-func testFileSystemToolCreation() async throws {
-    let tool = FileSystemTool(workingDirectory: "/tmp")
-    #expect(tool.name == "filesystem")
+@Test("ReadTool Creation")
+func testReadToolCreation() async throws {
+    let tool = ReadTool(workingDirectory: "/tmp")
+    #expect(tool.name == "read")
     #expect(!tool.description.isEmpty)
 }
 

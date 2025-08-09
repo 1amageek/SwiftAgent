@@ -123,7 +123,7 @@ public struct GlobTool: OpenFoundationModels.Tool {
         let regex = try globToRegex(pattern)
         
         // Perform synchronous file enumeration in a detached Task
-        let results: [String] = try await Task<[String], Error>.detached {
+        let results: [String] = try await Task<[String], Error>.detached { [regex, basePath, isRecursive, fileType] in
             var results: [String] = []
             
             // Get file enumerator
@@ -138,11 +138,8 @@ public struct GlobTool: OpenFoundationModels.Tool {
                 return []
             }
             
-            // Get all objects from enumerator
-            let allObjects = enumerator.allObjects
-            
-            // Iterate through files
-            for object in allObjects {
+            // Iterate through files using nextObject() for memory efficiency
+            while let object = enumerator.nextObject() {
                 guard let fileURL = object as? URL else { continue }
                 
                 // Get relative path from base

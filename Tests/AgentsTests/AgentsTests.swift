@@ -44,8 +44,8 @@ struct AgentsTests {
     
     @Test("Agent with Tools")
     func agentWithTools() async throws {
-        let fileSystemTool = FileSystemTool(workingDirectory: "/tmp")
-        let agent = TestAgent(tools: [fileSystemTool])
+        let readTool = ReadTool(workingDirectory: "/tmp")
+        let agent = TestAgent(tools: [readTool])
         #expect(agent.tools.count == 1)
     }
     

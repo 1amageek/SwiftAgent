@@ -11,17 +11,19 @@ import SwiftAgent
 
 /// A tool for executing shell commands in a controlled environment.
 ///
-/// `ExecuteCommandTool` allows safe execution of shell commands or scripts while enforcing basic
-/// input validation and sanitization to prevent misuse or unsafe behavior.
+/// `ExecuteCommandTool` allows safe execution of commands through direct process
+/// invocation, avoiding shell interpretation and injection vulnerabilities.
 ///
 /// ## Features
-/// - Run system commands or shell scripts.
-/// - Perform non-interactive system operations.
+/// - Direct process execution (no shell interpretation)
+/// - Whitelist-based command validation
+/// - Timeout and output size limits
 ///
 /// ## Limitations
-/// - Does not support long-running processes.
-/// - Does not allow interactive commands.
-/// - Cannot execute commands requiring user input.
+/// - Only whitelisted commands allowed
+/// - No shell features (pipes, redirects, variables)
+/// - Maximum 60 second execution time
+/// - Maximum 1MB output size
 public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
@@ -30,56 +32,131 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public var name: String { Self.name }
     
     public static let description = """
-    A tool for executing shell commands in a controlled environment.
+    Executes commands directly without shell interpretation.
     
     Use this tool to:
-    - Run system commands
-    - Execute shell scripts
-    - Perform non-interactive system operations
+    - Run system commands safely
+    - Execute development tools
+    - Perform file operations
+    
+    Features:
+    - Direct process execution (no shell)
+    - Whitelist-based security
+    - 60 second timeout
+    - 1MB output limit
     
     Limitations:
-    - Does not support long-running processes
-    - Does not allow interactive commands
-    - Cannot execute commands requiring user input
+    - No shell features (pipes, redirects)
+    - Only allowed commands
+    - No interactive commands
     """
     
     public var description: String { Self.description }
     
+    // Allowed executables with their common paths
+    private let allowedCommands: [String: String] = [
+        // File operations
+        "ls": "/bin/ls",
+        "cat": "/bin/cat",
+        "head": "/usr/bin/head",
+        "tail": "/usr/bin/tail",
+        "wc": "/usr/bin/wc",
+        "sort": "/usr/bin/sort",
+        "uniq": "/usr/bin/uniq",
+        "find": "/usr/bin/find",
+        "which": "/usr/bin/which",
+        "file": "/usr/bin/file",
+        "stat": "/usr/bin/stat",
+        "du": "/usr/bin/du",
+        "df": "/bin/df",
+        
+        // Text processing
+        "grep": "/usr/bin/grep",
+        "sed": "/usr/bin/sed",
+        "awk": "/usr/bin/awk",
+        
+        // System info
+        "pwd": "/bin/pwd",
+        "whoami": "/usr/bin/whoami",
+        "date": "/bin/date",
+        "uname": "/usr/bin/uname",
+        "ps": "/bin/ps",
+        "top": "/usr/bin/top",
+        "uptime": "/usr/bin/uptime",
+        "free": "/usr/bin/free",
+        
+        // Development tools
+        "git": "/usr/bin/git",
+        "swift": "/usr/bin/swift",
+        "python3": "/usr/bin/python3",
+        "node": "/usr/local/bin/node",
+        "npm": "/usr/local/bin/npm",
+        "make": "/usr/bin/make",
+        "cmake": "/usr/local/bin/cmake",
+        "gcc": "/usr/bin/gcc",
+        "clang": "/usr/bin/clang",
+        
+        // Network (limited)
+        "ping": "/sbin/ping",
+        "nslookup": "/usr/bin/nslookup",
+        "dig": "/usr/bin/dig"
+        // curl and wget intentionally excluded (SSRF risk)
+    ]
+    
     public init() {}
     
     public func call(arguments: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
-        guard !arguments.command.isEmpty else {
-            let output = ExecuteCommandOutput(
-                success: false,
-                output: "Command cannot be empty",
-                metadata: ["error": "Command cannot be empty"]
-            )
-            return output
+        // Validate command
+        guard !arguments.executable.isEmpty else {
+            throw FileSystemError.operationFailed(reason: "Command cannot be empty")
         }
         
-        let sanitizedCommand = sanitizeCommand(arguments.command)
-        guard validateCommand(sanitizedCommand) else {
-            let output = ExecuteCommandOutput(
-                success: false,
-                output: "Unsafe command detected: \(arguments.command)",
-                metadata: ["error": "Unsafe command detected: \(arguments.command)"]
+        // Extract base command name
+        let commandName = URL(fileURLWithPath: arguments.executable).lastPathComponent
+        
+        // Check if command is allowed
+        guard let executablePath = allowedCommands[commandName] else {
+            throw FileSystemError.operationFailed(
+                reason: "Command '\(commandName)' is not allowed. Allowed commands: \(allowedCommands.keys.sorted().joined(separator: ", "))"
             )
-            return output
         }
         
-        return try await executeCommand(sanitizedCommand)
+        // Verify executable exists
+        let finalExecutablePath: String
+        if FileManager.default.fileExists(atPath: executablePath) {
+            finalExecutablePath = executablePath
+        } else if arguments.executable.hasPrefix("/") && FileManager.default.fileExists(atPath: arguments.executable) {
+            // Use provided path if it exists and command is allowed
+            finalExecutablePath = arguments.executable
+        } else {
+            throw FileSystemError.operationFailed(
+                reason: "Executable not found: \(executablePath)"
+            )
+        }
+        
+        // Parse arguments (space-separated)
+        let args = arguments.arguments.split(separator: " ").map(String.init)
+        
+        // Execute command
+        return try await executeCommand(
+            executable: finalExecutablePath,
+            arguments: args
+        )
     }
 }
-
 
 // MARK: - Input/Output Types
 
 /// The input structure for command execution.
 @Generable
 public struct ExecuteCommandInput {
-    /// The shell command to execute.
-    @Guide(description: "The shell command to execute")
-    public let command: String
+    /// The command executable name or path.
+    @Guide(description: "Command name (e.g., 'git', 'ls', 'swift')")
+    public let executable: String
+    
+    /// Space-separated arguments for the command.
+    @Guide(description: "Space-separated arguments (e.g., 'status --porcelain')")
+    public let arguments: String
 }
 
 /// Output structure for command execution operations.
@@ -90,28 +167,45 @@ public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
     /// The output from the command.
     public let output: String
     
+    /// The exit status code.
+    public let exitCode: Int32
+    
+    /// Execution time in seconds.
+    public let executionTime: Double
+    
+    /// Whether output was truncated.
+    public let truncated: Bool
+    
     /// Additional metadata about the operation.
     public let metadata: [String: String]
     
-    /// Creates a new instance of `ExecuteCommandOutput`.
-    ///
-    /// - Parameters:
-    ///   - success: Whether the command succeeded.
-    ///   - output: The command output.
-    ///   - metadata: Additional metadata.
-    public init(success: Bool, output: String, metadata: [String: String]) {
+    public init(
+        success: Bool,
+        output: String,
+        exitCode: Int32,
+        executionTime: Double,
+        truncated: Bool,
+        metadata: [String: String]
+    ) {
         self.success = success
         self.output = output
+        self.exitCode = exitCode
+        self.executionTime = executionTime
+        self.truncated = truncated
         self.metadata = metadata
     }
     
     public var description: String {
         let status = success ? "Success" : "Failed"
-        let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
+        let truncateNote = truncated ? " (truncated)" : ""
         
         return """
         Command Execution [\(status)]
-        Output: \(output)\(metadataString)
+        Exit code: \(exitCode)
+        Execution time: \(String(format: "%.3f", executionTime))s\(truncateNote)
+        
+        Output:
+        \(output)
         """
     }
 }
@@ -119,42 +213,50 @@ public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
 // MARK: - Private Methods
 
 private extension ExecuteCommandTool {
-    /// Executes a sanitized shell command and returns the result.
-    ///
-    /// - Parameter command: The sanitized shell command to execute.
-    /// - Returns: The result of the command execution.
-    /// - Throws: `ToolError` if the command fails.
-    func executeCommand(_ command: String) async throws -> ExecuteCommandOutput {
+    func executeCommand(executable: String, arguments: [String]) async throws -> ExecuteCommandOutput {
+        let startTime = Date()
+        
         return try await withThrowingTaskGroup(of: ExecuteCommandOutput.self) { group in
             let process = Process()
             let outputPipe = Pipe()
             let errorPipe = Pipe()
             
             // Configure process
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", command]
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
             process.standardOutput = outputPipe
             process.standardError = errorPipe
             
-            // Restrict environment for security
+            // Minimal, safe environment
             process.environment = [
                 "PATH": "/usr/bin:/bin:/usr/local/bin",
-                "HOME": "/tmp",
-                "USER": "agent",
-                "SHELL": "/bin/bash"
+                "HOME": NSHomeDirectory(),
+                "USER": NSUserName(),
+                "SHELL": "/bin/bash",
+                "LANG": "en_US.UTF-8"
             ]
             
-            // Add timeout task
+            // Add timeout task (60 seconds)
             group.addTask {
-                try await Task.sleep(for: .seconds(60)) // 60 second timeout
-                process.terminate()
-                throw ToolError.executionFailed("Command timed out after 60 seconds")
+                try await Task.sleep(for: .seconds(60))
+                if process.isRunning {
+                    process.terminate()
+                    // Wait briefly for graceful termination
+                    try await Task.sleep(for: .milliseconds(500))
+                    if process.isRunning {
+                        process.interrupt() // SIGINT
+                        try await Task.sleep(for: .milliseconds(500))
+                        if process.isRunning {
+                            // Force kill as last resort
+                            kill(process.processIdentifier, SIGKILL)
+                        }
+                    }
+                }
+                throw FileSystemError.operationFailed(reason: "Command timed out after 60 seconds")
             }
             
             // Add execution task
             group.addTask {
-                let startTime = Date()
-                
                 try process.run()
                 process.waitUntilExit()
                 
@@ -162,157 +264,59 @@ private extension ExecuteCommandTool {
                 
                 // Read output with size limit (1MB)
                 let maxOutputSize = 1024 * 1024
-                let outputHandle = outputPipe.fileHandleForReading
-                let errorHandle = errorPipe.fileHandleForReading
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
                 
-                var outputData = outputHandle.readDataToEndOfFile()
-                var errorData = errorHandle.readDataToEndOfFile()
-                
-                // Truncate data if too large
-                if outputData.count > maxOutputSize {
-                    outputData = outputData.prefix(maxOutputSize)
-                }
-                if errorData.count > maxOutputSize {
-                    errorData = errorData.prefix(maxOutputSize)
+                // Combine and truncate if needed
+                var combinedData = outputData
+                if !errorData.isEmpty {
+                    combinedData.append("\n[STDERR]\n".data(using: .utf8) ?? Data())
+                    combinedData.append(errorData)
                 }
                 
-                // Combine stdout and stderr
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-                let combinedOutput = output + (errorOutput.isEmpty ? "" : "\n[STDERR]\n" + errorOutput)
+                let truncated = combinedData.count > maxOutputSize
+                if truncated {
+                    combinedData = combinedData.prefix(maxOutputSize)
+                }
                 
-                // Final truncation check
-                let finalOutput = combinedOutput.count > maxOutputSize 
-                    ? String(combinedOutput.prefix(maxOutputSize)) + "\n... [Output truncated]"
-                    : combinedOutput
+                let output = String(data: combinedData, encoding: .utf8) ?? ""
+                let finalOutput = truncated ? output + "\n... [Output truncated]" : output
                 
                 let metadata: [String: String] = [
-                    "status": String(process.terminationStatus),
-                    "command": command,
+                    "command": executable,
+                    "arguments": arguments.joined(separator: " "),
+                    "exit_code": String(process.terminationStatus),
                     "execution_time": String(format: "%.3f", executionTime),
-                    "output_size": String(finalOutput.count),
-                    "truncated": String(combinedOutput.count > maxOutputSize)
+                    "output_size": String(combinedData.count),
+                    "truncated": String(truncated)
                 ]
                 
                 return ExecuteCommandOutput(
                     success: process.terminationStatus == 0,
                     output: finalOutput,
+                    exitCode: process.terminationStatus,
+                    executionTime: executionTime,
+                    truncated: truncated,
                     metadata: metadata
                 )
             }
             
             // Wait for either completion or timeout
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else {
-                throw ToolError.executionFailed("No result from command execution")
+            for try await result in group {
+                // Cancel remaining tasks
+                group.cancelAll()
+                return result
             }
             
-            return result
+            // Should not reach here
+            throw FileSystemError.operationFailed(reason: "Unexpected execution error")
         }
-    }
-    
-    /// Validates if a command is safe to execute.
-    ///
-    /// - Parameter command: The command to validate.
-    /// - Returns: `true` if the command is considered safe, `false` otherwise.
-    func validateCommand(_ command: String) -> Bool {
-        let trimmedCommand = command.trimmingCharacters(in: .whitespaces)
-        
-        // Check for empty commands
-        guard !trimmedCommand.isEmpty else { return false }
-        
-        // Dangerous patterns to block
-        let dangerousPatterns = [
-            // File system destruction
-            "rm -rf /", "rm -rf /*", "rm -rf ~", "rm -rf .*",
-            "rmdir /", "delete /",
-            
-            // System control
-            "shutdown", "reboot", "halt", "poweroff", "systemctl",
-            "service ", "init ", "telinit",
-            
-            // Process manipulation
-            "kill -9", "killall", "pkill",
-            
-            // Network/system access
-            "sudo ", "su ", "doas ",
-            
-            // Fork bombs and DoS
-            ":(){ :|:& };:", ":(){ :|: & }; :",
-            "while true; do", "for((;;))",
-            
-            // File system operations
-            "mkfs", "fdisk", "dd if=", "dd of=/dev/",
-            "mount ", "umount ", "swapon", "swapoff",
-            
-            // Dangerous redirections
-            "> /dev/", ">> /dev/", "< /dev/random"
-        ]
-        
-        // Check for dangerous patterns
-        let lowercaseCommand = trimmedCommand.lowercased()
-        for pattern in dangerousPatterns {
-            if lowercaseCommand.contains(pattern.lowercased()) {
-                return false
-            }
-        }
-        
-        // Block shell operators that can chain commands or redirect
-        let shellOperators = [";", "&&", "||", "|", "&", ">", "<", ">>", "<<", "`", "$("]
-        for op in shellOperators {
-            if trimmedCommand.contains(op) {
-                return false
-            }
-        }
-        
-        // Basic whitelist approach - allow common safe commands
-        let allowedCommands = [
-            "echo", "cat", "ls", "pwd", "whoami", "date", "uname",
-            "head", "tail", "grep", "wc", "sort", "uniq",
-            "find", "which", "type", "file", "stat",
-            "ps", "top", "uptime", "free", "df", "du",
-            "curl", "wget", "ping", "nslookup", "dig",
-            "git", "python3", "node", "npm", "swift", "java",
-            "make", "cmake", "gcc", "clang"
-        ]
-        
-        let commandParts = trimmedCommand.components(separatedBy: .whitespaces)
-        guard let firstCommand = commandParts.first else { return false }
-        
-        // Extract base command name (remove path if present)
-        let baseCommand = URL(fileURLWithPath: firstCommand).lastPathComponent
-        
-        return allowedCommands.contains(baseCommand)
-    }
-    
-    /// Sanitizes a command input.
-    ///
-    /// - Parameter command: The command to sanitize.
-    /// - Returns: A sanitized version of the command.
-    func sanitizeCommand(_ command: String) -> String {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Replace multiple spaces with single space
-        let singleSpaced = trimmed.replacingOccurrences(
-            of: " +",
-            with: " ",
-            options: .regularExpression
-        )
-        
-        // Remove null bytes and control characters
-        let filtered = singleSpaced.filter { char in
-            let scalar = char.unicodeScalars.first?.value ?? 0
-            // Allow printable ASCII and space/tab
-            return (scalar >= 32 && scalar < 127) || scalar == 9
-        }
-        
-        return filtered
     }
 }
 
-// Make ExecuteCommandOutput conform to PromptRepresentable for compatibility
+// Make ExecuteCommandOutput conform to PromptRepresentable
 extension ExecuteCommandOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(description)
+        Prompt(description)
     }
 }

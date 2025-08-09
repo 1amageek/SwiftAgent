@@ -1,11 +1,30 @@
+//
+//  GitTool.swift
+//  SwiftAgent
+//
+//  Created by Norikazu Muramoto on 2025/01/13.
+//
+
 import Foundation
 import OpenFoundationModels
 import SwiftAgent
 
-/// A tool for executing Git commands safely.
+/// A tool for executing Git commands in a repository.
 ///
-/// `GitTool` provides a controlled interface for executing Git commands while ensuring
-/// basic validation and safety checks.
+/// `GitTool` provides controlled Git operations with safety checks
+/// to prevent destructive actions without explicit permission.
+///
+/// ## Features
+/// - Safe Git command execution
+/// - Destructive operation protection
+/// - Repository validation
+/// - Timeout and output limits
+///
+/// ## Limitations
+/// - Only whitelisted Git subcommands
+/// - Destructive operations require explicit permission
+/// - Maximum 60 second execution time
+/// - Maximum 1MB output size
 public struct GitTool: OpenFoundationModels.Tool {
     public typealias Arguments = GitInput
     public typealias Output = GitOutput
@@ -14,190 +33,296 @@ public struct GitTool: OpenFoundationModels.Tool {
     public var name: String { Self.name }
     
     public static let description = """
-    A tool for executing Git commands safely within a repository.
+    Executes Git commands in a repository.
     
     Use this tool to:
-    - Execute basic Git operations
-    - Manage repository state
-    - Access Git information
+    - Check repository status
+    - View commit history
+    - Show diffs and changes
+    - Perform version control operations
+    
+    Features:
+    - Safe command execution
+    - Destructive operation protection
+    - 60 second timeout
+    - 1MB output limit
     
     Limitations:
-    - Complex Git operations requiring interaction are not supported
-    - Some Git commands may be restricted for safety
+    - Only allowed Git subcommands
+    - Destructive operations need allowMutating=true
     """
     
     public var description: String { Self.description }
     
     private let gitPath: String
     
+    // Read-only Git commands (safe by default)
+    private let readOnlyCommands: Set<String> = [
+        "status", "log", "diff", "show", "branch", "tag",
+        "ls-files", "ls-tree", "cat-file", "rev-parse",
+        "describe", "shortlog", "blame", "grep",
+        "remote", "submodule", "worktree"
+    ]
+    
+    // Mutating Git commands (require explicit permission)
+    private let mutatingCommands: Set<String> = [
+        "add", "commit", "push", "pull", "fetch", "merge",
+        "rebase", "reset", "revert", "checkout", "switch",
+        "restore", "rm", "mv", "clean", "stash",
+        "cherry-pick", "am", "apply", "init", "clone"
+    ]
+    
     public init(gitPath: String = "/usr/bin/git") {
         self.gitPath = gitPath
     }
     
     public func call(arguments: GitInput) async throws -> GitOutput {
+        // Validate Git command
+        let command = arguments.command.trimmingCharacters(in: .whitespaces)
+        guard !command.isEmpty else {
+            throw FileSystemError.operationFailed(reason: "Git command cannot be empty")
+        }
+        
+        // Check if command is allowed
+        let isReadOnly = readOnlyCommands.contains(command)
+        let isMutating = mutatingCommands.contains(command)
+        
+        guard isReadOnly || isMutating else {
+            throw FileSystemError.operationFailed(
+                reason: "Git command '\(command)' is not allowed. Allowed commands: \(Array(readOnlyCommands.union(mutatingCommands)).sorted().joined(separator: ", "))"
+            )
+        }
+        
+        // Check permission for mutating commands
+        if isMutating {
+            switch arguments.allowMutating.lowercased() {
+            case "true":
+                break // Permission granted
+            case "false", "":
+                throw FileSystemError.operationFailed(
+                    reason: "Mutating Git command '\(command)' requires allowMutating='true'"
+                )
+            default:
+                throw FileSystemError.operationFailed(
+                    reason: "allowMutating must be 'true' or 'false', got: '\(arguments.allowMutating)'"
+                )
+            }
+        }
+        
         // Validate repository path if specified
+        let workingDirectory: String
         if !arguments.repository.isEmpty {
             guard FileManager.default.fileExists(atPath: arguments.repository) else {
-                let output = GitOutput(
-                    success: false,
-                    output: "Repository not found: \(arguments.repository)",
-                    exitCode: -1,
-                    metadata: ["error": "Repository not found"]
-                )
-                return output
+                throw FileSystemError.fileNotFound(path: arguments.repository)
             }
             
-            let gitDir = URL(fileURLWithPath: arguments.repository).appendingPathComponent(".git").path
-            guard FileManager.default.fileExists(atPath: gitDir) else {
-                let output = GitOutput(
-                    success: false,
-                    output: "Not a Git repository: \(arguments.repository)",
-                    exitCode: -1,
-                    metadata: ["error": "Not a Git repository"]
+            let gitDir = URL(fileURLWithPath: arguments.repository).appendingPathComponent(".git")
+            guard FileManager.default.fileExists(atPath: gitDir.path) else {
+                throw FileSystemError.operationFailed(
+                    reason: "Not a Git repository: \(arguments.repository)"
                 )
-                return output
+            }
+            workingDirectory = arguments.repository
+        } else {
+            workingDirectory = FileManager.default.currentDirectoryPath
+            
+            // Check if current directory is a Git repository
+            let gitDir = URL(fileURLWithPath: workingDirectory).appendingPathComponent(".git")
+            guard FileManager.default.fileExists(atPath: gitDir.path) else {
+                throw FileSystemError.operationFailed(
+                    reason: "Not a Git repository: \(workingDirectory)"
+                )
             }
         }
         
-        // Validate Git command
-        guard isValidGitCommand(arguments.command) else {
-            let output = GitOutput(
-                success: false,
-                output: "Invalid or unsafe Git command: \(arguments.command)",
-                exitCode: -1,
-                metadata: ["error": "Invalid Git command"]
-            )
-            return output
-        }
+        // Parse arguments array from space-separated string
+        let args = arguments.args.split(separator: " ").map(String.init)
         
         // Execute Git command
-        let result = await executeGitCommand(arguments)
-        return result
+        return try await executeGitCommand(
+            command: command,
+            arguments: args,
+            workingDirectory: workingDirectory
+        )
     }
     
-    private func isValidGitCommand(_ command: String) -> Bool {
-        let allowedCommands = [
-            "status", "log", "diff", "add", "commit", "push", "pull",
-            "branch", "checkout", "merge", "fetch", "remote", "tag",
-            "reset", "revert", "stash", "show", "clone", "init"
-        ]
-        return allowedCommands.contains(command)
-    }
-    
-    private func executeGitCommand(_ input: GitInput) async -> GitOutput {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: gitPath)
+    private func executeGitCommand(command: String, arguments: [String], workingDirectory: String) async throws -> GitOutput {
+        let startTime = Date()
         
-        var arguments = [input.command]
-        if !input.args.isEmpty {
-            arguments.append(contentsOf: input.args.split(separator: " ").map(String.init))
-        }
-        process.arguments = arguments
-        
-        if !input.repository.isEmpty {
-            process.currentDirectoryURL = URL(fileURLWithPath: input.repository)
-        }
-        
-        let pipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = errorPipe
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
+        return try await withThrowingTaskGroup(of: GitOutput.self) { group in
+            let process = Process()
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
             
-            let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            // Configure process
+            process.executableURL = URL(fileURLWithPath: gitPath)
+            process.arguments = [command] + arguments
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
             
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let error = String(data: errorData, encoding: .utf8) ?? ""
+            // Git-specific environment
+            process.environment = [
+                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "HOME": NSHomeDirectory(),
+                "USER": NSUserName(),
+                "GIT_TERMINAL_PROMPT": "0", // Disable prompts
+                "GIT_ASKPASS": "echo", // Prevent password prompts
+                "LANG": "en_US.UTF-8"
+            ]
             
-            let exitCode = process.terminationStatus
-            let success = exitCode == 0
+            // Add timeout task (60 seconds)
+            group.addTask {
+                try await Task.sleep(for: .seconds(60))
+                if process.isRunning {
+                    process.terminate()
+                    // Wait briefly for graceful termination
+                    try await Task.sleep(for: .milliseconds(500))
+                    if process.isRunning {
+                        // Force kill
+                        kill(process.processIdentifier, SIGKILL)
+                    }
+                }
+                throw FileSystemError.operationFailed(reason: "Git command timed out after 60 seconds")
+            }
             
-            return GitOutput(
-                success: success,
-                output: success ? output : error,
-                exitCode: Int(exitCode),
-                metadata: [
-                    "command": input.command,
-                    "repository": input.repository.isEmpty ? "current directory" : input.repository,
-                    "exit_code": String(exitCode)
+            // Add execution task
+            group.addTask {
+                try process.run()
+                process.waitUntilExit()
+                
+                let executionTime = Date().timeIntervalSince(startTime)
+                
+                // Read output with size limit (1MB)
+                let maxOutputSize = 1024 * 1024
+                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                
+                // Combine stdout and stderr
+                var combinedData = outputData
+                if !errorData.isEmpty && process.terminationStatus != 0 {
+                    // Only include stderr for failures
+                    combinedData.append("\n[STDERR]\n".data(using: .utf8) ?? Data())
+                    combinedData.append(errorData)
+                }
+                
+                // Truncate if needed
+                let truncated = combinedData.count > maxOutputSize
+                if truncated {
+                    combinedData = combinedData.prefix(maxOutputSize)
+                }
+                
+                let output = String(data: combinedData, encoding: .utf8) ?? ""
+                let finalOutput = truncated ? output + "\n... [Output truncated]" : output
+                
+                let metadata: [String: String] = [
+                    "command": "git \(command) \(arguments.joined(separator: " "))",
+                    "repository": workingDirectory,
+                    "exit_code": String(process.terminationStatus),
+                    "execution_time": String(format: "%.3f", executionTime),
+                    "output_size": String(combinedData.count),
+                    "truncated": String(truncated)
                 ]
-            )
-        } catch {
-            return GitOutput(
-                success: false,
-                output: "Failed to execute Git command: \(error.localizedDescription)",
-                exitCode: -1,
-                metadata: [
-                    "command": input.command,
-                    "error": error.localizedDescription
-                ]
-            )
+                
+                return GitOutput(
+                    success: process.terminationStatus == 0,
+                    output: finalOutput,
+                    exitCode: process.terminationStatus,
+                    executionTime: executionTime,
+                    truncated: truncated,
+                    metadata: metadata
+                )
+            }
+            
+            // Wait for either completion or timeout
+            for try await result in group {
+                // Cancel remaining tasks
+                group.cancelAll()
+                return result
+            }
+            
+            // Should not reach here
+            throw FileSystemError.operationFailed(reason: "Unexpected Git execution error")
         }
     }
 }
 
+// MARK: - Input/Output Types
+
 /// Input structure for Git operations.
 @Generable
-public struct GitInput: Codable, Sendable, ConvertibleFromGeneratedContent {
-    /// The Git command to execute.
-    @Guide(description: "The Git command to execute", .enumeration(["status", "log", "diff", "add", "commit", "push", "pull", "branch", "checkout", "merge", "fetch", "remote", "tag", "reset", "revert", "stash", "show", "clone", "init"]))
+public struct GitInput {
+    /// The Git subcommand to execute.
+    @Guide(description: "Git subcommand (e.g., 'status', 'log', 'commit')")
     public let command: String
     
     /// Path to the Git repository (empty string means current directory).
     @Guide(description: "Path to the Git repository (empty string means current directory)")
     public let repository: String
     
-    /// Additional arguments for the Git command (space-separated, empty string if none).
-    @Guide(description: "Additional arguments for the Git command (space-separated, empty string if none)")
+    /// Space-separated arguments for the Git command.
+    @Guide(description: "Space-separated arguments (e.g., '--oneline -n 10')")
     public let args: String
+    
+    /// Whether to allow mutating operations.
+    @Guide(description: "Allow mutating operations: 'true' or 'false' (default: false)")
+    public let allowMutating: String
 }
 
 /// Output structure for Git operations.
 public struct GitOutput: Codable, Sendable, CustomStringConvertible {
-    /// Whether the Git command executed successfully.
+    /// Whether the command executed successfully.
     public let success: Bool
     
     /// The output from the Git command.
     public let output: String
     
-    /// The exit code from the Git process.
-    public let exitCode: Int
+    /// The exit status code.
+    public let exitCode: Int32
+    
+    /// Execution time in seconds.
+    public let executionTime: Double
+    
+    /// Whether output was truncated.
+    public let truncated: Bool
     
     /// Additional metadata about the operation.
     public let metadata: [String: String]
     
-    /// Creates a new instance of `GitOutput`.
-    ///
-    /// - Parameters:
-    ///   - success: Whether the command succeeded.
-    ///   - output: The command output.
-    ///   - exitCode: The process exit code.
-    ///   - metadata: Additional metadata.
-    public init(success: Bool, output: String, exitCode: Int, metadata: [String: String]) {
+    public init(
+        success: Bool,
+        output: String,
+        exitCode: Int32,
+        executionTime: Double,
+        truncated: Bool,
+        metadata: [String: String]
+    ) {
         self.success = success
         self.output = output
         self.exitCode = exitCode
+        self.executionTime = executionTime
+        self.truncated = truncated
         self.metadata = metadata
     }
     
     public var description: String {
         let status = success ? "Success" : "Failed"
-        let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
+        let truncateNote = truncated ? " (truncated)" : ""
         
         return """
         Git Operation [\(status)]
-        Output: \(output)\(metadataString)
+        Exit code: \(exitCode)
+        Execution time: \(String(format: "%.3f", executionTime))s\(truncateNote)
+        
+        Output:
+        \(output)
         """
     }
 }
 
-// Make GitOutput conform to PromptRepresentable for compatibility
+// Make GitOutput conform to PromptRepresentable
 extension GitOutput: PromptRepresentable {
     public var promptRepresentation: Prompt {
-        return Prompt(description)
+        Prompt(description)
     }
 }

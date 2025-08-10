@@ -34,7 +34,8 @@ public struct ResearchAgent: Agent {
             guardrails: .default,
             tools: [
                 URLFetchTool(),
-                FileSystemTool(workingDirectory: FileManager.default.currentDirectoryPath),
+                ReadTool(workingDirectory: FileManager.default.currentDirectoryPath),
+                WriteTool(workingDirectory: FileManager.default.currentDirectoryPath),
                 ExecuteCommandTool()
             ],
             instructions: Instructions("""
@@ -42,7 +43,8 @@ public struct ResearchAgent: Agent {
             
             Available tools:
             - url_fetch: Fetch content from web URLs for research
-            - filesystem: Read and write files, list directories
+            - read: Read file contents with line numbers
+            - write: Write content to files
             - execute: Run command-line tools for system operations
             
             Use these tools when helpful to provide comprehensive research and analysis.

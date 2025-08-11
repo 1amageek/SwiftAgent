@@ -232,61 +232,129 @@ Parallel<String, Int> {
 
 ## Built-in Tools
 
-SwiftAgent includes several pre-built tools:
+SwiftAgent includes a comprehensive suite of tools for file operations, searching, command execution, and more. See the [Tool Reference](#tool-reference) section below for detailed information about each tool.
 
-### FileSystemTool
+### Quick Examples
 
-Read and write files:
+#### File Operations
+```swift
+// Reading files
+let readTool = ReadTool()
+let content = try await readTool.call(ReadInput(path: "config.json", startLine: 1, endLine: 50))
+
+// Writing files
+let writeTool = WriteTool()
+let result = try await writeTool.call(WriteInput(path: "output.txt", content: "Hello, World!"))
+
+// Editing files
+let editTool = EditTool()
+let edited = try await editTool.call(EditInput(
+    path: "main.swift",
+    oldString: "print(\"old\")",
+    newString: "print(\"new\")",
+    replaceAll: "true"
+))
+```
+
+#### Search Operations
+```swift
+// Search with grep
+let grepTool = GrepTool()
+let matches = try await grepTool.call(GrepInput(
+    pattern: "TODO:",
+    filePattern: "*.swift",
+    basePath: "./src",
+    ignoreCase: "false",
+    contextBefore: 2,
+    contextAfter: 2
+))
+
+// Find files with glob
+let globTool = GlobTool()
+let files = try await globTool.call(GlobInput(
+    pattern: "**/*.md",
+    basePath: ".",
+    fileType: "file"
+))
+```
+
+#### System Operations
+```swift
+// Execute commands
+let executeTool = ExecuteCommandTool()
+let output = try await executeTool.call(ExecuteCommandInput(
+    command: "swift build",
+    timeout: 30
+))
+
+// Git operations
+let gitTool = GitTool()
+let status = try await gitTool.call(GitInput(
+    command: "status",
+    args: "--short"
+))
+
+// Fetch URLs
+let urlTool = URLFetchTool()
+let webpage = try await urlTool.call(URLInput(url: "https://api.example.com/data"))
+```
+
+## Tool Reference
+
+| Tool Name | Purpose | Main Features | Common Use Cases |
+|-----------|---------|---------------|------------------|
+| **ReadTool** | Read file contents with line numbers | • Line number formatting (123→content)<br>• Range selection (startLine, endLine)<br>• UTF-8 text file support<br>• Max file size: 1MB | • View source code<br>• Read configuration files<br>• Inspect specific line ranges<br>• Debug file contents |
+| **WriteTool** | Write content to files | • Create new files or overwrite existing<br>• Automatic parent directory creation<br>• Atomic write operations<br>• UTF-8 encoding only | • Save generated content<br>• Create configuration files<br>• Export data<br>• Write logs or reports |
+| **EditTool** | Find and replace text in files | • Single or all occurrences replacement<br>• Preview changes before applying<br>• Atomic operations<br>• Validates old/new strings | • Fix bugs in code<br>• Update configuration values<br>• Refactor variable names<br>• Correct typos |
+| **MultiEditTool** | Apply multiple edits in one transaction | • Batch find/replace operations<br>• Transactional (all or nothing)<br>• Order-preserving execution<br>• JSON-based edit specification | • Complex refactoring<br>• Multiple related changes<br>• Atomic updates<br>• Code migrations |
+| **GrepTool** | Search file contents using regex | • Regular expression patterns<br>• Case-insensitive option<br>• Context lines (before/after)<br>• Multi-file search | • Find TODO comments<br>• Locate function usage<br>• Search error messages<br>• Code analysis |
+| **GlobTool** | Find files using glob patterns | • Wildcard patterns (*, **, ?)<br>• File type filtering<br>• Recursive directory traversal<br>• Sorted results | • Find files by extension<br>• List directory contents<br>• Discover project structure<br>• Batch file operations |
+| **ExecuteCommandTool** | Execute shell commands | • Configurable timeout<br>• stdout/stderr capture<br>• Working directory support<br>• Process control | • Build projects<br>• Run tests<br>• System operations<br>• Script execution |
+| **GitTool** | Perform Git operations | • All git commands supported<br>• Argument passing<br>• Repository operations<br>• Output capture | • Version control<br>• Commit changes<br>• Branch management<br>• Check status |
+| **URLFetchTool** | Fetch content from URLs | • HTTP/HTTPS support<br>• Content type handling<br>• Error handling<br>• Response parsing | • API calls<br>• Web scraping<br>• Data fetching<br>• External integrations |
+
+### Tool Integration with AI Models
+
+All tools implement the `OpenFoundationModels.Tool` protocol and can be used with AI models:
 
 ```swift
+let session = LanguageModelSession(
+    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+    tools: [
+        ReadTool(),
+        WriteTool(),
+        EditTool(),
+        GrepTool(),
+        ExecuteCommandTool()
+    ],
+    instructions: Instructions("You are a code assistant with file system access.")
+)
+```
+
+### Tool Input/Output Types
+
+All tools use `@Generable` structs for type-safe input and provide structured output:
+
+```swift
+// Example: ReadTool
 @Generable
-struct FileSystemInput {
-    @Guide(description: "Operation: 'read' or 'write'")
-    let operation: String
-    @Guide(description: "File path")
+struct ReadInput {
+    @Guide(description: "File path to read")
     let path: String
-    @Guide(description: "Content to write (for write operation)")
-    let content: String?
+    @Guide(description: "Starting line number (1-based, 0 for beginning)")
+    let startLine: Int
+    @Guide(description: "Ending line number (0 for end of file)")
+    let endLine: Int
 }
-```
 
-### ExecuteCommandTool
-
-Execute shell commands:
-
-```swift
-@Generable
-struct ExecuteCommandInput {
-    @Guide(description: "Command to execute")
-    let command: String
-    @Guide(description: "Optional timeout in seconds")
-    let timeout: Int?
-}
-```
-
-### URLFetchTool
-
-Fetch content from URLs:
-
-```swift
-@Generable
-struct URLInput {
-    @Guide(description: "URL to fetch")
-    let url: String
-}
-```
-
-### GitTool
-
-Git operations:
-
-```swift
-@Generable
-struct GitInput {
-    @Guide(description: "Git command")
-    let command: String
-    @Guide(description: "Additional arguments")
-    let args: String?
+// Output includes metadata
+struct ReadOutput {
+    let content: String        // Formatted with line numbers
+    let totalLines: Int       // Total lines in file
+    let linesRead: Int        // Lines actually read
+    let path: String          // Normalized path
+    let startLine: Int        // Actual start line
+    let endLine: Int          // Actual end line
 }
 ```
 

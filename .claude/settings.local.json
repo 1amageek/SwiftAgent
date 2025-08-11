@@ -14,7 +14,8 @@
       "Bash(grep:*)",
       "Bash(ls:*)",
       "Bash(cp:*)",
-      "Bash(swift build:*)"
+      "Bash(swift build:*)",
+      "Bash(swift:*)"
     ],
     "deny": []
   }

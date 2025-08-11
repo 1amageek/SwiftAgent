@@ -8,21 +8,21 @@ struct AgentsTests {
     
     // Test Agent を定義（テスト用）
     struct TestAgent: Agent {
-        let instructions: String
-        let tools: [any OpenFoundationModels.Tool]
+        @Session
+        var session: LanguageModelSession
         
         init(instructions: String = "You are a helpful assistant", tools: [any OpenFoundationModels.Tool] = []) {
-            self.instructions = instructions
-            self.tools = tools
+            self._session = Session(wrappedValue: LanguageModelSession(
+                model: SystemLanguageModel.default,
+                tools: tools,
+                instructions: Instructions(instructions)
+            ))
         }
         
         @StepBuilder
         var body: some Step {
-            GenerateText<String>(
-                tools: tools,
-                instructions: instructions
-            ) { input in
-                input
+            GenerateText<String>(session: $session) { input in
+                Prompt(input)
             }
         }
     }
@@ -31,22 +31,24 @@ struct AgentsTests {
     func basicAgentCreation() async throws {
         // Test basic agent creation
         let agent = TestAgent()
-        #expect(agent.instructions == "You are a helpful assistant")
-        #expect(agent.tools.isEmpty)
+        // セッションが正しく作成されていることを確認
+        #expect(agent.session.instructions != nil)
+        #expect(agent.session.tools.isEmpty)
     }
     
     @Test("Agent with Instructions")
     func agentWithInstructions() async throws {
-        let instructions = "You are a helpful assistant"
+        let instructions = "You are a specialized assistant"
         let agent = TestAgent(instructions: instructions)
-        #expect(agent.instructions == instructions)
+        // Instructions が設定されていることを確認（内容は直接アクセスできない）
+        #expect(agent.session.instructions != nil)
     }
     
     @Test("Agent with Tools")
     func agentWithTools() async throws {
         let readTool = ReadTool(workingDirectory: "/tmp")
         let agent = TestAgent(tools: [readTool])
-        #expect(agent.tools.count == 1)
+        #expect(agent.session.tools.count == 1)
     }
     
     @Test("Agent Protocol Conformance")

@@ -84,6 +84,8 @@ graph TB
 - 🔄 **Async/Await Support**: Built for modern Swift concurrency
 - 🎭 **Protocol-Based**: Flexible and extensible architecture
 - 📊 **State Management**: Memory and Relay for state handling
+- 🎨 **@Session**: Elegant session management with property wrapper
+- 🏗️ **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
 - 🔍 **Monitoring**: Built-in monitoring and distributed tracing support
 - 📡 **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
 
@@ -116,9 +118,103 @@ public protocol Agent: Step {
 }
 ```
 
+## Session Management
+
+SwiftAgent provides elegant session management through the `@Session` property wrapper, enabling reusable and shared language model sessions across your agents.
+
+### @Session Property Wrapper
+
+The `@Session` wrapper simplifies session creation and management:
+
+```swift
+struct MyAgent {
+    // Create a session with InstructionsBuilder
+    @Session {
+        "You are a helpful assistant"
+        "Be concise and accurate"
+        if debugMode {
+            "Include debug information"
+        }
+    }
+    var session
+    
+    // Or with explicit initialization
+    @Session
+    var customSession = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+        instructions: Instructions("You are an expert")
+    )
+}
+```
+
+### Using Sessions with Generate Steps
+
+Pass sessions to Generate steps using the `$` prefix for Relay access:
+
+```swift
+struct ContentAgent {
+    @Session {
+        "You are a content creator"
+        "Focus on clarity and engagement"
+    }
+    var session
+    
+    var body: some Step {
+        GenerateText(session: $session) { input in
+            Prompt {
+                "Create content about: \(input)"
+                if detailed {
+                    "Include comprehensive details"
+                }
+            }
+        }
+    }
+}
+```
+
 ## AI Model Integration
 
-SwiftAgent uses OpenFoundationModels for AI model integration, supporting any model provider:
+SwiftAgent uses OpenFoundationModels for AI model integration with powerful Builder APIs:
+
+### Dynamic Instructions with InstructionsBuilder
+
+```swift
+// Build instructions dynamically with conditions and loops
+let session = LanguageModelSession {
+    "You are an AI assistant"
+    
+    if userPreferences.verbose {
+        "Provide detailed explanations"
+    }
+    
+    for expertise in userExpertiseAreas {
+        "You have expertise in \(expertise)"
+    }
+    
+    "Always be helpful and accurate"
+}
+```
+
+### Dynamic Prompts with PromptBuilder
+
+```swift
+// Build prompts dynamically
+GenerateText(session: $session) { input in
+    Prompt {
+        "User request: \(input)"
+        
+        if includeContext {
+            "Context: \(contextInfo)"
+        }
+        
+        for example in relevantExamples {
+            "Example: \(example)"
+        }
+        
+        "Please provide a comprehensive response"
+    }
+}
+```
 
 ### Using Different Model Providers
 
@@ -128,14 +224,18 @@ import OpenFoundationModels
 import OpenFoundationModelsOpenAI
 
 // Create a session with OpenAI
-let session = LanguageModelSession(
+@Session
+var openAISession = LanguageModelSession(
     model: OpenAIModelFactory.gpt4o(apiKey: "your-api-key"),
     instructions: Instructions("You are a helpful assistant.")
 )
 
-// Use in a Generate step
-let step = Generate<String, Story>(session: session) { input in
-    input
+// Use in a Generate step with PromptBuilder
+let step = Generate<String, Story>(session: $openAISession) { input in
+    Prompt {
+        "Write a story based on: \(input)"
+        "Make it engaging and creative"
+    }
 }
 ```
 
@@ -164,7 +264,7 @@ Transform<String, Int> { input in
 
 ### Generate
 
-Generate structured output using AI models:
+Generate structured output using AI models with Builder APIs:
 
 ```swift
 @Generable
@@ -175,22 +275,49 @@ struct Story {
     let content: String
 }
 
-Generate<String, Story>(
-    session: session
-) { input in
-    "Write a story about: \(input)"
+// Using @Session and PromptBuilder
+struct StoryGenerator {
+    @Session {
+        "You are a creative writer"
+        "Focus on engaging narratives"
+    }
+    var session
+    
+    var generator: some Step {
+        Generate<String, Story>(session: $session) { input in
+            Prompt {
+                "Write a story about: \(input)"
+                "Include vivid descriptions"
+                if includeDialogue {
+                    "Add realistic dialogue"
+                }
+            }
+        }
+    }
 }
 ```
 
 ### GenerateText
 
-Generate string output using AI models:
+Generate string output using AI models with dynamic builders:
 
 ```swift
-GenerateText<String>(
-    instructions: "You are a creative writer."
-) { input in
-    input
+// Using @Session with shared configuration
+struct TextGenerator {
+    @Session {
+        "You are a creative writer"
+        "Use vivid and engaging language"
+    }
+    var session
+    
+    func generate(_ topic: String) -> some Step {
+        GenerateText(session: $session) { input in
+            Prompt {
+                "Write about: \(topic)"
+                "Input: \(input)"
+            }
+        }
+    }
 }
 ```
 
@@ -370,17 +497,21 @@ public struct Writer: Agent {
     public typealias Input = String
     public typealias Output = String
     
+    @Session {
+        "You are a creative writer"
+        "Write compelling stories based on the user's request"
+        "Include interesting characters, plot, and theme"
+    }
+    var session
+    
     public init() {}
     
     public var body: some Step<Input, Output> {
-        GenerateText<String>(
-            instructions: """
-                You are a creative writer. 
-                Write a compelling story based on the user's request.
-                Include interesting characters, plot, and theme.
-                """
-        ) { input in
-            input
+        GenerateText(session: $session) { input in
+            Prompt {
+                "Request: \(input)"
+                "Create an engaging narrative"
+            }
         }
     }
 }
@@ -401,24 +532,22 @@ struct CodeAnalyzer: Agent {
     typealias Input = String
     typealias Output = AnalysisResult
     
-    let session: LanguageModelSession
-    
-    init(apiKey: String) {
-        self.session = LanguageModelSession(
-            model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
-            tools: [FileSystemTool(), GitTool()],
-            instructions: Instructions("""
-                You are a code analysis expert.
-                Analyze the codebase and provide insights.
-                """)
-        )
+    @Session(tools: [ReadTool(), GrepTool(), GitTool()]) {
+        "You are a code analysis expert"
+        "Analyze the codebase and provide insights"
+        "Focus on code quality and best practices"
     }
+    var session
+    
+    init() {}
     
     var body: some Step<Input, Output> {
-        Generate<String, AnalysisResult>(
-            session: session
-        ) { request in
-            "Analyze the following: \(request)"
+        Generate<String, AnalysisResult>(session: $session) { request in
+            Prompt {
+                "Analyze the following: \(request)"
+                "Use available tools to examine the code"
+                "Provide actionable recommendations"
+            }
         }
     }
 }
@@ -443,7 +572,12 @@ struct ResearchAgent: Agent {
     typealias Input = String
     typealias Output = ResearchReport
     
-    let session: LanguageModelSession
+    @Session {
+        "You are a research expert"
+        "Synthesize information into comprehensive reports"
+        "Focus on accuracy and clarity"
+    }
+    var session
     
     var body: some Step<Input, Output> {
         // Step 1: Generate search queries
@@ -458,10 +592,14 @@ struct ResearchAgent: Agent {
         }
         
         // Step 3: Analyze results
-        Generate<[SearchResult], ResearchReport>(
-            session: session
-        ) { results in
-            "Synthesize these search results into a comprehensive report: \(results)"
+        Generate<[SearchResult], ResearchReport>(session: $session) { results in
+            Prompt {
+                "Synthesize these search results:"
+                for result in results {
+                    "- \(result.content)"
+                }
+                "Create a comprehensive report with key findings"
+            }
         }
     }
     
@@ -479,27 +617,31 @@ struct ChatAgent: Agent {
     typealias Output = String
     
     @Memory var conversationHistory: [String] = []
-    let session: LanguageModelSession
+    
+    @Session {
+        "You are a helpful conversational assistant"
+        "Maintain context across the conversation"
+        "Be friendly and engaging"
+    }
+    var session
     
     var body: some Step<Input, Output> {
         Transform<String, String> { input in
             // Add to conversation history
             conversationHistory.append("User: \(input)")
-            
-            // Include context in prompt
-            let context = conversationHistory.suffix(10).joined(separator: "\n")
-            return """
-                Conversation history:
-                \(context)
-                
-                Current message: \(input)
-                """
+            return input
         }
         
-        GenerateText<String>(
-            session: session
-        ) { contextualInput in
-            contextualInput
+        GenerateText(session: $session) { input in
+            Prompt {
+                "Conversation history:"
+                for message in conversationHistory.suffix(10) {
+                    message
+                }
+                ""
+                "Current message: \(input)"
+                "Respond naturally and helpfully"
+            }
         }
         
         Transform<String, String> { response in
@@ -622,16 +764,18 @@ struct MyAgent: Agent {
     typealias Input = String
     typealias Output = String
     
-    let session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!),
-        instructions: Instructions("You are a helpful assistant.")
-    )
+    @Session {
+        "You are a helpful assistant"
+        "Be concise and informative"
+    }
+    var session
     
     var body: some Step<Input, Output> {
-        GenerateText<String>(
-            session: session
-        ) { input in
-            input
+        GenerateText(session: $session) { input in
+            Prompt {
+                "User request: \(input)"
+                "Provide a helpful response"
+            }
         }
     }
 }

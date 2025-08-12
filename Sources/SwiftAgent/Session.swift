@@ -42,28 +42,27 @@ public struct Session: Sendable {
     /// - Parameter instructions: A closure that builds Instructions using InstructionsBuilder
     public init(@InstructionsBuilder instructions: () -> Instructions) {
         let session = LanguageModelSession(
-            model: SystemLanguageModel.default,
-            instructions: instructions()
-        )
+            model: SystemLanguageModel.default
+        ) {
+            instructions()
+        }
         self.storage = Memory(wrappedValue: session)
     }
     
     /// Initializes a Session with InstructionsBuilder and additional configuration
     /// - Parameters:
     ///   - tools: Tools to be used by the model
-    ///   - guardrails: Guardrails for content safety
     ///   - instructions: A closure that builds Instructions using InstructionsBuilder
     public init(
         tools: [any OpenFoundationModels.Tool] = [],
-        guardrails: LanguageModelSession.Guardrails? = nil,
         @InstructionsBuilder instructions: () -> Instructions
     ) {
         let session = LanguageModelSession(
             model: SystemLanguageModel.default,
-            guardrails: guardrails ?? .default,
-            tools: tools,
-            instructions: instructions()
-        )
+            tools: tools
+        ) {
+            instructions()
+        }
         self.storage = Memory(wrappedValue: session)
     }
     

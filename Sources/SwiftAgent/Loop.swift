@@ -79,6 +79,20 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
         self.condition = condition
     }
     
+    /// Create a loop with only a termination condition (uses a default max of Int.max)
+    ///
+    /// - Parameters:
+    ///   - step: The step to execute in each iteration
+    ///   - condition: Condition to check for loop termination
+    public init(
+        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
+    ) {
+        self.loopType = .finite(Int.max)
+        self.step = step
+        self.condition = condition
+    }
+    
     /// Create an infinite loop
     ///
     /// - Parameter step: The step to execute in each iteration
@@ -88,6 +102,21 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
         self.loopType = .infinite
         self.step = step
         self.condition = nil
+    }
+    
+    /// Create an infinite loop with optional termination condition
+    ///
+    /// - Parameters:
+    ///   - step: The step to execute in each iteration
+    ///   - condition: Optional condition to check for loop termination
+    public init(
+        infinite: Bool = true,
+        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
+    ) {
+        self.loopType = .infinite
+        self.step = step
+        self.condition = condition
     }
     
     /// Execute the loop with the given input
@@ -131,8 +160,17 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
                 // Check for task cancellation
                 try Task.checkCancellation()
                 
-                // Execute the step and update current value
-                current = try await step(current).run(current)
+                // Execute the step
+                let output = try await step(current).run(current)
+                
+                // Check termination condition if provided
+                if let condition = condition,
+                   try await condition().run(output) {
+                    return output
+                }
+                
+                // Update current value for next iteration
+                current = output
                 
                 // Optional: you can add iteration tracking here
                 if !Task.isCancelled {
@@ -199,6 +237,56 @@ extension Loop {
         condition: @escaping (Output) -> Bool
     ) {
         self.init(max: max, step: step) {
+            Transform(transformer: condition)
+        }
+    }
+    
+    /// Create a loop with only a simple boolean condition (uses a default max of Int.max)
+    ///
+    /// This convenience initializer allows creating a loop with a simple boolean condition
+    /// without specifying a maximum iteration count.
+    ///
+    /// Example:
+    /// ```swift
+    /// Loop(step: someStep) { value in
+    ///     value >= 10
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - step: The step to execute in each iteration
+    ///   - condition: Simple boolean condition for loop termination
+    public init(
+        @StepBuilder step: @escaping (Input) -> S,
+        condition: @escaping (Output) -> Bool
+    ) {
+        self.init(step: step) {
+            Transform(transformer: condition)
+        }
+    }
+    
+    /// Create an infinite loop with a simple boolean termination condition
+    ///
+    /// This convenience initializer allows creating an infinite loop with a simple boolean condition
+    /// for termination.
+    ///
+    /// Example:
+    /// ```swift
+    /// Loop(infinite: true, step: someStep) { value in
+    ///     value >= 10  // Loop terminates when this becomes true
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - infinite: Must be true to indicate infinite loop (default: true)
+    ///   - step: The step to execute in each iteration
+    ///   - condition: Simple boolean condition for loop termination
+    public init(
+        infinite: Bool = true,
+        @StepBuilder step: @escaping (Input) -> S,
+        condition: @escaping (Output) -> Bool
+    ) {
+        self.init(infinite: infinite, step: step) {
             Transform(transformer: condition)
         }
     }

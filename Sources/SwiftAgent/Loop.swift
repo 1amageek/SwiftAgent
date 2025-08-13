@@ -219,7 +219,7 @@ extension Loop {
     public init(
         max: Int,
         @StepBuilder step: @escaping (Input) -> S,
-        condition: @escaping (Output) -> Bool
+        @StepBuilder condition: @escaping (Output) -> Bool
     ) {
         self.init(max: max, step: step) {
             Transform(transformer: condition)

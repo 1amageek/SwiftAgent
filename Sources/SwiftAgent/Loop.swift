@@ -88,7 +88,7 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
         @StepBuilder step: @escaping (Input) -> S,
         @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
     ) {
-        self.loopType = .finite(Int.max)
+        self.loopType = .infinite
         self.step = step
         self.condition = condition
     }
@@ -102,21 +102,6 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
         self.loopType = .infinite
         self.step = step
         self.condition = nil
-    }
-    
-    /// Create an infinite loop with optional termination condition
-    ///
-    /// - Parameters:
-    ///   - step: The step to execute in each iteration
-    ///   - condition: Optional condition to check for loop termination
-    public init(
-        infinite: Bool = true,
-        @StepBuilder step: @escaping (Input) -> S,
-        @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
-    ) {
-        self.loopType = .infinite
-        self.step = step
-        self.condition = condition
     }
     
     /// Execute the loop with the given input

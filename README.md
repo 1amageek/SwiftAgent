@@ -147,17 +147,14 @@ The `@Session` wrapper simplifies session creation and management:
 
 ```swift
 struct MyAgent {
-    // Create a session with InstructionsBuilder
-    @Session {
-        "You are a helpful assistant"
-        "Be concise and accurate"
-        if debugMode {
-            "Include debug information"
-        }
-    }
-    var session
+    // With explicit initialization
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+        instructions: Instructions("You are a helpful assistant")
+    )
     
-    // Or with explicit initialization
+    // With custom configuration
     @Session
     var customSession = LanguageModelSession(
         model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
@@ -173,11 +170,12 @@ Pass sessions to Generate steps using the `$` prefix for Relay access:
 
 ```swift
 struct ContentAgent {
-    @Session {
-        "You are a content creator"
-        "Focus on clarity and engagement"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a content creator")
     }
-    var session
     
     var body: some Step {
         GenerateText(session: $session) { input in
@@ -291,11 +289,12 @@ struct Story {
 
 // Using @Session and PromptBuilder
 struct StoryGenerator {
-    @Session {
-        "You are a creative writer"
-        "Focus on engaging narratives"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a creative writer")
     }
-    var session
     
     var generator: some Step {
         Generate<String, Story>(session: $session) { input in
@@ -318,11 +317,12 @@ Generate string output using AI models with dynamic builders:
 ```swift
 // Using @Session with shared configuration
 struct TextGenerator {
-    @Session {
-        "You are a creative writer"
-        "Use vivid and engaging language"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a creative writer")
     }
-    var session
     
     func generate(_ topic: String) -> some Step {
         GenerateText(session: $session) { input in
@@ -512,12 +512,12 @@ public struct Writer: Agent {
     public typealias Input = String
     public typealias Output = String
     
-    @Session {
-        "You are a creative writer"
-        "Write compelling stories based on the user's request"
-        "Include interesting characters, plot, and theme"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a creative writer")
     }
-    var session
     
     public init() {}
     
@@ -595,12 +595,12 @@ struct ResearchAgent: Agent {
     typealias Input = String
     typealias Output = ResearchReport
     
-    @Session {
-        "You are a research expert"
-        "Synthesize information into comprehensive reports"
-        "Focus on accuracy and clarity"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a research expert")
     }
-    var session
     
     var body: some Step<Input, Output> {
         // Step 1: Generate search queries
@@ -641,12 +641,12 @@ struct ChatAgent: Agent {
     
     @Memory var conversationHistory: [String] = []
     
-    @Session {
-        "You are a helpful conversational assistant"
-        "Maintain context across the conversation"
-        "Be friendly and engaging"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
+    ) {
+        Instructions("You are a helpful conversational assistant")
     }
-    var session
     
     var body: some Step<Input, Output> {
         Transform<String, String> { input in

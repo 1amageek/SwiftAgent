@@ -11,14 +11,18 @@ graph TB
     subgraph "Core Protocols"
         Step["Step<Input, Output>"]
         Agent["Agent: Step"]
+        Model["Model: Step"]
         
         Step --> Agent
+        Step --> Model
     end
     
     subgraph "OpenFoundationModels Integration"
         Tool["Tool Protocol"]
         LMS["LanguageModelSession"]
         Generable["@Generable"]
+        Prompt["@PromptBuilder"]
+        Instructions["@InstructionsBuilder"]
     end
     
     subgraph "Built-in Steps"
@@ -33,6 +37,7 @@ graph TB
             Loop["Loop"]
             Parallel["Parallel"]
             Race["Race"]
+            WaitForInput["WaitForInput"]
         end
         
         subgraph "AI Generation"
@@ -41,17 +46,28 @@ graph TB
         end
     end
     
+    subgraph "State Management"
+        Memory["@Memory"]
+        Relay["Relay<T>"]
+        Session["@Session"]
+    end
+    
     subgraph "Safety & Monitoring"
         Guardrails["Guardrails"]
         Monitor["Monitor"]
-        TracingStep["TracingStep"]
+        Tracing["Distributed Tracing"]
     end
     
     subgraph "Tools"
-        FST["FileSystemTool"]
-        GT["GitTool"]
-        ECT["ExecuteCommandTool"]
-        UFT["URLFetchTool"]
+        ReadTool["ReadTool"]
+        WriteTool["WriteTool"]
+        EditTool["EditTool"]
+        MultiEditTool["MultiEditTool"]
+        GrepTool["GrepTool"]
+        GlobTool["GlobTool"]
+        GitTool["GitTool"]
+        ExecuteCommandTool["ExecuteCommandTool"]
+        URLFetchTool["URLFetchTool"]
     end
     
     Step --> Transform
@@ -63,21 +79,22 @@ graph TB
     
     Agent --> Guardrails
     Step --> Monitor
-    Step --> TracingStep
+    Step --> Tracing
     
     Generate --> LMS
     GenerateText --> LMS
+    Session --> LMS
     
-    Tool --> FST
-    Tool --> GT
-    Tool --> ECT
-    Tool --> UFT
+    Tool --> ReadTool
+    Tool --> WriteTool
+    Tool --> EditTool
+    Tool --> ExecuteCommandTool
 ```
 
 ## Features
 
 - 🎯 **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
-- 🔄 **Composable Steps**: Chain multiple steps together seamlessly
+- 🔄 **Composable Steps**: Chain multiple steps together seamlessly with StepBuilder
 - 🛠️ **Type-Safe Tools**: Define and use tools with compile-time type checking
 - 🤖 **Model-Agnostic**: Works with any AI model through OpenFoundationModels
 - 📦 **Modular Design**: Create reusable agent components
@@ -88,8 +105,8 @@ graph TB
 - 🏗️ **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
 - 🔍 **Monitoring**: Built-in monitoring and distributed tracing support
 - 📡 **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
-- 🏠 **Local AI Support**: Run models completely offline with Ollama integration
-- ⚡ **Multiple Providers**: Choose between cloud (OpenAI) or local (Ollama) execution
+- 🛡️ **Guardrails**: Safety checks for input/output validation
+- ⚙️ **Chain Support**: Chain up to 8 steps with type-safe composition
 
 ## Core Components
 
@@ -177,7 +194,7 @@ struct ContentAgent {
 
 ## AI Model Integration
 
-SwiftAgent uses OpenFoundationModels for AI model integration with powerful Builder APIs:
+SwiftAgent uses OpenFoundationModels for AI model integration, providing a unified interface for multiple AI providers:
 
 ### Dynamic Instructions with InstructionsBuilder
 
@@ -219,56 +236,33 @@ GenerateText(session: $session) { input in
 }
 ```
 
-### Using Different Model Providers
+### Using Model Providers
 
-#### OpenAI
+SwiftAgent works with any AI provider through OpenFoundationModels. Configure your preferred provider:
+
 ```swift
 import SwiftAgent
 import OpenFoundationModels
-import OpenFoundationModelsOpenAI
+// Import your chosen provider package
+// e.g., OpenFoundationModelsOpenAI, OpenFoundationModelsOllama, etc.
 
-// Create a session with OpenAI
+// Create a session with your chosen model
 @Session
-var openAISession = LanguageModelSession(
-    model: OpenAIModelFactory.gpt4o(apiKey: "your-api-key")
+var session = LanguageModelSession(
+    model: YourModelFactory.create(apiKey: "your-api-key")
 ) {
     Instructions("You are a helpful assistant.")
 }
 ```
 
-#### Ollama (Local Models)
-```swift
-import SwiftAgent
-import OpenFoundationModels
-import OpenFoundationModelsOllama
+### Available Provider Packages
 
-// Create a session with Ollama (runs locally)
-@Session
-var ollamaSession = LanguageModelSession(
-    model: OllamaLanguageModel(modelName: "llama3.2")
-) {
-    Instructions("You are a helpful assistant.")
-}
+SwiftAgent is provider-agnostic. Choose from available OpenFoundationModels provider packages:
 
-// Use in a Generate step with PromptBuilder
-let step = Generate<String, Story>(session: $openAISession) { input in
-    Prompt {
-        "Write a story based on: \(input)"
-        "Make it engaging and creative"
-    }
-}
-```
-
-### Supported Providers
-
-Currently supported:
-- **OpenAI** (GPT-4o, GPT-4o Mini, o1, o3) - ✅ Available now
-- **Ollama** (Local models: llama3.2, mistral, deepseek-r1, etc.) - ✅ Available now
-
-Coming soon through OpenFoundationModels:
-- **Anthropic** (Claude 3 Opus, Sonnet, Haiku) - 🚧 In development
-- **Google** (Gemini Pro, Flash) - 🚧 In development
-- **Apple's Foundation Models** (via SystemLanguageModel) - 🚧 In development
+- [OpenFoundationModels-OpenAI](https://github.com/1amageek/OpenFoundationModels-OpenAI) - OpenAI models (GPT-4o, etc.)
+- [OpenFoundationModels-Ollama](https://github.com/1amageek/OpenFoundationModels-Ollama) - Local models via Ollama
+- [OpenFoundationModels-Anthropic](https://github.com/1amageek/OpenFoundationModels-Anthropic) - Anthropic Claude models
+- Additional providers available through the OpenFoundationModels ecosystem
 
 ## Built-in Steps
 
@@ -542,102 +536,6 @@ let writer = Writer()
 let story = try await writer.run("Write a story about a time-traveling scientist")
 ```
 
-### Local AI Agent with Ollama
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-import OpenFoundationModelsOllama
-
-public struct LocalAgent: Agent {
-    public typealias Input = String
-    public typealias Output = String
-    
-    @Session {
-        "You are a helpful assistant running locally"
-        "Provide concise and accurate responses"
-        "You don't require internet connectivity"
-    }
-    var session
-    
-    public init(model: String = "llama3.2") {
-        // Initialize with Ollama model
-        self._session = Session(wrappedValue: LanguageModelSession(
-            model: OllamaLanguageModel(modelName: model)
-        ) {
-            Instructions {
-                "You are a helpful assistant running locally"
-                "Provide concise and accurate responses"
-            }
-        })
-    }
-    
-    public var body: some Step<Input, Output> {
-        GenerateText(session: $session) { input in
-            Prompt {
-                "User query: \(input)"
-                "Provide a helpful response"
-            }
-        }
-    }
-}
-
-// Usage
-let agent = LocalAgent(model: "llama3.2") // or "mistral", "codellama", etc.
-let response = try await agent.run("Explain quantum computing in simple terms")
-```
-
-### Reasoning Agent with DeepSeek-R1
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-import OpenFoundationModelsOllama
-
-struct ReasoningAgent: Agent {
-    typealias Input = String
-    typealias Output = ReasoningOutput
-    
-    @Session
-    var session = LanguageModelSession(
-        model: OllamaLanguageModel(modelName: "deepseek-r1")
-    ) {
-        Instructions {
-            "You are a reasoning model"
-            "Think step by step through problems"
-            "Show your reasoning process"
-        }
-    }
-    
-    var body: some Step<Input, Output> {
-        Generate<String, ReasoningOutput>(session: $session) { problem in
-            Prompt {
-                "Problem: \(problem)"
-                "Think through this step by step"
-                "Provide your reasoning and final answer"
-            }
-        }
-    }
-}
-
-@Generable
-struct ReasoningOutput {
-    @Guide(description: "Step-by-step reasoning process")
-    let reasoning: String
-    
-    @Guide(description: "Final answer or conclusion")
-    let answer: String
-    
-    @Guide(description: "Confidence level (low, medium, high)")
-    let confidence: String
-}
-
-// Usage - runs completely offline!
-let reasoner = ReasoningAgent()
-let result = try await reasoner.run("If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?")
-print("Reasoning: \(result.reasoning)")
-print("Answer: \(result.answer)")
-```
 
 ### Code Analysis Agent with Tools
 
@@ -650,14 +548,21 @@ struct CodeAnalyzer: Agent {
     typealias Input = String
     typealias Output = AnalysisResult
     
-    @Session(tools: [ReadTool(), GrepTool(), GitTool()]) {
-        "You are a code analysis expert"
-        "Analyze the codebase and provide insights"
-        "Focus on code quality and best practices"
-    }
-    var session
+    @Session
+    var session: LanguageModelSession
     
-    init() {}
+    init(model: any LanguageModel) {
+        self._session = Session(wrappedValue: LanguageModelSession(
+            model: model,
+            tools: [ReadTool(), GrepTool(), GitTool()]
+        ) {
+            Instructions {
+                "You are a code analysis expert"
+                "Analyze the codebase and provide insights"
+                "Focus on code quality and best practices"
+            }
+        })
+    }
     
     var body: some Step<Input, Output> {
         Generate<String, AnalysisResult>(session: $session) { request in
@@ -787,22 +692,22 @@ dependencies: [
 ]
 ```
 
-### Available Model Providers
+### Model Provider Packages
 
-Currently available:
+SwiftAgent requires a model provider package from the OpenFoundationModels ecosystem. Choose based on your needs:
 
 ```swift
-// OpenAI (GPT-4o, GPT-4o Mini, o1, o3)
+// For OpenAI models
 .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
 
-// Ollama (Local models: llama3.2, mistral, deepseek-r1, codellama, etc.)
+// For local models via Ollama
 .package(url: "https://github.com/1amageek/OpenFoundationModels-Ollama.git", branch: "main")
-```
 
-Coming soon:
-- Anthropic (Claude 3 Opus, Sonnet, Haiku)
-- Google (Gemini Pro, Flash)
-- Apple's Foundation Models
+// For Anthropic Claude models
+.package(url: "https://github.com/1amageek/OpenFoundationModels-Anthropic.git", branch: "main")
+
+// Additional providers available - check OpenFoundationModels documentation
+```
 
 ### Quick Start Example
 
@@ -818,52 +723,21 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
-        // Choose your AI provider(s)
-        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main"),
-        // .package(url: "https://github.com/1amageek/OpenFoundationModels-Ollama.git", branch: "main")
+        // Choose your AI provider - example with OpenAI
+        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
     ],
     targets: [
         .executableTarget(
             name: "MyAgent",
             dependencies: [
                 .product(name: "SwiftAgent", package: "SwiftAgent"),
-                .product(name: "AgentTools", package: "SwiftAgent"),
-                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI"),
-                // .product(name: "OpenFoundationModelsOllama", package: "OpenFoundationModels-Ollama")
+                .product(name: "AgentTools", package: "SwiftAgent"),  // Optional: for built-in tools
+                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI")
             ]
         )
     ]
 )
 ```
-
-## Choosing a Model Provider
-
-### OpenAI vs Ollama
-
-| Feature | OpenAI | Ollama |
-|---------|--------|--------|
-| **Location** | Cloud-based | Local (on-device) |
-| **Internet Required** | Yes | No |
-| **API Key Required** | Yes | No |
-| **Privacy** | Data sent to OpenAI | Fully private |
-| **Cost** | Pay per token | Free (hardware cost only) |
-| **Model Quality** | State-of-the-art | Very good open models |
-| **Speed** | Fast (with internet) | Depends on hardware |
-| **Model Selection** | GPT-4o, GPT-4o Mini, o1, o3 | Llama, Mistral, DeepSeek, etc. |
-| **Resource Usage** | Minimal (cloud) | High (RAM/GPU) |
-
-### When to Use OpenAI
-- Need highest quality responses
-- Building production applications
-- Limited local resources
-- Need consistent performance
-
-### When to Use Ollama
-- Privacy is critical
-- Working offline
-- Development and testing
-- Cost-sensitive applications
-- Need full control over the model
 
 ## Getting Started
 
@@ -879,12 +753,9 @@ let package = Package(
         // Core SwiftAgent framework
         .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
         
-        // Choose your AI provider(s)
-        // Option 1: OpenAI (cloud-based)
-        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main"),
-        
-        // Option 2: Ollama (local models)
-        // .package(url: "https://github.com/1amageek/OpenFoundationModels-Ollama.git", branch: "main")
+        // Add your chosen AI provider package
+        // Example: OpenAI
+        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
     ],
     targets: [
         .target(
@@ -901,88 +772,39 @@ let package = Package(
 
 ### 2. Set up your environment
 
+Configure your chosen AI provider according to their documentation. For example:
+
 ```bash
 # For OpenAI
 export OPENAI_API_KEY="your-api-key"
 
-# For Ollama (local models)
-# First, install and start Ollama:
-brew install ollama
-ollama serve  # Runs on http://localhost:11434
-
-# Pull the model you want to use:
-ollama pull llama3.2        # 2B/3B parameter models
-ollama pull mistral         # 7B parameter model
-ollama pull codellama       # Code-focused model
-ollama pull deepseek-r1     # Reasoning model with thinking support
-
-# Verify models are available:
-ollama list
-
-# For Anthropic (coming soon)
+# For Anthropic
 export ANTHROPIC_API_KEY="your-api-key"
+
+# For local models (Ollama)
+# Install and configure Ollama according to their documentation
 ```
 
 ### 3. Create your first agent
 
-#### Flexible Provider Selection
-
 ```swift
 import SwiftAgent
 import OpenFoundationModels
-import OpenFoundationModelsOpenAI
-import OpenFoundationModelsOllama
-
-struct FlexibleAgent: Agent {
-    typealias Input = String
-    typealias Output = String
-    
-    @Session
-    var session: LanguageModelSession
-    
-    // Choose provider at initialization
-    init(useLocal: Bool = false) {
-        let model: any LanguageModel = useLocal
-            ? OllamaLanguageModel(modelName: "llama3.2")
-            : OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
-        
-        self._session = Session(wrappedValue: LanguageModelSession(
-            model: model
-        ) {
-            Instructions("You are a helpful assistant")
-        })
-    }
-    
-    var body: some Step<Input, Output> {
-        GenerateText(session: $session) { input in
-            Prompt(input)
-        }
-    }
-}
-
-// Use cloud model
-let cloudAgent = FlexibleAgent(useLocal: false)
-
-// Use local model
-let localAgent = FlexibleAgent(useLocal: true)
-```
-
-#### Basic Agent Example
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-import OpenFoundationModelsOpenAI  // or OpenFoundationModelsOllama
+import OpenFoundationModelsOpenAI  // Your chosen provider
 
 struct MyAgent: Agent {
     typealias Input = String
     typealias Output = String
     
-    @Session {
-        "You are a helpful assistant"
-        "Be concise and informative"
+    @Session
+    var session = LanguageModelSession(
+        model: OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
+    ) {
+        Instructions {
+            "You are a helpful assistant"
+            "Be concise and informative"
+        }
     }
-    var session
     
     var body: some Step<Input, Output> {
         GenerateText(session: $session) { input in

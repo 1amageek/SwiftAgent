@@ -243,35 +243,9 @@ extension Loop {
     ///   - condition: Simple boolean condition for loop termination
     public init(
         @StepBuilder step: @escaping (Input) -> S,
-        condition: @escaping (Output) -> Bool
+        @StepBuilder condition: @escaping (Output) -> Bool
     ) {
         self.init(step: step) {
-            Transform(transformer: condition)
-        }
-    }
-    
-    /// Create an infinite loop with a simple boolean termination condition
-    ///
-    /// This convenience initializer allows creating an infinite loop with a simple boolean condition
-    /// for termination.
-    ///
-    /// Example:
-    /// ```swift
-    /// Loop(infinite: true, step: someStep) { value in
-    ///     value >= 10  // Loop terminates when this becomes true
-    /// }
-    /// ```
-    ///
-    /// - Parameters:
-    ///   - infinite: Must be true to indicate infinite loop (default: true)
-    ///   - step: The step to execute in each iteration
-    ///   - condition: Simple boolean condition for loop termination
-    public init(
-        infinite: Bool = true,
-        @StepBuilder step: @escaping (Input) -> S,
-        condition: @escaping (Output) -> Bool
-    ) {
-        self.init(infinite: infinite, step: step) {
             Transform(transformer: condition)
         }
     }

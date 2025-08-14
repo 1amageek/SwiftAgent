@@ -207,46 +207,98 @@ extension Loop {
     ///
     /// Example:
     /// ```swift
-    /// Loop(max: 5, step: someStep) { value in
-    ///     value >= 10
-    /// }
+    /// Loop(max: 5, step: someStep, while: { value in
+    ///     value < 10
+    /// })
     /// ```
     ///
     /// - Parameters:
     ///   - max: Maximum number of iterations
     ///   - step: The step to execute in each iteration
-    ///   - condition: Simple boolean condition for loop termination
+    ///   - condition: Simple boolean condition for loop continuation (returns true to continue)
     public init(
         max: Int,
         @StepBuilder step: @escaping (Input) -> S,
-        @StepBuilder condition: @escaping (Output) -> Bool
+        while condition: @escaping (S.Output) -> Bool
     ) {
         self.init(max: max, step: step) {
-            Transform(transformer: condition)
+            Transform { output in
+                !condition(output)  // Invert because Loop expects true to stop
+            }
         }
     }
     
-    /// Create a loop with only a simple boolean condition (uses a default max of Int.max)
+    /// Create a loop with a simple boolean termination condition
     ///
     /// This convenience initializer allows creating a loop with a simple boolean condition
-    /// without specifying a maximum iteration count.
+    /// that determines when to stop the loop.
     ///
     /// Example:
     /// ```swift
-    /// Loop(step: someStep) { value in
+    /// Loop(max: 5, step: someStep, until: { value in
     ///     value >= 10
-    /// }
+    /// })
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - max: Maximum number of iterations
+    ///   - step: The step to execute in each iteration
+    ///   - stopCondition: Simple boolean condition for loop termination (returns true to stop)
+    public init(
+        max: Int,
+        @StepBuilder step: @escaping (Input) -> S,
+        until stopCondition: @escaping (S.Output) -> Bool
+    ) {
+        self.init(max: max, step: step) {
+            Transform { output in
+                stopCondition(output)
+            }
+        }
+    }
+    
+    /// Create an infinite loop with a simple boolean continuation condition
+    ///
+    /// Example:
+    /// ```swift
+    /// Loop(step: someStep, while: { value in
+    ///     value < 10
+    /// })
     /// ```
     ///
     /// - Parameters:
     ///   - step: The step to execute in each iteration
-    ///   - condition: Simple boolean condition for loop termination
+    ///   - condition: Simple boolean condition for loop continuation (returns true to continue)
     public init(
         @StepBuilder step: @escaping (Input) -> S,
-        @StepBuilder condition: @escaping (Output) -> Bool
+        while condition: @escaping (S.Output) -> Bool
     ) {
         self.init(step: step) {
-            Transform(transformer: condition)
+            Transform { output in
+                !condition(output)  // Invert because Loop expects true to stop
+            }
+        }
+    }
+    
+    /// Create an infinite loop with a simple boolean termination condition
+    ///
+    /// Example:
+    /// ```swift
+    /// Loop(step: someStep, until: { value in
+    ///     value >= 10
+    /// })
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - step: The step to execute in each iteration
+    ///   - stopCondition: Simple boolean condition for loop termination (returns true to stop)
+    public init(
+        @StepBuilder step: @escaping (Input) -> S,
+        until stopCondition: @escaping (S.Output) -> Bool
+    ) {
+        self.init(step: step) {
+            Transform { output in
+                stopCondition(output)
+            }
         }
     }
 }

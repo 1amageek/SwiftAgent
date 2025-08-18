@@ -210,7 +210,7 @@ public struct GrepTool: OpenFoundationModels.Tool {
 
 /// Input structure for the grep operation.
 @Generable
-public struct GrepInput {
+public struct GrepInput: Sendable {
     /// The regular expression pattern to search for.
     @Guide(description: "Search pattern (regex)")
     public let pattern: String

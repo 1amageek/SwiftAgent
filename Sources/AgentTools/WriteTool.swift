@@ -96,7 +96,7 @@ public struct WriteTool: OpenFoundationModels.Tool {
 
 /// Input structure for the write operation.
 @Generable
-public struct WriteInput {
+public struct WriteInput: Sendable {
     /// The file path to write to.
     @Guide(description: "File path to write to")
     public let path: String

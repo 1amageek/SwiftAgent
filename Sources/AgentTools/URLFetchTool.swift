@@ -238,7 +238,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
 
 /// Input structure for URL fetching operations.
 @Generable
-public struct FetchInput {
+public struct FetchInput: Sendable {
     /// The URL (HTTP or HTTPS) from which to fetch data.
     @Guide(description: "The URL (HTTP or HTTPS) from which to fetch data")
     public let url: String

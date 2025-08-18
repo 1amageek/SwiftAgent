@@ -268,7 +268,7 @@ public struct GitTool: OpenFoundationModels.Tool {
 
 /// Input structure for Git operations.
 @Generable
-public struct GitInput {
+public struct GitInput: Sendable {
     /// The Git subcommand to execute.
     @Guide(description: "Git subcommand (e.g., 'status', 'log', 'commit')")
     public let command: String

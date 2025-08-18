@@ -188,7 +188,7 @@ public struct MultiEditTool: OpenFoundationModels.Tool {
 
 /// Input structure for the multi-edit operation.
 @Generable
-public struct MultiEditInput {
+public struct MultiEditInput: Sendable {
     /// The file path to edit.
     @Guide(description: "File path to edit")
     public let path: String

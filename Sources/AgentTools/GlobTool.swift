@@ -249,7 +249,7 @@ public struct GlobTool: OpenFoundationModels.Tool {
 
 /// Input structure for the glob operation.
 @Generable
-public struct GlobInput {
+public struct GlobInput: Sendable {
     /// The glob pattern to match files against.
     @Guide(description: "Glob pattern (e.g., '*.swift', '**/*.md')")
     public let pattern: String

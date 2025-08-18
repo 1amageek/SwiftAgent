@@ -125,7 +125,7 @@ public struct ReadTool: OpenFoundationModels.Tool {
 
 /// Input structure for the read operation.
 @Generable
-public struct ReadInput {
+public struct ReadInput: Sendable {
     /// The file path to read.
     @Guide(description: "File path to read")
     public let path: String

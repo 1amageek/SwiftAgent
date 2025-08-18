@@ -166,7 +166,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
 
 /// The input structure for command execution.
 @Generable
-public struct ExecuteCommandInput {
+public struct ExecuteCommandInput: Sendable {
     /// The command executable name or path.
     @Guide(description: "Command name (e.g., 'git', 'ls', 'swift')")
     public let executable: String

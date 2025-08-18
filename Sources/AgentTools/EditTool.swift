@@ -181,7 +181,7 @@ public struct EditTool: OpenFoundationModels.Tool {
 
 /// Input structure for the edit operation.
 @Generable
-public struct EditInput {
+public struct EditInput: Sendable {
     /// The file path to edit.
     @Guide(description: "File path to edit")
     public let path: String

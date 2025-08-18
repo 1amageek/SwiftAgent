@@ -44,7 +44,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     }
     
     public func run(_ input: In) async throws -> Out {
-        try await withSpan(
+        return try await withSpan(
             "Generate.\(Out.self)",
             ofKind: .client
         ) { span in
@@ -56,6 +56,9 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
             span.addEvent("prompt_generated")
             
             do {
+                // Note: Tool execution happens internally in the LanguageModel implementation
+                // if tools are registered in the session. The model will handle tool calls
+                // automatically based on its implementation (e.g., OpenAI, Anthropic).
                 let response = try await session.wrappedValue.respond(
                     generating: Out.self,
                     includeSchemaInPrompt: true
@@ -107,7 +110,7 @@ public struct GenerateText<In: Sendable>: Step {
     }
     
     public func run(_ input: In) async throws -> String {
-        try await withSpan(
+        return try await withSpan(
             "GenerateText",
             ofKind: .client
         ) { span in
@@ -119,6 +122,9 @@ public struct GenerateText<In: Sendable>: Step {
             span.addEvent("prompt_generated")
             
             do {
+                // Note: Tool execution happens internally in the LanguageModel implementation
+                // if tools are registered in the session. The model will handle tool calls
+                // automatically based on its implementation (e.g., OpenAI, Anthropic).
                 let response = try await session.wrappedValue.respond {
                     prompt
                 }

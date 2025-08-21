@@ -43,6 +43,16 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         self.promptBuilder = { input in Prompt(transform(input)) }
     }
     
+    /// Creates a new Generate step with a shared session via Relay
+    /// When Input conforms to PromptRepresentable, no prompt builder is needed
+    /// - Parameter session: A Relay to a shared LanguageModelSession
+    public init(
+        session: Relay<LanguageModelSession>
+    ) where In: PromptRepresentable {
+        self.session = session
+        self.promptBuilder = { input in input.promptRepresentation }
+    }
+    
     public func run(_ input: In) async throws -> Out {
         return try await withSpan(
             "Generate.\(Out.self)",
@@ -107,6 +117,16 @@ public struct GenerateText<In: Sendable>: Step {
     ) {
         self.session = session
         self.promptBuilder = { input in Prompt(transform(input)) }
+    }
+    
+    /// Creates a new GenerateText step with a shared session via Relay
+    /// When Input conforms to PromptRepresentable, no prompt builder is needed
+    /// - Parameter session: A Relay to a shared LanguageModelSession
+    public init(
+        session: Relay<LanguageModelSession>
+    ) where In: PromptRepresentable {
+        self.session = session
+        self.promptBuilder = { input in input.promptRepresentation }
     }
     
     public func run(_ input: In) async throws -> String {

@@ -10,6 +10,26 @@ import OpenFoundationModels
 import Tracing
 import Instrumentation
 
+// MARK: - GeneratedText
+
+/// Represents generated text with both current chunk and accumulated content
+public struct GeneratedText: Sendable {
+    /// The latest chunk of text that was just generated
+    public let chunk: String
+    
+    /// The accumulated text content so far
+    public let accumulated: String
+    
+    /// Whether the generation is complete
+    public let isComplete: Bool
+    
+    public init(chunk: String, accumulated: String, isComplete: Bool = false) {
+        self.chunk = chunk
+        self.accumulated = accumulated
+        self.isComplete = isComplete
+    }
+}
+
 /// A step that integrates OpenFoundationModels' LanguageModelSession with SwiftAgent
 ///
 /// Generate supports both streaming and non-streaming modes for structured output generation.
@@ -29,17 +49,23 @@ import Instrumentation
 ///     prompt: { input in
 ///         Prompt("Write a blog post about: \(input)")
 ///     },
-///     onStream: { partialPost in
-///         print("Title: \(partialPost.title)")
-///         print("Content length: \(partialPost.content.count)")
+///     onStream: { post, rawContent in
+///         print("Title: \(post.title)")
+///         print("Content length: \(post.content.count)")
+///         print("Is complete: \(rawContent.isComplete)")
+///         
+///         // Access raw JSON if needed
+///         if let json = rawContent.jsonString {
+///             print("Raw JSON length: \(json.count)")
+///         }
 ///     }
 /// )
 /// let finalPost = try await step.run("Swift Concurrency")
 /// ```
 ///
-/// When using streaming, the `onStream` handler will be called for each partial update
-/// as the model generates the structured output. The final complete result is still
-/// returned by the `run` method.
+/// When using streaming, the `onStream` handler receives both the typed output
+/// and the raw GeneratedContent for each update. The final complete result is
+/// still returned by the `run` method.
 public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     
     public typealias Input = In
@@ -47,17 +73,17 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     
     private let session: Relay<LanguageModelSession>
     private let promptBuilder: (In) -> Prompt
-    private let streamHandler: ((Out?) async -> Void)?
+    private let streamHandler: ((Out, GeneratedContent) async -> Void)?
     
     /// Creates a new Generate step with streaming support
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
-    ///   - onStream: A closure that handles each streamed partial output
+    ///   - onStream: A closure that handles each streamed output with both typed content and raw GeneratedContent
     public init(
         session: Relay<LanguageModelSession>,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
-        onStream: @escaping (Out?) async -> Void
+        onStream: @escaping (Out, GeneratedContent) async -> Void
     ) {
         self.session = session
         self.promptBuilder = prompt
@@ -105,10 +131,10 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// When Input conforms to PromptRepresentable
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
-    ///   - onStream: A closure that handles each streamed partial output
+    ///   - onStream: A closure that handles each streamed output with both typed content and raw GeneratedContent
     public init(
         session: Relay<LanguageModelSession>,
-        onStream: @escaping (Out?) async -> Void
+        onStream: @escaping (Out, GeneratedContent) async -> Void
     ) where In: PromptRepresentable {
         self.session = session
         self.promptBuilder = { input in input.promptRepresentation }
@@ -142,8 +168,8 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     
                     for try await snapshot in responseStream {
                         lastContent = snapshot.content
-                        // Call the user's stream handler for each partial output
-                        await handler(snapshot.content)
+                        // Call the user's stream handler with both typed content and raw GeneratedContent
+                        await handler(snapshot.content, snapshot.rawContent)
                     }
                     
                     span.addEvent("streaming_completed")
@@ -195,8 +221,12 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 ///     prompt: { input in
 ///         Prompt("Generate a story about: \(input)")
 ///     },
-///     onStream: { chunk in
-///         print(chunk, terminator: "")  // Display as it's generated
+///     onStream: { generated in
+///         print(generated.chunk, terminator: "")  // Display new chunk
+///         
+///         if generated.isComplete {
+///             print("\n[Story complete: \(generated.accumulated.count) characters]")
+///         }
 ///     }
 /// )
 /// let fullStory = try await step.run("a brave knight")
@@ -204,37 +234,45 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 ///
 /// Example usage (streaming - progress tracking):
 /// ```swift
-/// var totalChars = 0
 /// let step = GenerateText<String>(
 ///     session: relay,
 ///     prompt: { _ in
 ///         Prompt("Write a detailed essay")
 ///     },
-///     onStream: { chunk in
-///         totalChars += chunk.count
-///         print("Progress: \(totalChars) characters")
+///     onStream: { generated in
+///         print("Progress: \(generated.accumulated.count) characters")
+///         print("Latest chunk: \(generated.chunk.count) characters")
+///         
+///         // Show progress bar
+///         let progress = min(generated.accumulated.count / 1000, 1.0)
+///         updateProgressBar(progress)
 ///     }
 /// )
 /// let essay = try await step.run("AI")
 /// ```
 ///
-/// Example usage (streaming - UI updates):
+/// Example usage (streaming - UI updates with buffering):
 /// ```swift
 /// let step = GenerateText<String>(
 ///     session: relay,
 ///     prompt: { input in
 ///         Prompt("Explain: \(input)")
 ///     },
-///     onStream: { chunk in
+///     onStream: { generated in
 ///         await MainActor.run {
-///             textView.append(chunk)
+///             // Append only the new chunk
+///             textView.append(generated.chunk)
+///             
+///             // Update status
+///             statusLabel.text = "Generated: \(generated.accumulated.count) characters"
 ///         }
 ///     }
 /// )
 /// ```
 ///
-/// When using streaming, the `onStream` handler receives each text chunk as it's generated.
-/// The complete text is still returned by the `run` method.
+/// When using streaming, the `onStream` handler receives a GeneratedText struct
+/// containing both the latest chunk and the accumulated text. The complete text
+/// is still returned by the `run` method.
 public struct GenerateText<In: Sendable>: Step {
     
     public typealias Input = In
@@ -242,17 +280,17 @@ public struct GenerateText<In: Sendable>: Step {
     
     private let session: Relay<LanguageModelSession>
     private let promptBuilder: (In) -> Prompt
-    private let streamHandler: ((String) async -> Void)?
+    private let streamHandler: ((GeneratedText) async -> Void)?
     
     /// Creates a new GenerateText step with streaming support
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
-    ///   - onStream: A closure that handles each streamed chunk of text
+    ///   - onStream: A closure that handles each streamed text with chunk and accumulated content
     public init(
         session: Relay<LanguageModelSession>,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
-        onStream: @escaping (String) async -> Void
+        onStream: @escaping (GeneratedText) async -> Void
     ) {
         self.session = session
         self.promptBuilder = prompt
@@ -300,10 +338,10 @@ public struct GenerateText<In: Sendable>: Step {
     /// When Input conforms to PromptRepresentable
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
-    ///   - onStream: A closure that handles each streamed chunk of text
+    ///   - onStream: A closure that handles each streamed text with chunk and accumulated content
     public init(
         session: Relay<LanguageModelSession>,
-        onStream: @escaping (String) async -> Void
+        onStream: @escaping (GeneratedText) async -> Void
     ) where In: PromptRepresentable {
         self.session = session
         self.promptBuilder = { input in input.promptRepresentation }
@@ -326,6 +364,7 @@ public struct GenerateText<In: Sendable>: Step {
                 if let handler = streamHandler {
                     // Streaming mode - use streamResponse
                     span.addEvent("streaming_started")
+                    var previousContent = ""
                     var accumulated = ""
                     
                     let responseStream = session.wrappedValue.streamResponse {
@@ -333,12 +372,27 @@ public struct GenerateText<In: Sendable>: Step {
                     }
                     
                     for try await snapshot in responseStream {
-                        let chunk = snapshot.content
-                        accumulated += chunk
+                        let currentContent = snapshot.content
+                        // Calculate the chunk (delta from previous content)
+                        let chunk = String(currentContent.dropFirst(previousContent.count))
+                        accumulated = currentContent
                         
-                        // Call the user's stream handler for each chunk
-                        await handler(chunk)
+                        // Call the user's stream handler with GeneratedText
+                        await handler(GeneratedText(
+                            chunk: chunk,
+                            accumulated: accumulated,
+                            isComplete: false
+                        ))
+                        
+                        previousContent = currentContent
                     }
+                    
+                    // Send final completion signal
+                    await handler(GeneratedText(
+                        chunk: "",
+                        accumulated: accumulated,
+                        isComplete: true
+                    ))
                     
                     span.addEvent("streaming_completed")
                     return accumulated

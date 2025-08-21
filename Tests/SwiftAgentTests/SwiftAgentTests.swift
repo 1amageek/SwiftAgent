@@ -56,27 +56,27 @@ func testToolCallSimplified() async throws {
 @Test("ReadTool Creation")
 func testReadToolCreation() async throws {
     let tool = ReadTool(workingDirectory: "/tmp")
-    #expect(tool.name == "read")
+    #expect(tool.name == "file_read")
     #expect(!tool.description.isEmpty)
 }
 
 @Test("GitTool Creation")
 func testGitToolCreation() async throws {
     let tool = GitTool()
-    #expect(tool.name == "git_control")
+    #expect(tool.name == "git_command")
     #expect(!tool.description.isEmpty)
 }
 
 @Test("URLFetchTool Creation")
 func testURLFetchToolCreation() async throws {
     let tool = URLFetchTool()
-    #expect(tool.name == "url_fetch")
+    #expect(tool.name == "web_fetch")
     #expect(!tool.description.isEmpty)
 }
 
 @Test("ExecuteCommandTool Creation")
 func testExecuteCommandToolCreation() async throws {
     let tool = ExecuteCommandTool()
-    #expect(tool.name == "execute")
+    #expect(tool.name == "command_execute")
     #expect(!tool.description.isEmpty)
 }

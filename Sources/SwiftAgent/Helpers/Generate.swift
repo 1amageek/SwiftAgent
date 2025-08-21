@@ -35,14 +35,26 @@ public typealias GenerateSnapshot<T: Generable> = LanguageModelSession.ResponseS
 ///         Prompt("Write a blog post about: \(input)")
 ///     },
 ///     onStream: { snapshot in
-///         // snapshot.content is the current state of the generated content
-///         // For custom @Generable types, this is actually PartiallyGenerated
-///         let content = snapshot.content
+///         // snapshot.content is BlogPost.PartiallyGenerated
+///         // For custom @Generable types, properties are Optional
+///         let partialPost = snapshot.content
+///         
+///         // Access partial properties safely
+///         if let title = partialPost.title {
+///             print("Title: \(title)")
+///         }
+///         
+///         if let content = partialPost.content {
+///             print("Content length: \(content.count) characters")
+///         }
+///         
+///         // Check if generation is complete (if PartiallyGenerated has isComplete)
+///         // print("Is complete: \(partialPost.isComplete)")
+///         
+///         // Raw content is always available
 ///         let rawContent = snapshot.rawContent
+///         print("Raw content complete: \(rawContent.isComplete)")
 ///         
-///         print("Is complete: \(rawContent.isComplete)")
-///         
-///         // Access raw JSON if needed
 ///         if let json = rawContent.jsonString {
 ///             print("Raw JSON: \(json)")
 ///         }
@@ -51,30 +63,49 @@ public typealias GenerateSnapshot<T: Generable> = LanguageModelSession.ResponseS
 /// let finalPost = try await step.run("Swift Concurrency")
 /// ```
 ///
+/// Example usage (with GenerationOptions):
+/// ```swift
+/// let step = Generate<String, BlogPost>(
+///     session: relay,
+///     options: GenerationOptions(
+///         sampling: .random(probabilityThreshold: 0.95),
+///         temperature: 0.7,
+///         maximumResponseTokens: 2000
+///     )
+/// ) { input in
+///     Prompt("Write a creative blog post about: \(input)")
+/// }
+/// let post = try await step.run("Future of AI")
+/// ```
+///
 /// When using streaming, the `onStream` handler receives a `ResponseStream.Snapshot`
-/// containing both the content (which may be `PartiallyGenerated` for custom types)
-/// and the raw `GeneratedContent`. The final complete result is still returned by
-/// the `run` method.
+/// where `snapshot.content` is `Out.PartiallyGenerated` (not `Out` itself).
+/// For custom @Generable types, PartiallyGenerated has Optional properties.
+/// The final complete result is still returned by the `run` method.
 public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     
     public typealias Input = In
     public typealias Output = Out
     
     private let session: Relay<LanguageModelSession>
+    private let options: GenerationOptions
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Out>) async -> Void)?
     
     /// Creates a new Generate step with streaming support
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -82,12 +113,15 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// Creates a new Generate step with a shared session via Relay
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -95,23 +129,30 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// Creates a new Generate step with Relay (backward compatibility)
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         transform: @escaping (In) -> String
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
     
     /// Creates a new Generate step with a shared session via Relay
     /// When Input conforms to PromptRepresentable, no prompt builder is needed
-    /// - Parameter session: A Relay to a shared LanguageModelSession
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     public init(
-        session: Relay<LanguageModelSession>
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions()
     ) where In: PromptRepresentable {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -120,12 +161,15 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// When Input conforms to PromptRepresentable
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) where In: PromptRepresentable {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
     }
@@ -150,7 +194,8 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     
                     let responseStream = session.wrappedValue.streamResponse(
                         generating: Out.self,
-                        includeSchemaInPrompt: true
+                        includeSchemaInPrompt: true,
+                        options: options
                     ) {
                         prompt
                     }
@@ -158,7 +203,12 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     for try await snapshot in responseStream {
                         // Pass the snapshot directly to the handler
                         await handler(snapshot)
-                        lastContent = snapshot.content
+                        
+                        // Try to get the full content from rawContent
+                        // This is needed because snapshot.content is PartiallyGenerated
+                        if let fullContent = try? Out(snapshot.rawContent) {
+                            lastContent = fullContent
+                        }
                     }
                     
                     span.addEvent("streaming_completed")
@@ -175,7 +225,8 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     // automatically based on its implementation (e.g., OpenAI, Anthropic).
                     let response = try await session.wrappedValue.respond(
                         generating: Out.self,
-                        includeSchemaInPrompt: true
+                        includeSchemaInPrompt: true,
+                        options: options
                     ) {
                         prompt
                     }
@@ -212,17 +263,19 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 ///         Prompt("Generate a story about: \(input)")
 ///     },
 ///     onStream: { snapshot in
-///         // snapshot.content: accumulated String
-///         // snapshot.rawContent: GeneratedContent
+///         // snapshot.content is String.PartiallyGenerated (which is String)
+///         // For String, PartiallyGenerated == String
+///         let accumulated = snapshot.content
 ///         
 ///         // Calculate chunk if needed
-///         let chunk = String(snapshot.content.dropFirst(previousContent.count))
-///         previousContent = snapshot.content
+///         let chunk = String(accumulated.dropFirst(previousContent.count))
+///         previousContent = accumulated
 ///         
 ///         print(chunk, terminator: "")  // Display new chunk
 ///         
+///         // Check completion via rawContent
 ///         if snapshot.rawContent.isComplete {
-///             print("\n[Story complete: \(snapshot.content.count) characters]")
+///             print("\n[Story complete: \(accumulated.count) characters]")
 ///         }
 ///     }
 /// )
@@ -253,6 +306,21 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 /// let essay = try await step.run("AI")
 /// ```
 ///
+/// Example usage (with GenerationOptions for concise output):
+/// ```swift
+/// let step = GenerateText<String>(
+///     session: relay,
+///     options: GenerationOptions(
+///         sampling: .greedy,
+///         temperature: 0.3,
+///         maximumResponseTokens: 100
+///     )
+/// ) { topic in
+///     Prompt("Write a brief summary about: \(topic)")
+/// }
+/// let summary = try await step.run("quantum computing")
+/// ```
+///
 /// When using streaming, the `onStream` handler receives a `ResponseStream.Snapshot`
 /// containing both the content (accumulated String) and the raw `GeneratedContent`.
 /// The complete text is still returned by the `run` method.
@@ -262,20 +330,24 @@ public struct GenerateText<In: Sendable>: Step {
     public typealias Output = String
     
     private let session: Relay<LanguageModelSession>
+    private let options: GenerationOptions
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Output>) async -> Void)?
     
     /// Creates a new GenerateText step with streaming support
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -283,12 +355,15 @@ public struct GenerateText<In: Sendable>: Step {
     /// Creates a new GenerateText step with a shared session via Relay
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -296,23 +371,30 @@ public struct GenerateText<In: Sendable>: Step {
     /// Creates a new GenerateText step with Relay (backward compatibility)
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         transform: @escaping (In) -> String
     ) {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
     
     /// Creates a new GenerateText step with a shared session via Relay
     /// When Input conforms to PromptRepresentable, no prompt builder is needed
-    /// - Parameter session: A Relay to a shared LanguageModelSession
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     public init(
-        session: Relay<LanguageModelSession>
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions()
     ) where In: PromptRepresentable {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -321,12 +403,15 @@ public struct GenerateText<In: Sendable>: Step {
     /// When Input conforms to PromptRepresentable
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) where In: PromptRepresentable {
         self.session = session
+        self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
     }
@@ -349,13 +434,17 @@ public struct GenerateText<In: Sendable>: Step {
                     span.addEvent("streaming_started")
                     var lastContent: String = ""
                     
-                    let responseStream = session.wrappedValue.streamResponse {
+                    let responseStream = session.wrappedValue.streamResponse(
+                        options: options
+                    ) {
                         prompt
                     }
                     
                     for try await snapshot in responseStream {
                         // Pass the snapshot directly to the handler
                         await handler(snapshot)
+                        
+                        // For String, PartiallyGenerated == String
                         lastContent = snapshot.content
                     }
                     
@@ -367,7 +456,9 @@ public struct GenerateText<In: Sendable>: Step {
                     // Note: Tool execution happens internally in the LanguageModel implementation
                     // if tools are registered in the session. The model will handle tool calls
                     // automatically based on its implementation (e.g., OpenAI, Anthropic).
-                    let response = try await session.wrappedValue.respond {
+                    let response = try await session.wrappedValue.respond(
+                        options: options
+                    ) {
                         prompt
                     }
                     

@@ -30,15 +30,26 @@ let package = Package(
         ),
         .target(
             name: "AgentTools",
-            dependencies: ["SwiftAgent"]
+            dependencies: [
+                "SwiftAgent",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ]
         ),
         .testTarget(
             name: "SwiftAgentTests",
-            dependencies: ["SwiftAgent", "AgentTools"]
+            dependencies: [
+                "SwiftAgent",
+                "AgentTools",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ]
         ),
         .testTarget(
             name: "AgentsTests",
-            dependencies: ["SwiftAgent", "AgentTools"]
+            dependencies: [
+                "SwiftAgent",
+                "AgentTools",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ]
         ),
     ]
 )

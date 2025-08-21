@@ -29,7 +29,7 @@ public struct GrepTool: OpenFoundationModels.Tool {
     public typealias Arguments = GrepInput
     public typealias Output = GrepOutput
     
-    public static let name = "grep"
+    public static let name = "text_search"
     public var name: String { Self.name }
     
     public static let description = """
@@ -53,6 +53,10 @@ public struct GrepTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        GrepInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -212,32 +216,26 @@ public struct GrepTool: OpenFoundationModels.Tool {
 @Generable
 public struct GrepInput: Sendable {
     /// The regular expression pattern to search for.
-    @Guide(description: "Search pattern (regex)")
     public let pattern: String
     
     /// File pattern to search (e.g., "*.swift").
-    @Guide(description: "File pattern (e.g., '*.swift')")
     public let filePattern: String
     
     /// Base directory to search from.
-    @Guide(description: "Base directory")
     public let basePath: String
     
     /// Whether to ignore case ("true" or "false").
-    @Guide(description: "Case insensitive: 'true' or 'false'")
     public let ignoreCase: String
     
     /// Number of lines to show before each match.
-    @Guide(description: "Lines of context before match")
     public let contextBefore: Int
     
     /// Number of lines to show after each match.
-    @Guide(description: "Lines of context after match")
     public let contextAfter: Int
 }
 
 /// A single grep match result.
-public struct GrepMatch: Codable, Sendable {
+public struct GrepMatch: Sendable {
     /// The file containing the match.
     public let file: String
     
@@ -259,7 +257,7 @@ public struct GrepMatch: Codable, Sendable {
 }
 
 /// Output structure for the grep operation.
-public struct GrepOutput: Codable, Sendable, CustomStringConvertible {
+public struct GrepOutput: Sendable {
     /// List of all matches found.
     public let matches: [GrepMatch]
     
@@ -288,7 +286,15 @@ public struct GrepOutput: Codable, Sendable, CustomStringConvertible {
         self.pattern = pattern
         self.basePath = basePath
     }
-    
+}
+
+extension GrepOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension GrepOutput: CustomStringConvertible {
     public var description: String {
         let header = """
         Grep Search [Found \(totalMatches) match(es) in \(filesSearched) file(s)]
@@ -316,9 +322,3 @@ public struct GrepOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make GrepOutput conform to PromptRepresentable
-extension GrepOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

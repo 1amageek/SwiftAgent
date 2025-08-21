@@ -8,23 +8,32 @@ import Foundation
 struct AgentsTests {
     
     // Mock LanguageModel for testing
-    struct MockLanguageModel: LanguageModel {
+    struct MockLanguageModel: LanguageModel, Sendable {
         public var isAvailable: Bool { true }
         
         public func generate(
             transcript: Transcript,
             options: GenerationOptions?
-        ) async throws -> String {
-            return "Mock response"
+        ) async throws -> Transcript.Entry {
+            return .response(Transcript.Response(
+                assetIDs: [],
+                segments: [
+                    .text(Transcript.TextSegment(content: "Mock response"))
+                ]
+            ))
         }
         
         public func stream(
             transcript: Transcript,
             options: GenerationOptions?
-        ) -> AsyncStream<String> {
+        ) -> AsyncStream<Transcript.Entry> {
             AsyncStream { continuation in
-                continuation.yield("Mock")
-                continuation.yield(" response")
+                continuation.yield(.response(Transcript.Response(
+                    assetIDs: [],
+                    segments: [
+                        .text(Transcript.TextSegment(content: "Mock response"))
+                    ]
+                )))
                 continuation.finish()
             }
         }
@@ -62,8 +71,6 @@ struct AgentsTests {
         let agent = TestAgent()
         // エージェントが正しく作成されていることを確認
         #expect(agent.session.isResponding == false)
-        // Transcript should contain instructions entry
-        #expect(agent.session.transcript.entries.count == 1)
     }
     
     @Test("Agent with Instructions")

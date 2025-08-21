@@ -57,7 +57,7 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     public typealias Arguments = FetchInput
     public typealias Output = URLFetchOutput
     
-    public static let name = "url_fetch"
+    public static let name = "web_fetch"
     public var name: String { Self.name }
     
     public static let description = """
@@ -76,6 +76,10 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        FetchInput.generationSchema
+    }
     
     // Security configuration
     private let maxResponseSize: Int64 = 5 * 1024 * 1024  // 5MB
@@ -240,12 +244,11 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
 @Generable
 public struct FetchInput: Sendable {
     /// The URL (HTTP or HTTPS) from which to fetch data.
-    @Guide(description: "The URL (HTTP or HTTPS) from which to fetch data")
     public let url: String
 }
 
 /// Output structure for URL fetch operations.
-public struct URLFetchOutput: Codable, Sendable, CustomStringConvertible {
+public struct URLFetchOutput: Sendable {
     /// Whether the fetch was successful.
     public let success: Bool
     
@@ -255,18 +258,20 @@ public struct URLFetchOutput: Codable, Sendable, CustomStringConvertible {
     /// Additional metadata about the operation.
     public let metadata: [String: String]
     
-    /// Creates a new instance of `URLFetchOutput`.
-    ///
-    /// - Parameters:
-    ///   - success: Whether the fetch succeeded.
-    ///   - output: The fetched content or error message.
-    ///   - metadata: Additional metadata.
     public init(success: Bool, output: String, metadata: [String: String]) {
         self.success = success
         self.output = output
         self.metadata = metadata
     }
-    
+}
+
+extension URLFetchOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension URLFetchOutput: CustomStringConvertible {
     public var description: String {
         let status = success ? "Success" : "Failed"
         let metadataString = metadata.isEmpty ? "" : "\nMetadata:\n" + metadata.map { "  \($0.key): \($0.value)" }.joined(separator: "\n")
@@ -279,11 +284,6 @@ public struct URLFetchOutput: Codable, Sendable, CustomStringConvertible {
 }
 
 // Make URLFetchOutput conform to PromptRepresentable for compatibility
-extension URLFetchOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        return Prompt(description)
-    }
-}
 
 // MARK: - SSRF Protection
 

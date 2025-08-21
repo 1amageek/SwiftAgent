@@ -28,7 +28,7 @@ public struct ReadTool: OpenFoundationModels.Tool {
     public typealias Arguments = ReadInput
     public typealias Output = ReadOutput
     
-    public static let name = "read"
+    public static let name = "file_read"
     public var name: String { Self.name }
     
     public static let description = """
@@ -50,6 +50,10 @@ public struct ReadTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        ReadInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -127,20 +131,17 @@ public struct ReadTool: OpenFoundationModels.Tool {
 @Generable
 public struct ReadInput: Sendable {
     /// The file path to read.
-    @Guide(description: "File path to read")
     public let path: String
     
     /// Starting line number (1-based, 0 for beginning).
-    @Guide(description: "Starting line number (1-based, 0 for beginning)")
     public let startLine: Int
     
     /// Ending line number (0 for end of file).
-    @Guide(description: "Ending line number (0 for end of file)")
     public let endLine: Int
 }
 
 /// Output structure for the read operation.
-public struct ReadOutput: Codable, Sendable, CustomStringConvertible {
+public struct ReadOutput: Sendable {
     /// The formatted file content with line numbers.
     public let content: String
     
@@ -174,7 +175,15 @@ public struct ReadOutput: Codable, Sendable, CustomStringConvertible {
         self.startLine = startLine
         self.endLine = endLine
     }
-    
+}
+
+extension ReadOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension ReadOutput: CustomStringConvertible {
     public var description: String {
         """
         Read Operation [Success]
@@ -186,9 +195,3 @@ public struct ReadOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make ReadOutput conform to PromptRepresentable
-extension ReadOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

@@ -30,7 +30,7 @@ public struct GlobTool: OpenFoundationModels.Tool {
     public typealias Arguments = GlobInput
     public typealias Output = GlobOutput
     
-    public static let name = "glob"
+    public static let name = "file_pattern"
     public var name: String { Self.name }
     
     public static let description = """
@@ -53,6 +53,10 @@ public struct GlobTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        GlobInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -251,20 +255,17 @@ public struct GlobTool: OpenFoundationModels.Tool {
 @Generable
 public struct GlobInput: Sendable {
     /// The glob pattern to match files against.
-    @Guide(description: "Glob pattern (e.g., '*.swift', '**/*.md')")
     public let pattern: String
     
     /// The base directory to search from.
-    @Guide(description: "Base directory (default: current)")
     public let basePath: String
     
     /// File type filter: "file", "dir", or "any".
-    @Guide(description: "File type: 'file', 'dir', or 'any'")
     public let fileType: String
 }
 
 /// Output structure for the glob operation.
-public struct GlobOutput: Codable, Sendable, CustomStringConvertible {
+public struct GlobOutput: Sendable {
     /// List of matching file paths.
     public let files: [String]
     
@@ -288,7 +289,15 @@ public struct GlobOutput: Codable, Sendable, CustomStringConvertible {
         self.pattern = pattern
         self.basePath = basePath
     }
-    
+}
+
+extension GlobOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension GlobOutput: CustomStringConvertible {
     public var description: String {
         let filesList = files.isEmpty ? "No matches found" : files.joined(separator: "\n")
         
@@ -302,9 +311,3 @@ public struct GlobOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make GlobOutput conform to PromptRepresentable
-extension GlobOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

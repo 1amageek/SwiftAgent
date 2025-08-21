@@ -29,7 +29,7 @@ public struct MultiEditTool: OpenFoundationModels.Tool {
     public typealias Arguments = MultiEditInput
     public typealias Output = MultiEditOutput
     
-    public static let name = "multi_edit"
+    public static let name = "file_multi_edit"
     public var name: String { Self.name }
     
     public static let description = """
@@ -56,6 +56,10 @@ public struct MultiEditTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        MultiEditInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -190,16 +194,14 @@ public struct MultiEditTool: OpenFoundationModels.Tool {
 @Generable
 public struct MultiEditInput: Sendable {
     /// The file path to edit.
-    @Guide(description: "File path to edit")
     public let path: String
     
     /// JSON array of edit operations.
-    @Guide(description: "JSON array of edits: [{\"old\":\"text1\",\"new\":\"replacement1\"}]")
     public let editsJson: String
 }
 
 /// Output structure for the multi-edit operation.
-public struct MultiEditOutput: Codable, Sendable, CustomStringConvertible {
+public struct MultiEditOutput: Sendable {
     /// Whether the operation was successful.
     public let success: Bool
     
@@ -233,7 +235,15 @@ public struct MultiEditOutput: Codable, Sendable, CustomStringConvertible {
         self.path = path
         self.message = message
     }
-    
+}
+
+extension MultiEditOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension MultiEditOutput: CustomStringConvertible {
     public var description: String {
         let changesDetail = changes.isEmpty ? "" : "\n\nChanges:\n" + changes.joined(separator: "\n")
         
@@ -245,9 +255,3 @@ public struct MultiEditOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make MultiEditOutput conform to PromptRepresentable
-extension MultiEditOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

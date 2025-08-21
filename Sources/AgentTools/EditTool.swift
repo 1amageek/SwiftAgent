@@ -28,7 +28,7 @@ public struct EditTool: OpenFoundationModels.Tool {
     public typealias Arguments = EditInput
     public typealias Output = EditOutput
     
-    public static let name = "edit"
+    public static let name = "file_edit"
     public var name: String { Self.name }
     
     public static let description = """
@@ -51,6 +51,10 @@ public struct EditTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        EditInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -183,24 +187,20 @@ public struct EditTool: OpenFoundationModels.Tool {
 @Generable
 public struct EditInput: Sendable {
     /// The file path to edit.
-    @Guide(description: "File path to edit")
     public let path: String
     
     /// The text to find in the file.
-    @Guide(description: "Text to find")
     public let oldString: String
     
     /// The text to replace it with.
-    @Guide(description: "Text to replace with")
     public let newString: String
     
     /// Whether to replace all occurrences ("true" or "false").
-    @Guide(description: "Replace all occurrences: 'true' or 'false'")
     public let replaceAll: String
 }
 
 /// Output structure for the edit operation.
-public struct EditOutput: Codable, Sendable, CustomStringConvertible {
+public struct EditOutput: Sendable {
     /// Whether the operation was successful.
     public let success: Bool
     
@@ -229,7 +229,15 @@ public struct EditOutput: Codable, Sendable, CustomStringConvertible {
         self.preview = preview
         self.message = message
     }
-    
+}
+
+extension EditOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension EditOutput: CustomStringConvertible {
     public var description: String {
         """
         Edit Operation [\(success ? "Success" : "Failed")]
@@ -241,9 +249,3 @@ public struct EditOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make EditOutput conform to PromptRepresentable
-extension EditOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

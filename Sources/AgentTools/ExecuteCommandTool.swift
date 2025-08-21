@@ -28,7 +28,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
     
-    public static let name = "execute"
+    public static let name = "command_execute"
     public var name: String { Self.name }
     
     public static let description = """
@@ -52,6 +52,10 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        ExecuteCommandInput.generationSchema
+    }
     
     // Allowed executables with their common paths
     private let allowedCommands: [String: String] = [
@@ -168,16 +172,14 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
 @Generable
 public struct ExecuteCommandInput: Sendable {
     /// The command executable name or path.
-    @Guide(description: "Command name (e.g., 'git', 'ls', 'swift')")
     public let executable: String
     
     /// JSON array of arguments for the command.
-    @Guide(description: "Arguments as JSON array (e.g., [\"status\", \"--porcelain\"])")
     public let argsJson: String
 }
 
 /// Output structure for command execution operations.
-public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
+public struct ExecuteCommandOutput: Sendable {
     /// Whether the command executed successfully.
     public let success: Bool
     
@@ -211,7 +213,15 @@ public struct ExecuteCommandOutput: Codable, Sendable, CustomStringConvertible {
         self.truncated = truncated
         self.metadata = metadata
     }
-    
+}
+
+extension ExecuteCommandOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension ExecuteCommandOutput: CustomStringConvertible {
     public var description: String {
         let status = success ? "Success" : "Failed"
         let truncateNote = truncated ? " (truncated)" : ""
@@ -331,9 +341,3 @@ private extension ExecuteCommandTool {
     }
 }
 
-// Make ExecuteCommandOutput conform to PromptRepresentable
-extension ExecuteCommandOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

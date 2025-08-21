@@ -28,7 +28,7 @@ public struct WriteTool: OpenFoundationModels.Tool {
     public typealias Arguments = WriteInput
     public typealias Output = WriteOutput
     
-    public static let name = "write"
+    public static let name = "file_write"
     public var name: String { Self.name }
     
     public static let description = """
@@ -50,6 +50,10 @@ public struct WriteTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        WriteInput.generationSchema
+    }
     
     private let workingDirectory: String
     private let fsActor: FileSystemActor
@@ -98,16 +102,14 @@ public struct WriteTool: OpenFoundationModels.Tool {
 @Generable
 public struct WriteInput: Sendable {
     /// The file path to write to.
-    @Guide(description: "File path to write to")
     public let path: String
     
     /// The content to write to the file.
-    @Guide(description: "Content to write to the file")
     public let content: String
 }
 
 /// Output structure for the write operation.
-public struct WriteOutput: Codable, Sendable, CustomStringConvertible {
+public struct WriteOutput: Sendable {
     /// Whether the operation was successful.
     public let success: Bool
     
@@ -136,7 +138,15 @@ public struct WriteOutput: Codable, Sendable, CustomStringConvertible {
         self.overwrote = overwrote
         self.message = message
     }
-    
+}
+
+extension WriteOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension WriteOutput: CustomStringConvertible {
     public var description: String {
         """
         Write Operation [\(success ? "Success" : "Failed")]
@@ -147,9 +157,3 @@ public struct WriteOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make WriteOutput conform to PromptRepresentable
-extension WriteOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

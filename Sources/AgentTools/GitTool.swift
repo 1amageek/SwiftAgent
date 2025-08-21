@@ -29,7 +29,7 @@ public struct GitTool: OpenFoundationModels.Tool {
     public typealias Arguments = GitInput
     public typealias Output = GitOutput
     
-    public static let name = "git_control"
+    public static let name = "git_command"
     public var name: String { Self.name }
     
     public static let description = """
@@ -53,6 +53,10 @@ public struct GitTool: OpenFoundationModels.Tool {
     """
     
     public var description: String { Self.description }
+    
+    public var parameters: GenerationSchema {
+        GitInput.generationSchema
+    }
     
     private let gitPath: String
     
@@ -270,24 +274,20 @@ public struct GitTool: OpenFoundationModels.Tool {
 @Generable
 public struct GitInput: Sendable {
     /// The Git subcommand to execute.
-    @Guide(description: "Git subcommand (e.g., 'status', 'log', 'commit')")
     public let command: String
     
     /// Path to the Git repository (empty string means current directory).
-    @Guide(description: "Path to the Git repository (empty string means current directory)")
     public let repository: String
     
     /// JSON array of arguments for the Git command.
-    @Guide(description: "Arguments as JSON array (e.g., [\"--oneline\", \"-n\", \"10\"])")
     public let argsJson: String
     
     /// Whether to allow mutating operations.
-    @Guide(description: "Allow mutating operations: 'true' or 'false' (default: false)")
     public let allowMutating: String
 }
 
 /// Output structure for Git operations.
-public struct GitOutput: Codable, Sendable, CustomStringConvertible {
+public struct GitOutput: Sendable {
     /// Whether the command executed successfully.
     public let success: Bool
     
@@ -321,7 +321,15 @@ public struct GitOutput: Codable, Sendable, CustomStringConvertible {
         self.truncated = truncated
         self.metadata = metadata
     }
-    
+}
+
+extension GitOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt(description)
+    }
+}
+
+extension GitOutput: CustomStringConvertible {
     public var description: String {
         let status = success ? "Success" : "Failed"
         let truncateNote = truncated ? " (truncated)" : ""
@@ -337,9 +345,3 @@ public struct GitOutput: Codable, Sendable, CustomStringConvertible {
     }
 }
 
-// Make GitOutput conform to PromptRepresentable
-extension GitOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt(description)
-    }
-}

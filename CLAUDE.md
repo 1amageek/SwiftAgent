@@ -105,8 +105,76 @@ Generate<String, Output>(session: session) { input in
 
 ## 注意事項
 
+### @Generableマクロの使用方法（重要）
+
+#### Apple Foundation Models の Tool プロトコル仕様（公式）
+Tool プロトコルの要件：
+- **Arguments**: `ConvertibleFromGeneratedContent` に準拠する必要がある
+- **Output**: `PromptRepresentable` に準拠する必要がある（通常は String または Generable 型）
+- **parameters**: `GenerationSchema` を返す（デフォルト実装あり）
+
+#### Tool の Arguments と Output の正しい実装
+
+##### Arguments 型の実装（@Generable を使用）
+```swift
+@Generable
+public struct ToolInput: Sendable {
+    @Guide(description: "File path to process")
+    public let path: String
+    
+    @Guide(description: "Starting line number", .range(1...))
+    public let startLine: Int
+    // init は不要 - @Generable が自動生成
+}
+```
+
+##### Output 型の実装（@Generable を使用しない）
+```swift
+// Tool の Output は @Generable を使用しない
+public struct ToolOutput: Sendable {
+    public let success: Bool
+    public let message: String
+    public let data: String
+    
+    // Tool の call メソッドで返すため、手動 init が必要
+    public init(success: Bool, message: String, data: String) {
+        self.success = success
+        self.message = message
+        self.data = data
+    }
+}
+
+// PromptRepresentable を手動で実装（必須）
+extension ToolOutput: PromptRepresentable {
+    public var promptRepresentation: Prompt {
+        Prompt("""
+        Success: \(success)
+        Message: \(message)
+        Data: \(data)
+        """)
+    }
+}
+```
+
+#### Tool の動作フロー
+1. **LLM が Tool 使用を決定** → Arguments を生成（@Generable により可能）
+2. **Tool.call(arguments:) が実行** → コードが Output を生成して返す
+3. **Output が LLM に返される** → PromptRepresentable として
+
+#### 重要な原則
+- **Arguments**: LLM が生成するもの → @Generable を使用
+- **Output**: Tool の実行結果としてコードが生成 → @Generable を使用しない、手動 init と PromptRepresentable 実装が必要
+
+#### @Guide 属性の必須性
+すべてのプロパティには **必ず @Guide 属性を付ける**こと：
+- LLM がプロパティの意味を理解するために必要
+- description パラメータで明確な説明を提供する
+- 制約（.range, .count など）も指定可能
+
 ### @Generableマクロの制限
-- 配列プロパティは直接サポートされない（回避策: スペース区切り文字列を使用）
+- Dictionary型（[String: String]など）は直接サポートされない
+  - 回避策: 別の構造体にラップするか、JSON文字列として扱う
+- 配列プロパティは基本型の配列のみサポート
 - enumプロパティは直接サポートされない（回避策: @Guideのenumerationを持つString型を使用）
 - 複雑なネスト構造では手動でinit実装が必要な場合がある
 

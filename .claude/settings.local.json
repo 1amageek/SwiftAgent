@@ -16,7 +16,9 @@
       "Bash(cp:*)",
       "Bash(swift build:*)",
       "Bash(swift:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:developer.apple.com)",
+      "Bash(remark:*)"
     ],
     "deny": []
   }

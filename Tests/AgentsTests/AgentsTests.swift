@@ -93,8 +93,6 @@ struct AgentsTests {
     func agentProtocolConformance() async throws {
         let agent = TestAgent()
         
-        // デフォルト値のテスト
-        #expect(agent.maxTurns == 10)
         #expect(agent.guardrails.isEmpty)
     }
 }

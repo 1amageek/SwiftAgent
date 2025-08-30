@@ -1,5 +1,5 @@
 {
-  "originHash" : "9aedbce591aa6308351cfd7742ef7457761117035ad38389c2efeb9f655ea002",
+  "originHash" : "ac53b6f3aa84343ff68a9d84bd9a06c174714bbbd5096bb8822255cf4d7fc390",
   "pins" : [
     {
       "identity" : "openfoundationmodels",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/1amageek/OpenFoundationModels.git",
       "state" : {
         "branch" : "main",
-        "revision" : "63abb9548567c8e191b0b23d8315c2bca68959b5"
+        "revision" : "8e8a9dc6485c885e0c01bc6adfe7ba1dfafc8a8b"
       }
     },
     {

@@ -55,22 +55,6 @@ public enum ToolError: Error {
     }
 }
 
-/// A protocol representing a language model (LLM), which extends the `Step` protocol.
-///
-/// `Model` defines a system prompt and can utilize a set of tools to assist in its operations.
-public protocol Model: Step {
-    
-    /// The system prompt used by the model.
-    ///
-    /// - Note: This prompt serves as the base context for the model's behavior.
-    var systemPrompt: String { get }
-    
-    /// A collection of tools available to the model for assisting in its operations.
-    ///
-    /// - Note: Tools can be used by the model to perform specialized tasks.
-    var tools: [any OpenFoundationModels.Tool] { get }
-}
-
 /// A protocol representing an agent, which acts as a composite step by combining multiple steps.
 ///
 /// `Agent` is composed of a body that defines its behavior and operates as a higher-level abstraction
@@ -87,17 +71,11 @@ public protocol Agent: Step where Input == Body.Input, Output == Body.Output {
     /// - Note: The body determines how the agent processes its input and generates its output.
     @StepBuilder var body: Self.Body { get }
     
-    /// Maximum number of execution turns for this agent
-    var maxTurns: Int { get }
-    
     /// Guardrails to apply to this agent's execution
     var guardrails: [any Guardrail] { get }
 }
 
 extension Agent {
-    
-    /// Default maximum number of turns
-    public var maxTurns: Int { 10 }
     
     /// Default guardrails (empty)
     public var guardrails: [any Guardrail] { [] }

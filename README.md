@@ -454,6 +454,111 @@ let webpage = try await urlTool.call(URLInput(url: "https://api.example.com/data
 | **GitTool** | Perform Git operations | • All git commands supported<br>• Argument passing<br>• Repository operations<br>• Output capture | • Version control<br>• Commit changes<br>• Branch management<br>• Check status |
 | **URLFetchTool** | Fetch content from URLs | • HTTP/HTTPS support<br>• Content type handling<br>• Error handling<br>• Response parsing | • API calls<br>• Web scraping<br>• Data fetching<br>• External integrations |
 
+## Converting Steps to Tools
+
+SwiftAgent allows you to use any Step as a Tool when it meets certain requirements. This enables seamless integration of your custom Steps with AI models, promoting code reuse and maintainability.
+
+### Requirements for Step-to-Tool Conversion
+
+A Step can be used directly as a Tool when it:
+1. **Conforms to both Step and Tool protocols**
+2. **Input conforms to `ConvertibleFromGeneratedContent` & `Generable`**
+3. **Output conforms to `PromptRepresentable`**
+4. **Conforms to `Sendable`** for thread safety
+5. **Defines `name` and `description` properties** for Tool identification
+
+### Simple Example
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+
+// Define a Step that also conforms to Tool
+struct UppercaseStep: Step, Tool, Sendable {
+    // Required Tool properties
+    let name = "uppercase"
+    let description = "Converts text to uppercase"
+    
+    // Step implementation
+    func run(_ input: String) async throws -> String {
+        input.uppercased()
+    }
+}
+
+// The Step can now be used as a Tool
+let session = LanguageModelSession(
+    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+    tools: [UppercaseStep()]  // Using Step as Tool
+) {
+    Instructions("You are a text processing assistant")
+}
+```
+
+### Advanced Example with Structured Input/Output
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+
+// Define structured input using @Generable
+@Generable
+struct CalculationInput: Sendable {
+    @Guide(description: "First number for calculation")
+    let a: Double
+    @Guide(description: "Second number for calculation")
+    let b: Double
+    @Guide(description: "Operation: add, subtract, multiply, divide")
+    let operation: String
+}
+
+// Define a calculation Step that can be used as a Tool
+struct CalculatorStep: Step, Tool, Sendable {
+    // Tool identification
+    let name = "calculator"
+    let description = "Performs basic arithmetic operations"
+    
+    // Step implementation
+    func run(_ input: CalculationInput) async throws -> String {
+        let result: Double = switch input.operation {
+        case "add": input.a + input.b
+        case "subtract": input.a - input.b
+        case "multiply": input.a * input.b
+        case "divide": input.b != 0 ? input.a / input.b : 0
+        default: 0
+        }
+        return "Result: \(result)"
+    }
+}
+
+// Use in an AI session
+let session = LanguageModelSession(
+    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+    tools: [CalculatorStep()]
+) {
+    Instructions("You are a math assistant. Use the calculator tool for computations.")
+}
+```
+
+### How It Works
+
+The `Tool+Step` extension automatically provides:
+- **`Arguments` type alias** pointing to your Step's Input type
+- **`parameters` property** derived from Input's GenerationSchema
+- **`call(arguments:)` method** that delegates to the Step's `run()` method
+- **Automatic name inference** from the Step type (can be overridden)
+
+This means you write your Step logic once and can use it both:
+- As a **Step** in agent workflows for composable processing
+- As a **Tool** for AI models to invoke during generation
+
+### Best Practices
+
+1. **Keep Steps focused**: Each Step should do one thing well
+2. **Use @Generable for complex inputs**: This ensures proper schema generation
+3. **Provide clear descriptions**: Help the AI understand when to use your tool
+4. **Make outputs PromptRepresentable**: Return strings or implement the protocol
+5. **Consider thread safety**: Ensure your Step is Sendable for concurrent use
+
 ### Tool Integration with AI Models
 
 All tools implement the `OpenFoundationModels.Tool` protocol and can be used with AI models:
@@ -462,11 +567,16 @@ All tools implement the `OpenFoundationModels.Tool` protocol and can be used wit
 let session = LanguageModelSession(
     model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
     tools: [
+        // Built-in tools
         ReadTool(),
         WriteTool(),
         EditTool(),
         GrepTool(),
-        ExecuteCommandTool()
+        ExecuteCommandTool(),
+        
+        // Your custom Steps as Tools
+        UppercaseStep(),
+        CalculatorStep()
     ]
 ) {
     Instructions("You are a code assistant with file system access.")

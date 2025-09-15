@@ -47,6 +47,7 @@ public struct Transform<Input: Sendable, Output: Sendable>: Step {
     /// - Parameter input: The value to transform
     /// - Returns: The transformed value
     /// - Throws: Any error that occurs during the transformation
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         try await transformer(input)
     }

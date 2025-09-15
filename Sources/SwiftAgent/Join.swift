@@ -39,6 +39,7 @@ public struct Join: Step {
     ///
     /// - Parameter input: The string to process
     /// - Returns: The joined string
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         input.joined(separator: separator)
     }

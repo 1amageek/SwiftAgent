@@ -54,6 +54,7 @@ public struct Reduce<Input: Collection & Sendable, Output: Sendable>: Step where
     /// - Parameter input: The collection to reduce
     /// - Returns: The final accumulated value
     /// - Throws: Any error that occurs during the reduction process
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         var result = initial
         var index = 0

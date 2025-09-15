@@ -174,6 +174,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         self.streamHandler = onStream
     }
     
+    @discardableResult
     public func run(_ input: In) async throws -> Out {
         return try await withSpan(
             "Generate.\(Out.self)",
@@ -416,6 +417,7 @@ public struct GenerateText<In: Sendable>: Step {
         self.streamHandler = onStream
     }
     
+    @discardableResult
     public func run(_ input: In) async throws -> String {
         return try await withSpan(
             "GenerateText",

@@ -20,6 +20,7 @@ public struct ValidateSchema<T: Codable & Sendable>: Step {
         // Empty init as we don't need schema anymore
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         guard let data = input.data(using: .utf8) else {
             throw ModelError.invalidInput("Cannot convert input to data")

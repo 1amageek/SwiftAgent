@@ -34,6 +34,7 @@ public struct Monitor<S: Step>: Step {
         self.onComplete = onComplete
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let startTime = Date()
         

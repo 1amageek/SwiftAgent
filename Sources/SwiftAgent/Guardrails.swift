@@ -104,6 +104,7 @@ public struct GuardrailStep<S: Step>: Step {
         self.outputGuardrails = outputGuardrails
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         // Check input guardrails
         var inputFailures: [String] = []

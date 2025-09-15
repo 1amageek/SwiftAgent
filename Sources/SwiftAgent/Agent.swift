@@ -27,6 +27,7 @@ public protocol Step<Input, Output> {
     /// - Parameter input: The input for the step.
     /// - Returns: The output produced by the step.
     /// - Throws: An error if the step fails to execute or the input is invalid.
+    @discardableResult
     func run(_ input: Input) async throws -> Output
 }
 
@@ -85,6 +86,7 @@ extension Agent {
     /// - Parameter input: The input for the agent.
     /// - Returns: The output produced by the agent's body.
     /// - Throws: An error if the agent's body fails to execute.
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         // Apply guardrails if present
         if !guardrails.isEmpty {
@@ -107,6 +109,7 @@ public struct EmptyStep<Input: Sendable>: Step {
     
     @inlinable public init() {}
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         input
     }
@@ -161,6 +164,7 @@ public struct Chain2<S1: Step, S2: Step>: Step where S1.Output == S2.Input {
         self.step2 = step2
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate = try await step1.run(input)
         return try await step2.run(intermediate)
@@ -182,6 +186,7 @@ public struct Chain3<S1: Step, S2: Step, S3: Step>: Step where S1.Output == S2.I
         self.step3 = step3
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -206,6 +211,7 @@ public struct Chain4<S1: Step, S2: Step, S3: Step, S4: Step>: Step where S1.Outp
         self.step4 = step4
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -232,6 +238,7 @@ public struct Chain5<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step>: Step whe
         self.step5 = step5
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -262,6 +269,7 @@ public struct Chain6<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step>
         self.step6 = step6
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -294,6 +302,7 @@ public struct Chain7<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step,
         self.step7 = step7
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -329,6 +338,7 @@ public struct Chain8<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step,
         self.step8 = step8
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate1 = try await step1.run(input)
         let intermediate2 = try await step2.run(intermediate1)
@@ -370,6 +380,7 @@ public struct OptionalStep<S: Step>: Step {
         self.step = step
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         guard let step = step else {
             throw OptionalStepError.stepIsNil
@@ -396,6 +407,7 @@ public struct ConditionalStep<TrueStep: Step, FalseStep: Step>: Step where TrueS
         self.second = second
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         if condition, let first = first {
             return try await first.run(input)

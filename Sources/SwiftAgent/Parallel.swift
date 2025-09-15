@@ -32,6 +32,7 @@ public struct Parallel<Input: Sendable, ElementOutput: Sendable>: Step {
         self.steps = builder()
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> [ElementOutput] {
         try await withThrowingTaskGroup(of: ElementOutput.self) { group in
             var results: [ElementOutput] = []

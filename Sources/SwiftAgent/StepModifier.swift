@@ -41,6 +41,7 @@ where S.Input == M.Input, S.Output == M.Output {
         self.modifier = modifier
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         try await modifier.body(input: input) { input in
             try await step.run(input)

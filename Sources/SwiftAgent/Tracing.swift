@@ -39,6 +39,7 @@ public struct TracingStep<S: Step>: Step {
         self.recordInputOutput = recordInputOutput
     }
     
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         try await withSpan(spanName, ofKind: spanKind) { span in
             // Set basic attributes

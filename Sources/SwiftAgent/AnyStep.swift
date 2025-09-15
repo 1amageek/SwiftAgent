@@ -41,6 +41,7 @@ public struct AnyStep<In: Sendable, Out: Sendable>: Step, Sendable {
     /// - Parameter input: The input to pass to the wrapped step
     /// - Returns: The output from the wrapped step
     /// - Throws: Any error thrown by the wrapped step
+    @discardableResult
     public func run(_ input: In) async throws -> Out {
         try await _run(input)
     }

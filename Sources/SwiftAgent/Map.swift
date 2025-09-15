@@ -54,6 +54,7 @@ public struct Map<InElement: Sendable, OutElement: Sendable>: Step {
     /// - Parameter input: The collection to transform
     /// - Returns: An array containing the transformed elements
     /// - Throws: Any error that occurs during the transformation of elements
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         var results: [OutElement] = []
         var index = 0

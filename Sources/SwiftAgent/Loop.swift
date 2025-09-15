@@ -112,6 +112,7 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
     ///   - `LoopError.conditionNotMet` if maximum iterations reached in finite loop
     ///   - `LoopError.cancelled` if the task was cancelled
     ///   - Any error thrown by the executed step or condition
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         var current = input
         

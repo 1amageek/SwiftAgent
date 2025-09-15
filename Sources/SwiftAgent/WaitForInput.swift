@@ -16,6 +16,7 @@ public struct WaitForInput: Step {
         self.prompt = prompt
     }
     
+    @discardableResult
     public func run(_ input: String) async throws -> String {
         print("\n\(prompt)", terminator: "")
         guard let userInput = readLine(), !userInput.isEmpty else {

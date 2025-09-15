@@ -44,6 +44,7 @@ public struct Race<Input: Sendable, Output: Sendable>: Step {
     /// - Throws:
     ///   - `RaceError.noSuccessfulResults` if no step succeeds.
     ///   - `RaceError.timeout` if the timeout elapses before any step succeeds.
+    @discardableResult
     public func run(_ input: Input) async throws -> Output {
         try await withThrowingTaskGroup(of: Output.self) { group in
             // Launch each step in the group

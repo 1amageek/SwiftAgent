@@ -9,8 +9,14 @@ struct AgentsTests {
     
     // Mock LanguageModel for testing
     struct MockLanguageModel: LanguageModel, Sendable {
+        public var id: String { "mock-model" }
+
         public var isAvailable: Bool { true }
-        
+
+        public func supports(locale: Locale) -> Bool {
+            true
+        }
+
         public func generate(
             transcript: Transcript,
             options: GenerationOptions?
@@ -22,12 +28,12 @@ struct AgentsTests {
                 ]
             ))
         }
-        
+
         public func stream(
             transcript: Transcript,
             options: GenerationOptions?
-        ) -> AsyncStream<Transcript.Entry> {
-            AsyncStream { continuation in
+        ) -> AsyncThrowingStream<Transcript.Entry, Error> {
+            AsyncThrowingStream { continuation in
                 continuation.yield(.response(Transcript.Response(
                     assetIDs: [],
                     segments: [
@@ -36,10 +42,6 @@ struct AgentsTests {
                 )))
                 continuation.finish()
             }
-        }
-        
-        public func supports(locale: Locale) -> Bool {
-            true
         }
     }
     

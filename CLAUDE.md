@@ -1,183 +1,334 @@
-# SwiftAgent OpenFoundationModels 統合方針
+# SwiftAgent
 
 ## 概要
-SwiftAgentをOpenFoundationModelsに対応させ、既存のAIライブラリ依存を削除する。
+SwiftAgentはOpenFoundationModelsを基盤とした、型安全で宣言的なAIエージェントフレームワーク。
 
-## 現在の状況
-- ✅ Package.swiftからAIライブラリ依存を削除済み
-- ✅ OpenFoundationModels依存を追加済み
-- ✅ SwiftAgent.Tool を OpenFoundationModels.Tool に完全移行済み
-- ✅ AgentTools (FileSystemTool, URLFetchTool, GitTool, ExecuteCommandTool) を移行済み
-- ✅ Agent プロトコルに guardrails, tracer, maxTurns プロパティを追加済み
-- ✅ 宣言的な設計を維持（Agent 実装時に必要なプロパティのみオーバーライド）
-- ✅ すべての個別AIライブラリ依存を削除済み（OllamaKit、LLMChatOpenAI、JSONSchema等）
-- ✅ Generate, GenerateText, GenerateStructured を SwiftAgent モジュールに統合済み
-- ✅ MessageTransform.swift で ChatMessage 型を定義済み
-- ✅ プロジェクト全体のビルドが成功
+## アーキテクチャ
 
-## 実装済みの内容
+### コア概念
+- **Step**: 基本的な処理単位。`Input -> Output` の非同期変換を行う
+- **LanguageModelSession**: OpenFoundationModelsのLLMセッション
+- **Session**: TaskLocalベースのセッション伝播機構
 
-### 1. コア設計の維持
-- **Step/Agent/Model** の基本構造は維持
-- **宣言的でSwiftUIライクな構文** を保持
-- **型安全性** を最優先
-
-### 2. Tool定義の完全移行
-OpenFoundationModels.Tool を直接使用（Option B を採用）：
 ```swift
-public struct ExecuteCommandTool: OpenFoundationModels.Tool {
-    public typealias Arguments = ExecuteCommandInput
-    
-    public static let name = "execute"
-    public var name: String { Self.name }
-    
-    public func call(arguments: ExecuteCommandInput) async throws -> ToolOutput {
-        // 実装
+public protocol Step<Input, Output> {
+    associatedtype Input: Sendable
+    associatedtype Output: Sendable
+    func run(_ input: Input) async throws -> Output
+}
+```
+
+### Step の種類
+
+#### プリミティブ Steps
+| Step | 説明 |
+|------|------|
+| `Transform` | クロージャによる単純な変換 |
+| `Generate<In, Out>` | LLMで構造化出力を生成（Out: Generable） |
+| `GenerateText<In>` | LLMでテキスト出力を生成 |
+| `EmptyStep` | パススルー（入力をそのまま出力） |
+| `Join` | `[String] -> String` 結合 |
+
+#### 合成 Steps
+| Step | 説明 |
+|------|------|
+| `Chain2-8` | 直列実行（StepBuilderで自動生成） |
+| `Parallel` | 並列実行 |
+| `Race` | 競合実行（最初の結果を返す） |
+| `Loop` | 繰り返し実行 |
+| `Map` | コレクション変換 |
+| `Reduce` | コレクション集約 |
+
+#### 修飾 Steps
+| Step | 説明 |
+|------|------|
+| `Monitor` | 入出力/エラー/完了を監視 |
+| `TracingStep` | 分散トレーシング |
+| `AnyStep` | 型消去ラッパー |
+
+## Session 管理
+
+SwiftUIの`@Environment`に似た仕組みで、`LanguageModelSession`をStep階層に暗黙的に伝播させる。
+
+### コンポーネント
+
+```swift
+// 1. TaskLocalでセッションを保持
+public enum SessionContext {
+    @TaskLocal public static var current: LanguageModelSession?
+}
+
+// 2. @Sessionプロパティラッパーでアクセス
+@propertyWrapper
+public struct Session {
+    public var wrappedValue: LanguageModelSession {
+        SessionContext.current!
     }
 }
-```
 
-- パラメータは`@Generable`マクロで定義
-- 型安全な入出力（ConvertibleFromGeneratedContent準拠）
-- ToolOutput型への出力統一
+// 3. withSessionでコンテキストを設定
+public func withSession<T>(_ session: LanguageModelSession, operation: () async throws -> T) async rethrows -> T
 
-### 3. Agent プロトコルの拡張
-```swift
-public protocol Agent: Step {
-    // 既存のプロパティ
-    @StepBuilder var body: Self.Body { get }
-    
-    // 新規追加（デフォルト実装あり）
-    var maxTurns: Int { get }           // デフォルト: 10
-    var guardrails: [any Guardrail] { get }  // デフォルト: []
+// 4. Step拡張でセッション付き実行
+extension Step {
+    public func run(_ input: Input, session: LanguageModelSession) async throws -> Output
 }
 ```
 
-run() メソッドで自動的に適用される：
-- Guardrails による入出力検証
-- Tracing による実行監視
-- 宣言的な設定（必要なプロパティのみオーバーライド）
-
-## 完了したタスク
-
-### 1. 依存関係の整理
-- すべての個別AIライブラリ（OllamaKit、LLMChatOpenAI、JSONSchema等）を削除
-- OpenFoundationModelsに完全移行
-- swift-distributed-actors依存も削除
-
-### 2. ヘルパー実装の SwiftAgent モジュールへの統合
-- Agents モジュールを削除し、すべてのヘルパー実装を SwiftAgent モジュールに移動
-- Generate: Generable型の構造化出力を生成
-- GenerateText: シンプルな文字列出力を生成
-- GenerateStructured: 構造化データ生成のための汎用Step
-- MessageTransform: ChatMessage型と変換処理を提供
-
-### 3. AgentTools の修正
-- @Generableマクロの制限に対応（enum→String、配列→String）
-- FileSystemTool、GitTool、ExecuteCommandTool、URLFetchToolすべて移行完了
-
-### 4. Guardrails の整理
-- SwiftAgent.Guardrail: 汎用的なStep検証用
-- LanguageModelSession.Guardrails: LLM特有のコンテンツ安全性用
-- 両者は補完的な役割を持つため、どちらも維持
-
-## 今後の方針
-- OpenFoundationModels が提供する統一インターフェースのみを使用
-- 具体的なAIプロバイダー実装（OpenAI、Anthropic等）はユーザー側で選択
-- SwiftAgentはプロバイダー中立なフレームワークとして機能
-
-## モデルプロバイダーの使用方法
-SwiftAgent で異なるAIモデルプロバイダーを使用するには、LanguageModelSession を作成して Generate/GenerateText に渡します：
+### 使用例
 
 ```swift
-// OpenAI の場合
-let session = LanguageModelSession(
-    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
-    instructions: Instructions("You are a helpful assistant.")
-)
+// @Sessionでセッションにアクセス
+struct TranslateStep: Step {
+    @Session var session: LanguageModelSession
 
-Generate<String, Output>(session: session) { input in
-    input
+    func run(_ input: String) async throws -> String {
+        let response = try await session.respond {
+            Prompt("Translate to Japanese: \(input)")
+        }
+        return response.content
+    }
+}
+
+// 実行時にwithSessionでコンテキスト設定
+let session = LanguageModelSession(model: model) {
+    Instructions("You are a translator")
+}
+
+let result = try await withSession(session) {
+    try await TranslateStep().run("Hello")
+}
+
+// または簡便なメソッド
+let result = try await TranslateStep().run("Hello", session: session)
+```
+
+### ネストしたStep
+
+```swift
+struct OuterStep: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        // InnerStepも同じsessionを自動的に使用
+        let processed = try await InnerStep().run(input)
+        return processed
+    }
+}
+
+struct InnerStep: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        // 親のコンテキストからsessionを取得
+        let response = try await session.respond { Prompt(input) }
+        return response.content
+    }
+}
+
+// 一度のwithSessionで両方のStepがsessionにアクセス可能
+try await withSession(session) {
+    try await OuterStep().run("Hello")
 }
 ```
 
-この設計により、SwiftAgent は特定のプロバイダーに依存せず、ユーザーが自由にモデルを選択できます。
+## 基本的な使い方
 
-## 注意事項
+```swift
+import SwiftAgent
+import OpenFoundationModels
 
-### @Generableマクロの使用方法（重要）
+// LanguageModelSession を作成
+let session = LanguageModelSession(model: model) {
+    Instructions("You are a helpful assistant.")
+}
 
-#### Apple Foundation Models の Tool プロトコル仕様（公式）
-Tool プロトコルの要件：
-- **Arguments**: `ConvertibleFromGeneratedContent` に準拠する必要がある
-- **Output**: `PromptRepresentable` に準拠する必要がある（通常は String または Generable 型）
-- **parameters**: `GenerationSchema` を返す（デフォルト実装あり）
+// Step を作成して実行
+let step = GenerateText<String>(session: session) { input in
+    Prompt("Translate to Japanese: \(input)")
+}
 
-#### Tool の Arguments と Output の正しい実装
+let result = try await step.run("Hello, world!")
+```
 
-##### Arguments 型の実装（@Generable を使用）
+### StepBuilder による合成
+
+```swift
+struct TranslationPipeline: Step {
+    typealias Input = String
+    typealias Output = String
+
+    @Session var session: LanguageModelSession
+
+    @StepBuilder
+    var body: some Step<String, String> {
+        Transform { $0.trimmingCharacters(in: .whitespaces) }
+        GenerateText(session: session) { input in
+            Prompt("Translate to Japanese: \(input)")
+        }
+        Transform { "Translation: \($0)" }
+    }
+
+    func run(_ input: String) async throws -> String {
+        try await body.run(input)
+    }
+}
+
+// 使用
+let result = try await withSession(session) {
+    try await TranslationPipeline().run("Hello")
+}
+```
+
+### 構造化出力
+
 ```swift
 @Generable
-public struct ToolInput: Sendable {
-    @Guide(description: "File path to process")
-    public let path: String
-    
-    @Guide(description: "Starting line number", .range(1...))
-    public let startLine: Int
-    // init は不要 - @Generable が自動生成
+struct BlogPost: Sendable {
+    @Guide(description: "The title of the blog post")
+    let title: String
+
+    @Guide(description: "The main content")
+    let content: String
 }
+
+let step = Generate<String, BlogPost>(session: session) { topic in
+    Prompt("Write a blog post about: \(topic)")
+}
+
+let post = try await step.run("Swift Concurrency")
 ```
 
-##### Output 型の実装（@Generable を使用しない）
+## Tool 定義
+
+OpenFoundationModels.Tool を直接使用：
+
 ```swift
-// Tool の Output は @Generable を使用しない
-public struct ToolOutput: Sendable {
-    public let success: Bool
-    public let message: String
-    public let data: String
-    
-    // Tool の call メソッドで返すため、手動 init が必要
-    public init(success: Bool, message: String, data: String) {
-        self.success = success
-        self.message = message
-        self.data = data
+@Generable
+public struct SearchInput: Sendable {
+    @Guide(description: "Search query")
+    public let query: String
+}
+
+public struct SearchOutput: Sendable, PromptRepresentable {
+    public let results: [String]
+
+    public var promptRepresentation: Prompt {
+        Prompt(results.joined(separator: "\n"))
     }
 }
 
-// PromptRepresentable を手動で実装（必須）
-extension ToolOutput: PromptRepresentable {
-    public var promptRepresentation: Prompt {
-        Prompt("""
-        Success: \(success)
-        Message: \(message)
-        Data: \(data)
-        """)
+public struct SearchTool: Tool {
+    public typealias Arguments = SearchInput
+
+    public let name = "search"
+    public let description = "Search for information"
+
+    public func call(arguments: SearchInput) async throws -> SearchOutput {
+        SearchOutput(results: ["Result 1", "Result 2"])
     }
 }
 ```
 
-#### Tool の動作フロー
-1. **LLM が Tool 使用を決定** → Arguments を生成（@Generable により可能）
-2. **Tool.call(arguments:) が実行** → コードが Output を生成して返す
-3. **Output が LLM に返される** → PromptRepresentable として
+### @Generable の注意事項
 
-#### 重要な原則
-- **Arguments**: LLM が生成するもの → @Generable を使用
-- **Output**: Tool の実行結果としてコードが生成 → @Generable を使用しない、手動 init と PromptRepresentable 実装が必要
+**Arguments（LLMが生成）**: @Generable を使用
+```swift
+@Generable
+struct ToolInput: Sendable {
+    @Guide(description: "説明") let param: String
+}
+```
 
-#### @Guide 属性の必須性
-すべてのプロパティには **必ず @Guide 属性を付ける**こと：
-- LLM がプロパティの意味を理解するために必要
-- description パラメータで明確な説明を提供する
-- 制約（.range, .count など）も指定可能
+**Output（コードが生成）**: @Generable を使用しない
+```swift
+struct ToolOutput: Sendable, PromptRepresentable {
+    let result: String
+    var promptRepresentation: Prompt { Prompt(result) }
+}
+```
 
-### @Generableマクロの制限
-- Dictionary型（[String: String]など）は直接サポートされない
-  - 回避策: 別の構造体にラップするか、JSON文字列として扱う
-- 配列プロパティは基本型の配列のみサポート
-- enumプロパティは直接サポートされない（回避策: @Guideのenumerationを持つString型を使用）
-- 複雑なネスト構造では手動でinit実装が必要な場合がある
+### @Generable の制限
+- Dictionary 型は直接サポートされない
+- enum は直接サポートされない（@Guide の enumeration を使用）
+- すべてのプロパティに @Guide を付ける必要がある
+
+## SwiftAgentMCP
+
+MCP (Model Context Protocol) をSwiftAgentと統合するオプショナルモジュール。
+
+### 概要
+
+```swift
+import SwiftAgentMCP
+
+// 1. MCP サーバー設定
+let config = MCPServerConfig(
+    name: "filesystem",
+    transport: .stdio(
+        command: "/usr/local/bin/npx",
+        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    )
+)
+
+// 2. 接続
+let mcpClient = try await MCPClient.connect(config: config)
+defer { Task { await mcpClient.disconnect() } }
+
+// 3. Tools取得 (OpenFoundationModels.Tool互換)
+let mcpTools = try await mcpClient.tools()
+
+// 4. LanguageModelSessionで使用
+let session = LanguageModelSession(model: model, tools: mcpTools) {
+    Instructions("You are a helpful assistant")
+}
+```
+
+### 主要コンポーネント
+
+| コンポーネント | 説明 |
+|--------------|------|
+| `MCPClient` | MCPサーバーへの接続を管理するActor |
+| `MCPDynamicTool` | MCP.ToolをOpenFoundationModels.Toolに変換 |
+| `MCPServerConfig` | サーバー接続設定 |
+| `MCPTransportConfig` | トランスポート設定（stdio/HTTP） |
+
+## ファイル構成
+
+| ファイル | 責務 |
+|----------|------|
+| `Agent.swift` | Step プロトコル、Chain2-8、StepBuilder |
+| `Session.swift` | @Session、withSession、SessionContext |
+| `Generate.swift` | Generate、GenerateText |
+| `Loop.swift` | 繰り返し制御 |
+| `Parallel.swift` | 並列実行 |
+| `Race.swift` | 競合実行 |
+| `Map.swift` | コレクション変換 |
+| `Reduce.swift` | コレクション集約 |
+| `Transform.swift` | 単純変換 |
+| `Join.swift` | 文字列結合 |
+| `AnyStep.swift` | 型消去 |
+| `Monitor.swift` | 監視 |
+| `Tracing.swift` | 分散トレーシング |
+| `StepModifier.swift` | モディファイアパターン |
+| `Tool+Step.swift` | Step を Tool として使用 |
+
+## 依存関係
+
+```
+OpenFoundationModels
+    ↑
+SwiftAgent (Step, Generate, Session, Control Flow)
+    ↑
+AgentTools (FileSystemTool, ExecuteCommandTool, etc.)
+
+MCP (swift-sdk)
+    ↑
+SwiftAgentMCP (MCPClient, MCPDynamicTool)
+    ↑
+SwiftAgent
+```
 
 ## 参考リンク
 - [OpenFoundationModels DeepWiki](https://deepwiki.com/1amageek/OpenFoundationModels)
-- [OpenAI Agents JS](https://deepwiki.com/openai/openai-agents-js) - Guardrails、Tracing の設計参考
+- [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk)

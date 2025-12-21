@@ -8,15 +8,10 @@ SwiftAgent is a powerful Swift framework for building AI agents using a declarat
 
 ```mermaid
 graph TB
-    subgraph "Core Protocols"
+    subgraph "Core Protocol"
         Step["Step<Input, Output>"]
-        Agent["Agent: Step"]
-        Model["Model: Step"]
-        
-        Step --> Agent
-        Step --> Model
     end
-    
+
     subgraph "OpenFoundationModels Integration"
         Tool["Tool Protocol"]
         LMS["LanguageModelSession"]
@@ -24,7 +19,13 @@ graph TB
         Prompt["@PromptBuilder"]
         Instructions["@InstructionsBuilder"]
     end
-    
+
+    subgraph "Session Management"
+        Session["@Session"]
+        WithSession["withSession()"]
+        SessionContext["SessionContext"]
+    end
+
     subgraph "Built-in Steps"
         subgraph "Transform Steps"
             Transform["Transform"]
@@ -32,81 +33,78 @@ graph TB
             Reduce["Reduce"]
             Join["Join"]
         end
-        
+
         subgraph "Control Flow"
             Loop["Loop"]
             Parallel["Parallel"]
             Race["Race"]
-            WaitForInput["WaitForInput"]
         end
-        
+
         subgraph "AI Generation"
             Generate["Generate<T>"]
             GenerateText["GenerateText"]
         end
     end
-    
-    subgraph "State Management"
-        Memory["@Memory"]
-        Relay["Relay<T>"]
-        Session["@Session"]
-    end
-    
-    subgraph "Safety & Monitoring"
-        Guardrails["Guardrails"]
+
+    subgraph "Monitoring"
         Monitor["Monitor"]
         Tracing["Distributed Tracing"]
     end
-    
+
     subgraph "Tools"
         ReadTool["ReadTool"]
         WriteTool["WriteTool"]
         EditTool["EditTool"]
-        MultiEditTool["MultiEditTool"]
         GrepTool["GrepTool"]
         GlobTool["GlobTool"]
         GitTool["GitTool"]
         ExecuteCommandTool["ExecuteCommandTool"]
         URLFetchTool["URLFetchTool"]
     end
-    
+
+    subgraph "MCP Integration"
+        MCPClient["MCPClient"]
+        MCPDynamicTool["MCPDynamicTool"]
+    end
+
     Step --> Transform
     Step --> Map
     Step --> Loop
     Step --> Parallel
     Step --> Generate
     Step --> GenerateText
-    
-    Agent --> Guardrails
-    Step --> Monitor
-    Step --> Tracing
-    
+
+    Session --> SessionContext
+    WithSession --> SessionContext
+    SessionContext --> LMS
+
     Generate --> LMS
     GenerateText --> LMS
-    Session --> LMS
-    
+
     Tool --> ReadTool
     Tool --> WriteTool
     Tool --> EditTool
     Tool --> ExecuteCommandTool
+
+    MCPClient --> MCPDynamicTool
+    MCPDynamicTool --> Tool
 ```
 
 ## Features
 
-- 🎯 **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
-- 🔄 **Composable Steps**: Chain multiple steps together seamlessly with StepBuilder
-- 🛠️ **Type-Safe Tools**: Define and use tools with compile-time type checking
-- 🤖 **Model-Agnostic**: Works with any AI model through OpenFoundationModels
-- 📦 **Modular Design**: Create reusable agent components
-- 🔄 **Async/Await Support**: Built for modern Swift concurrency
-- 🎭 **Protocol-Based**: Flexible and extensible architecture
-- 📊 **State Management**: Memory and Relay for state handling
-- 🎨 **@Session**: Elegant session management with property wrapper
-- 🏗️ **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
-- 🔍 **Monitoring**: Built-in monitoring and distributed tracing support
-- 📡 **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
-- 🛡️ **Guardrails**: Safety checks for input/output validation
-- ⚙️ **Chain Support**: Chain up to 8 steps with type-safe composition
+- **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
+- **Composable Steps**: Chain multiple steps together seamlessly with StepBuilder
+- **Type-Safe Tools**: Define and use tools with compile-time type checking
+- **Model-Agnostic**: Works with any AI model through OpenFoundationModels
+- **Modular Design**: Create reusable agent components
+- **Async/Await Support**: Built for modern Swift concurrency
+- **Protocol-Based**: Flexible and extensible architecture
+- **@Session**: TaskLocal-based session management with property wrapper
+- **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
+- **Monitoring**: Built-in monitoring and distributed tracing support
+- **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
+- **MCP Integration**: Optional Model Context Protocol support via SwiftAgentMCP
+- **Chain Support**: Chain up to 8 steps with type-safe composition
 
 ## Core Components
 
@@ -118,75 +116,87 @@ Steps are the fundamental building blocks in SwiftAgent. They process input and 
 public protocol Step<Input, Output> {
     associatedtype Input: Sendable
     associatedtype Output: Sendable
-    
+
     func run(_ input: Input) async throws -> Output
-}
-```
-
-### Agents
-
-Agents are high-level abstractions that combine steps to create complex workflows:
-
-```swift
-public protocol Agent: Step {
-    associatedtype Body: Step
-    
-    @StepBuilder var body: Self.Body { get }
-    var maxTurns: Int { get }
-    var guardrails: [any Guardrail] { get }
 }
 ```
 
 ## Session Management
 
-SwiftAgent provides elegant session management through the `@Session` property wrapper, enabling reusable and shared language model sessions across your agents.
+SwiftAgent provides elegant session management through TaskLocal-based `@Session` property wrapper, similar to SwiftUI's `@Environment`. This enables session propagation through the Step hierarchy without manual parameter passing.
 
 ### @Session Property Wrapper
 
-The `@Session` wrapper simplifies session creation and management:
+The `@Session` wrapper provides access to the current `LanguageModelSession` from the task context:
 
 ```swift
-struct MyAgent {
-    // With explicit initialization
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
-        instructions: Instructions("You are a helpful assistant")
-    )
-    
-    // With custom configuration
-    @Session
-    var customSession = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are an expert")
+struct TranslateStep: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        let response = try await session.respond {
+            Prompt("Translate to Japanese: \(input)")
+        }
+        return response.content
     }
 }
 ```
 
-### Using Sessions with Generate Steps
+### withSession - Setting the Context
 
-Pass sessions to Generate steps using the `$` prefix for Relay access:
+Use `withSession` to provide a session to the Step hierarchy:
 
 ```swift
-struct ContentAgent {
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a content creator")
-    }
-    
-    var body: some Step {
-        GenerateText(session: $session) { input in
-            Prompt {
-                "Create content about: \(input)"
-                if detailed {
-                    "Include comprehensive details"
-                }
-            }
+let session = LanguageModelSession(model: myModel) {
+    Instructions("You are a helpful translator")
+}
+
+let result = try await withSession(session) {
+    try await TranslateStep().run("Hello, world!")
+}
+```
+
+### Convenient Run with Session
+
+You can also use the Step extension for a more concise syntax:
+
+```swift
+let result = try await TranslateStep().run("Hello", session: session)
+```
+
+### Nested Steps
+
+Sessions automatically propagate through nested Steps:
+
+```swift
+struct OuterStep: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        // InnerStep automatically gets the same session
+        let processed = try await InnerStep().run(input)
+
+        let response = try await session.respond {
+            Prompt("Summarize: \(processed)")
         }
+        return response.content
     }
+}
+
+struct InnerStep: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        let response = try await session.respond {
+            Prompt("Expand: \(input)")
+        }
+        return response.content
+    }
+}
+
+// One withSession provides session to all nested Steps
+try await withSession(session) {
+    try await OuterStep().run("AI")
 }
 ```
 
@@ -197,38 +207,38 @@ SwiftAgent uses OpenFoundationModels for AI model integration, providing a unifi
 ### Dynamic Instructions with InstructionsBuilder
 
 ```swift
-// Build instructions dynamically with conditions and loops
-let session = LanguageModelSession {
-    "You are an AI assistant"
-    
-    if userPreferences.verbose {
-        "Provide detailed explanations"
+let session = LanguageModelSession(model: myModel) {
+    Instructions {
+        "You are an AI assistant"
+
+        if userPreferences.verbose {
+            "Provide detailed explanations"
+        }
+
+        for expertise in userExpertiseAreas {
+            "You have expertise in \(expertise)"
+        }
+
+        "Always be helpful and accurate"
     }
-    
-    for expertise in userExpertiseAreas {
-        "You have expertise in \(expertise)"
-    }
-    
-    "Always be helpful and accurate"
 }
 ```
 
 ### Dynamic Prompts with PromptBuilder
 
 ```swift
-// Build prompts dynamically
-GenerateText(session: $session) { input in
+GenerateText(session: session) { input in
     Prompt {
         "User request: \(input)"
-        
+
         if includeContext {
             "Context: \(contextInfo)"
         }
-        
+
         for example in relevantExamples {
             "Example: \(example)"
         }
-        
+
         "Please provide a comprehensive response"
     }
 }
@@ -236,17 +246,13 @@ GenerateText(session: $session) { input in
 
 ### Using Model Providers
 
-SwiftAgent works with any AI provider through OpenFoundationModels. Configure your preferred provider:
+SwiftAgent works with any AI provider through OpenFoundationModels:
 
 ```swift
 import SwiftAgent
 import OpenFoundationModels
-// Import your chosen provider package
-// e.g., OpenFoundationModelsOpenAI, OpenFoundationModelsOllama, etc.
 
-// Create a session with your chosen model
-@Session
-var session = LanguageModelSession(
+let session = LanguageModelSession(
     model: YourModelFactory.create(apiKey: "your-api-key")
 ) {
     Instructions("You are a helpful assistant.")
@@ -260,7 +266,6 @@ SwiftAgent is provider-agnostic. Choose from available OpenFoundationModels prov
 - [OpenFoundationModels-OpenAI](https://github.com/1amageek/OpenFoundationModels-OpenAI) - OpenAI models (GPT-4o, etc.)
 - [OpenFoundationModels-Ollama](https://github.com/1amageek/OpenFoundationModels-Ollama) - Local models via Ollama
 - [OpenFoundationModels-Anthropic](https://github.com/1amageek/OpenFoundationModels-Anthropic) - Anthropic Claude models
-- Additional providers available through the OpenFoundationModels ecosystem
 
 ## Built-in Steps
 
@@ -276,7 +281,7 @@ Transform<String, Int> { input in
 
 ### Generate
 
-Generate structured output using AI models with Builder APIs:
+Generate structured output using AI models:
 
 ```swift
 @Generable
@@ -287,50 +292,39 @@ struct Story {
     let content: String
 }
 
-// Using @Session and PromptBuilder
-struct StoryGenerator {
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a creative writer")
-    }
-    
-    var generator: some Step {
-        Generate<String, Story>(session: $session) { input in
+struct StoryGenerator: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ topic: String) async throws -> Story {
+        let generate = Generate<String, Story>(session: session) { input in
             Prompt {
                 "Write a story about: \(input)"
                 "Include vivid descriptions"
-                if includeDialogue {
-                    "Add realistic dialogue"
-                }
             }
         }
+        return try await generate.run(topic)
     }
+}
+
+// Usage
+let story = try await withSession(session) {
+    try await StoryGenerator().run("a brave knight")
 }
 ```
 
 ### GenerateText
 
-Generate string output using AI models with dynamic builders:
+Generate string output using AI models:
 
 ```swift
-// Using @Session with shared configuration
-struct TextGenerator {
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a creative writer")
-    }
-    
-    func generate(_ topic: String) -> some Step {
-        GenerateText(session: $session) { input in
-            Prompt {
-                "Write about: \(topic)"
-                "Input: \(input)"
-            }
+struct TextGenerator: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ topic: String) async throws -> String {
+        let generate = GenerateText<String>(session: session) { input in
+            Prompt("Write about: \(input)")
         }
+        return try await generate.run(topic)
     }
 }
 ```
@@ -373,315 +367,151 @@ Parallel<String, Int> {
 
 ## Built-in Tools
 
-SwiftAgent includes a comprehensive suite of tools for file operations, searching, command execution, and more. See the [Tool Reference](#tool-reference) section below for detailed information about each tool.
+SwiftAgent includes a comprehensive suite of tools for file operations, searching, command execution, and more.
 
-### Quick Examples
-
-#### File Operations
-```swift
-// Reading files
-let readTool = ReadTool()
-let content = try await readTool.call(ReadInput(path: "config.json", startLine: 1, endLine: 50))
-
-// Writing files
-let writeTool = WriteTool()
-let result = try await writeTool.call(WriteInput(path: "output.txt", content: "Hello, World!"))
-
-// Editing files
-let editTool = EditTool()
-let edited = try await editTool.call(EditInput(
-    path: "main.swift",
-    oldString: "print(\"old\")",
-    newString: "print(\"new\")",
-    replaceAll: "true"
-))
-```
-
-#### Search Operations
-```swift
-// Search with grep
-let grepTool = GrepTool()
-let matches = try await grepTool.call(GrepInput(
-    pattern: "TODO:",
-    filePattern: "*.swift",
-    basePath: "./src",
-    ignoreCase: "false",
-    contextBefore: 2,
-    contextAfter: 2
-))
-
-// Find files with glob
-let globTool = GlobTool()
-let files = try await globTool.call(GlobInput(
-    pattern: "**/*.md",
-    basePath: ".",
-    fileType: "file"
-))
-```
-
-#### System Operations
-```swift
-// Execute commands
-let executeTool = ExecuteCommandTool()
-let output = try await executeTool.call(ExecuteCommandInput(
-    command: "swift build",
-    timeout: 30
-))
-
-// Git operations
-let gitTool = GitTool()
-let status = try await gitTool.call(GitInput(
-    command: "status",
-    args: "--short"
-))
-
-// Fetch URLs
-let urlTool = URLFetchTool()
-let webpage = try await urlTool.call(URLInput(url: "https://api.example.com/data"))
-```
-
-## Tool Reference
-
-| Tool Name | Purpose | Main Features | Common Use Cases |
-|-----------|---------|---------------|------------------|
-| **ReadTool** | Read file contents with line numbers | • Line number formatting (123→content)<br>• Range selection (startLine, endLine)<br>• UTF-8 text file support<br>• Max file size: 1MB | • View source code<br>• Read configuration files<br>• Inspect specific line ranges<br>• Debug file contents |
-| **WriteTool** | Write content to files | • Create new files or overwrite existing<br>• Automatic parent directory creation<br>• Atomic write operations<br>• UTF-8 encoding only | • Save generated content<br>• Create configuration files<br>• Export data<br>• Write logs or reports |
-| **EditTool** | Find and replace text in files | • Single or all occurrences replacement<br>• Preview changes before applying<br>• Atomic operations<br>• Validates old/new strings | • Fix bugs in code<br>• Update configuration values<br>• Refactor variable names<br>• Correct typos |
-| **MultiEditTool** | Apply multiple edits in one transaction | • Batch find/replace operations<br>• Transactional (all or nothing)<br>• Order-preserving execution<br>• JSON-based edit specification | • Complex refactoring<br>• Multiple related changes<br>• Atomic updates<br>• Code migrations |
-| **GrepTool** | Search file contents using regex | • Regular expression patterns<br>• Case-insensitive option<br>• Context lines (before/after)<br>• Multi-file search | • Find TODO comments<br>• Locate function usage<br>• Search error messages<br>• Code analysis |
-| **GlobTool** | Find files using glob patterns | • Wildcard patterns (*, **, ?)<br>• File type filtering<br>• Recursive directory traversal<br>• Sorted results | • Find files by extension<br>• List directory contents<br>• Discover project structure<br>• Batch file operations |
-| **ExecuteCommandTool** | Execute shell commands | • Configurable timeout<br>• stdout/stderr capture<br>• Working directory support<br>• Process control | • Build projects<br>• Run tests<br>• System operations<br>• Script execution |
-| **GitTool** | Perform Git operations | • All git commands supported<br>• Argument passing<br>• Repository operations<br>• Output capture | • Version control<br>• Commit changes<br>• Branch management<br>• Check status |
-| **URLFetchTool** | Fetch content from URLs | • HTTP/HTTPS support<br>• Content type handling<br>• Error handling<br>• Response parsing | • API calls<br>• Web scraping<br>• Data fetching<br>• External integrations |
-
-## Converting Steps to Tools
-
-SwiftAgent allows you to use any Step as a Tool when it meets certain requirements. This enables seamless integration of your custom Steps with AI models, promoting code reuse and maintainability.
-
-### Requirements for Step-to-Tool Conversion
-
-A Step can be used directly as a Tool when it:
-1. **Conforms to both Step and Tool protocols**
-2. **Input conforms to `ConvertibleFromGeneratedContent` & `Generable`**
-3. **Output conforms to `PromptRepresentable`**
-4. **Conforms to `Sendable`** for thread safety
-5. **Defines `name` and `description` properties** for Tool identification
-
-### Simple Example
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-
-// Define a Step that also conforms to Tool
-struct UppercaseStep: Step, Tool, Sendable {
-    // Required Tool properties
-    let name = "uppercase"
-    let description = "Converts text to uppercase"
-    
-    // Step implementation
-    func run(_ input: String) async throws -> String {
-        input.uppercased()
-    }
-}
-
-// The Step can now be used as a Tool
-let session = LanguageModelSession(
-    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
-    tools: [UppercaseStep()]  // Using Step as Tool
-) {
-    Instructions("You are a text processing assistant")
-}
-```
-
-### Advanced Example with Structured Input/Output
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-
-// Define structured input using @Generable
-@Generable
-struct CalculationInput: Sendable {
-    @Guide(description: "First number for calculation")
-    let a: Double
-    @Guide(description: "Second number for calculation")
-    let b: Double
-    @Guide(description: "Operation: add, subtract, multiply, divide")
-    let operation: String
-}
-
-// Define a calculation Step that can be used as a Tool
-struct CalculatorStep: Step, Tool, Sendable {
-    // Tool identification
-    let name = "calculator"
-    let description = "Performs basic arithmetic operations"
-    
-    // Step implementation
-    func run(_ input: CalculationInput) async throws -> String {
-        let result: Double = switch input.operation {
-        case "add": input.a + input.b
-        case "subtract": input.a - input.b
-        case "multiply": input.a * input.b
-        case "divide": input.b != 0 ? input.a / input.b : 0
-        default: 0
-        }
-        return "Result: \(result)"
-    }
-}
-
-// Use in an AI session
-let session = LanguageModelSession(
-    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
-    tools: [CalculatorStep()]
-) {
-    Instructions("You are a math assistant. Use the calculator tool for computations.")
-}
-```
-
-### How It Works
-
-The `Tool+Step` extension automatically provides:
-- **`Arguments` type alias** pointing to your Step's Input type
-- **`parameters` property** derived from Input's GenerationSchema
-- **`call(arguments:)` method** that delegates to the Step's `run()` method
-- **Automatic name inference** from the Step type (can be overridden)
-
-This means you write your Step logic once and can use it both:
-- As a **Step** in agent workflows for composable processing
-- As a **Tool** for AI models to invoke during generation
-
-### Best Practices
-
-1. **Keep Steps focused**: Each Step should do one thing well
-2. **Use @Generable for complex inputs**: This ensures proper schema generation
-3. **Provide clear descriptions**: Help the AI understand when to use your tool
-4. **Make outputs PromptRepresentable**: Return strings or implement the protocol
-5. **Consider thread safety**: Ensure your Step is Sendable for concurrent use
+| Tool Name | Purpose |
+|-----------|---------|
+| **ReadTool** | Read file contents with line numbers |
+| **WriteTool** | Write content to files |
+| **EditTool** | Find and replace text in files |
+| **MultiEditTool** | Apply multiple edits in one transaction |
+| **GrepTool** | Search file contents using regex |
+| **GlobTool** | Find files using glob patterns |
+| **ExecuteCommandTool** | Execute shell commands |
+| **GitTool** | Perform Git operations |
+| **URLFetchTool** | Fetch content from URLs |
 
 ### Tool Integration with AI Models
 
-All tools implement the `OpenFoundationModels.Tool` protocol and can be used with AI models:
-
 ```swift
 let session = LanguageModelSession(
-    model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
+    model: myModel,
     tools: [
-        // Built-in tools
         ReadTool(),
         WriteTool(),
         EditTool(),
         GrepTool(),
-        ExecuteCommandTool(),
-        
-        // Your custom Steps as Tools
-        UppercaseStep(),
-        CalculatorStep()
+        ExecuteCommandTool()
     ]
 ) {
     Instructions("You are a code assistant with file system access.")
 }
 ```
 
-### Tool Input/Output Types
+## SwiftAgentMCP
 
-All tools use `@Generable` structs for type-safe input and provide structured output:
+SwiftAgentMCP provides optional MCP (Model Context Protocol) integration for SwiftAgent, enabling use of tools from MCP servers.
+
+### Installation
+
+Add SwiftAgentMCP to your dependencies:
 
 ```swift
-// Example: ReadTool
-@Generable
-struct ReadInput {
-    @Guide(description: "File path to read")
-    let path: String
-    @Guide(description: "Starting line number (1-based, 0 for beginning)")
-    let startLine: Int
-    @Guide(description: "Ending line number (0 for end of file)")
-    let endLine: Int
+.target(
+    name: "MyApp",
+    dependencies: [
+        .product(name: "SwiftAgent", package: "SwiftAgent"),
+        .product(name: "SwiftAgentMCP", package: "SwiftAgent")
+    ]
+)
+```
+
+### Usage
+
+```swift
+import SwiftAgent
+import SwiftAgentMCP
+import OpenFoundationModels
+
+// 1. Configure the MCP server
+let config = MCPServerConfig(
+    name: "filesystem",
+    transport: .stdio(
+        command: "/usr/local/bin/npx",
+        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+    )
+)
+
+// 2. Connect to the MCP server
+let mcpClient = try await MCPClient.connect(config: config)
+defer { Task { await mcpClient.disconnect() } }
+
+// 3. Get tools from the MCP server (OpenFoundationModels.Tool compatible)
+let mcpTools = try await mcpClient.tools()
+
+// 4. Use with LanguageModelSession
+let session = LanguageModelSession(
+    model: myModel,
+    tools: mcpTools
+) {
+    Instructions("You are a helpful assistant with file system access")
 }
 
-// Output includes metadata
-struct ReadOutput {
-    let content: String        // Formatted with line numbers
-    let totalLines: Int       // Total lines in file
-    let linesRead: Int        // Lines actually read
-    let path: String          // Normalized path
-    let startLine: Int        // Actual start line
-    let endLine: Int          // Actual end line
+// 5. Use in your Steps
+try await withSession(session) {
+    try await MyFileStep().run("List all Swift files")
 }
+```
+
+### MCP Resources and Prompts
+
+```swift
+// Read resources from MCP servers
+let resources = try await mcpClient.listResources()
+let content = try await mcpClient.resourceAsText(uri: "file:///path/to/file.txt")
+
+// Fetch prompts from MCP servers
+let prompts = try await mcpClient.listPrompts()
+let (description, messages) = try await mcpClient.getPrompt(
+    name: "code_review",
+    arguments: ["language": "swift"]
+)
 ```
 
 ## Examples
 
-### Simple Writer Agent
+### Simple Translation Step
 
 ```swift
 import SwiftAgent
 import OpenFoundationModels
 
-public struct Writer: Agent {
-    public typealias Input = String
-    public typealias Output = String
-    
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a creative writer")
-    }
-    
-    public init() {}
-    
-    public var body: some Step<Input, Output> {
-        GenerateText(session: $session) { input in
-            Prompt {
-                "Request: \(input)"
-                "Create an engaging narrative"
-            }
+struct Translator: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ text: String) async throws -> String {
+        let generate = GenerateText<String>(session: session) { input in
+            Prompt("Translate to Japanese: \(input)")
         }
+        return try await generate.run(text)
     }
 }
 
 // Usage
-let writer = Writer()
-let story = try await writer.run("Write a story about a time-traveling scientist")
+let session = LanguageModelSession(model: myModel) {
+    Instructions("You are a professional translator")
+}
+
+let result = try await withSession(session) {
+    try await Translator().run("Hello, world!")
+}
 ```
 
-
-### Code Analysis Agent with Tools
+### Code Analysis with Tools
 
 ```swift
-import SwiftAgent
-import OpenFoundationModels
-import AgentTools
+struct CodeAnalyzer: Step {
+    @Session var session: LanguageModelSession
 
-struct CodeAnalyzer: Agent {
-    typealias Input = String
-    typealias Output = AnalysisResult
-    
-    @Session
-    var session: LanguageModelSession
-    
-    init(model: any LanguageModel) {
-        self._session = Session(wrappedValue: LanguageModelSession(
-            model: model,
-            tools: [ReadTool(), GrepTool(), GitTool()]
-        ) {
-            Instructions {
-                "You are a code analysis expert"
-                "Analyze the codebase and provide insights"
-                "Focus on code quality and best practices"
-            }
-        })
-    }
-    
-    var body: some Step<Input, Output> {
-        Generate<String, AnalysisResult>(session: $session) { request in
+    func run(_ request: String) async throws -> AnalysisResult {
+        let generate = Generate<String, AnalysisResult>(session: session) { input in
             Prompt {
-                "Analyze the following: \(request)"
+                "Analyze the following: \(input)"
                 "Use available tools to examine the code"
                 "Provide actionable recommendations"
             }
         }
+        return try await generate.run(request)
     }
 }
 
@@ -689,100 +519,58 @@ struct CodeAnalyzer: Agent {
 struct AnalysisResult {
     @Guide(description: "Summary of findings")
     let summary: String
-    
+
     @Guide(description: "List of issues found")
-    let issues: String  // Space-separated list
-    
+    let issues: String
+
     @Guide(description: "Recommendations")
     let recommendations: String
 }
-```
 
-### Multi-Step Research Agent
+// Usage with tools
+let session = LanguageModelSession(
+    model: myModel,
+    tools: [ReadTool(), GrepTool(), GitTool()]
+) {
+    Instructions {
+        "You are a code analysis expert"
+        "Analyze the codebase and provide insights"
+    }
+}
 
-```swift
-struct ResearchAgent: Agent {
-    typealias Input = String
-    typealias Output = ResearchReport
-    
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a research expert")
-    }
-    
-    var body: some Step<Input, Output> {
-        // Step 1: Generate search queries
-        Transform<String, SearchQueries> { topic in
-            SearchQueries(topic: topic)
-        }
-        
-        // Step 2: Search in parallel
-        Map<SearchQueries, [SearchResult]> { query, _ in
-            URLFetchTool().call(URLInput(url: query.url))
-                .map { SearchResult(content: $0) }
-        }
-        
-        // Step 3: Analyze results
-        Generate<[SearchResult], ResearchReport>(session: $session) { results in
-            Prompt {
-                "Synthesize these search results:"
-                for result in results {
-                    "- \(result.content)"
-                }
-                "Create a comprehensive report with key findings"
-            }
-        }
-    }
-    
-    var guardrails: [any Guardrail] {
-        [ContentSafetyGuardrail(), TokenLimitGuardrail(maxTokens: 4000)]
-    }
+let result = try await withSession(session) {
+    try await CodeAnalyzer().run("Review the authentication module")
 }
 ```
 
-### Interactive Chat Agent with Memory
+### Multi-Step Pipeline
 
 ```swift
-struct ChatAgent: Agent {
-    typealias Input = String
-    typealias Output = String
-    
-    @Memory var conversationHistory: [String] = []
-    
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: apiKey)
-    ) {
-        Instructions("You are a helpful conversational assistant")
+struct ContentPipeline: Step {
+    @Session var session: LanguageModelSession
+
+    @StepBuilder
+    var body: some Step<String, String> {
+        // Step 1: Clean input
+        Transform { $0.trimmingCharacters(in: .whitespaces) }
+
+        // Step 2: Generate content
+        GenerateText(session: session) { input in
+            Prompt("Expand this topic: \(input)")
+        }
+
+        // Step 3: Format output
+        Transform { "## Content\n\n\($0)" }
     }
-    
-    var body: some Step<Input, Output> {
-        Transform<String, String> { input in
-            // Add to conversation history
-            conversationHistory.append("User: \(input)")
-            return input
-        }
-        
-        GenerateText(session: $session) { input in
-            Prompt {
-                "Conversation history:"
-                for message in conversationHistory.suffix(10) {
-                    message
-                }
-                ""
-                "Current message: \(input)"
-                "Respond naturally and helpfully"
-            }
-        }
-        
-        Transform<String, String> { response in
-            // Save assistant response
-            conversationHistory.append("Assistant: \(response)")
-            return response
-        }
+
+    func run(_ input: String) async throws -> String {
+        try await body.run(input)
     }
+}
+
+// Usage
+try await withSession(session) {
+    try await ContentPipeline().run("Swift Concurrency")
 }
 ```
 
@@ -802,49 +590,15 @@ dependencies: [
 ]
 ```
 
-### Model Provider Packages
-
-SwiftAgent requires a model provider package from the OpenFoundationModels ecosystem. Choose based on your needs:
+### Target Dependencies
 
 ```swift
-// For OpenAI models
-.package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
-
-// For local models via Ollama
-.package(url: "https://github.com/1amageek/OpenFoundationModels-Ollama.git", branch: "main")
-
-// For Anthropic Claude models
-.package(url: "https://github.com/1amageek/OpenFoundationModels-Anthropic.git", branch: "main")
-
-// Additional providers available - check OpenFoundationModels documentation
-```
-
-### Quick Start Example
-
-```swift
-// Complete Package.swift example
-import PackageDescription
-
-let package = Package(
-    name: "MyAgentProject",
-    platforms: [.iOS(.v18), .macOS(.v15)],
-    products: [
-        .executable(name: "MyAgent", targets: ["MyAgent"])
-    ],
+.target(
+    name: "MyApp",
     dependencies: [
-        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
-        // Choose your AI provider - example with OpenAI
-        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
-    ],
-    targets: [
-        .executableTarget(
-            name: "MyAgent",
-            dependencies: [
-                .product(name: "SwiftAgent", package: "SwiftAgent"),
-                .product(name: "AgentTools", package: "SwiftAgent"),  // Optional: for built-in tools
-                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI")
-            ]
-        )
+        .product(name: "SwiftAgent", package: "SwiftAgent"),
+        .product(name: "AgentTools", package: "SwiftAgent"),      // Optional: built-in tools
+        .product(name: "SwiftAgentMCP", package: "SwiftAgent")    // Optional: MCP integration
     ]
 )
 ```
@@ -860,11 +614,8 @@ let package = Package(
     name: "MyAgentApp",
     platforms: [.iOS(.v18), .macOS(.v15)],
     dependencies: [
-        // Core SwiftAgent framework
         .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
-        
         // Add your chosen AI provider package
-        // Example: OpenAI
         .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main")
     ],
     targets: [
@@ -872,7 +623,7 @@ let package = Package(
             name: "MyAgentApp",
             dependencies: [
                 .product(name: "SwiftAgent", package: "SwiftAgent"),
-                .product(name: "AgentTools", package: "SwiftAgent"),  // Optional: for built-in tools
+                .product(name: "AgentTools", package: "SwiftAgent"),
                 .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI")
             ]
         )
@@ -880,61 +631,45 @@ let package = Package(
 )
 ```
 
-### 2. Set up your environment
-
-Configure your chosen AI provider according to their documentation. For example:
-
-```bash
-# For OpenAI
-export OPENAI_API_KEY="your-api-key"
-
-# For Anthropic
-export ANTHROPIC_API_KEY="your-api-key"
-
-# For local models (Ollama)
-# Install and configure Ollama according to their documentation
-```
-
-### 3. Create your first agent
+### 2. Create your first Step
 
 ```swift
 import SwiftAgent
 import OpenFoundationModels
-import OpenFoundationModelsOpenAI  // Your chosen provider
 
-struct MyAgent: Agent {
-    typealias Input = String
-    typealias Output = String
-    
-    @Session
-    var session = LanguageModelSession(
-        model: OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
-    ) {
-        Instructions {
-            "You are a helpful assistant"
-            "Be concise and informative"
-        }
-    }
-    
-    var body: some Step<Input, Output> {
-        GenerateText(session: $session) { input in
+struct MyAssistant: Step {
+    @Session var session: LanguageModelSession
+
+    func run(_ input: String) async throws -> String {
+        let generate = GenerateText<String>(session: session) { request in
             Prompt {
-                "User request: \(input)"
+                "User request: \(request)"
                 "Provide a helpful response"
             }
         }
+        return try await generate.run(input)
     }
 }
 ```
 
-### 4. Run your agent
+### 3. Run your Step
 
 ```swift
 @main
 struct MyApp {
     static func main() async throws {
-        let agent = MyAgent()
-        let result = try await agent.run("Hello, world!")
+        let session = LanguageModelSession(
+            model: OpenAIModelFactory.gpt4o(apiKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
+        ) {
+            Instructions {
+                "You are a helpful assistant"
+                "Be concise and informative"
+            }
+        }
+
+        let result = try await withSession(session) {
+            try await MyAssistant().run("Hello, world!")
+        }
         print(result)
     }
 }
@@ -942,41 +677,13 @@ struct MyApp {
 
 ## Advanced Features
 
-### Guardrails
-
-Add safety checks to your agents:
-
-```swift
-struct ContentGuardrail: Guardrail {
-    func validate(_ content: String) throws {
-        if content.contains("inappropriate") {
-            throw GuardrailError.contentViolation
-        }
-    }
-}
-
-struct MyAgent: Agent {
-    var guardrails: [any Guardrail] {
-        [ContentGuardrail()]
-    }
-    
-    var body: some Step<String, String> {
-        // Agent implementation
-    }
-}
-```
-
 ### Monitoring & Tracing
-
-SwiftAgent provides two complementary ways to observe step execution:
 
 #### Monitor - Lightweight Debugging
 
-Use `Monitor` for simple debugging and logging during development:
-
 ```swift
-GenerateText { input in
-    "Process: \(input)"
+GenerateText(session: session) { input in
+    Prompt("Process: \(input)")
 }
 .onInput { input in
     print("Starting with: \(input)")
@@ -987,70 +694,15 @@ GenerateText { input in
 .onError { error in
     print("Failed: \(error)")
 }
-.onComplete { duration in
-    print("Took \(duration) seconds")
-}
 ```
 
 #### Distributed Tracing - Production Monitoring
 
-Use `trace()` for production-grade distributed tracing with OpenTelemetry support:
-
 ```swift
-GenerateText { input in
-    "Process: \(input)"
+GenerateText(session: session) { input in
+    Prompt("Process: \(input)")
 }
 .trace("TextGeneration", kind: .client)
-
-// Combine monitoring and tracing
-GenerateText { input in
-    "Process: \(input)"
-}
-.onError { error in
-    logger.error("Generation failed: \(error)")
-}
-.trace("TextGeneration")
-```
-
-#### Integration with Vapor
-
-SwiftAgent automatically integrates with Vapor's distributed tracing:
-
-```swift
-app.post("analyze") { req async throws -> Response in
-    // SwiftAgent traces will be nested under Vapor's request trace
-    let agent = MyAgent()
-    let result = try await agent.run(input)
-    return result
-}
-```
-
-The trace hierarchy will look like:
-```
-[Trace] Request abc-123
-├─ [Span] POST /analyze (Vapor) - 2.5s
-│  ├─ [Span] MyAgent - 2.3s
-│  │  ├─ [Span] ContentSafetyGuardrail - 0.1s ✓
-│  │  ├─ [Span] GenerateText - 2.0s
-│  │  └─ [Span] OutputGuardrail - 0.2s ✓
-│  └─ [Span] Response serialization - 0.2s
-```
-
-### Memory
-
-Maintain state across agent runs:
-
-```swift
-struct StatefulAgent: Agent {
-    @Memory var conversationHistory: [String] = []
-    
-    var body: some Step<String, String> {
-        Transform { input in
-            conversationHistory.append(input)
-            return conversationHistory.joined(separator: "\n")
-        }
-    }
-}
 ```
 
 ## License

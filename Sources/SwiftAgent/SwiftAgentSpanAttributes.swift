@@ -60,20 +60,7 @@ public enum SwiftAgentSpanAttributes {
     
     /// The type of operation performed by the tool
     public static let toolOperation = "swiftagent.tool.operation"
-    
-    // MARK: - Guardrail Attributes
-    /// The type of guardrail being evaluated
-    public static let guardrailType = "swiftagent.guardrail.type"
-    
-    /// Whether the guardrail check passed
-    public static let guardrailPassed = "swiftagent.guardrail.passed"
-    
-    /// The reason for guardrail failure
-    public static let guardrailReason = "swiftagent.guardrail.reason"
-    
-    /// Whether this is an input or output guardrail
-    public static let guardrailDirection = "swiftagent.guardrail.direction"
-    
+
     // MARK: - Input/Output Attributes
     /// The type of input data
     public static let inputType = "swiftagent.input.type"

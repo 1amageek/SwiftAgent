@@ -2,51 +2,93 @@
 //  Session.swift
 //  SwiftAgent
 //
-//  Created by SwiftAgent on 2025/01/18.
+//  Created by SwiftAgent on 2025/01/31.
 //
 
 import Foundation
 import OpenFoundationModels
 
-/// A property wrapper for managing LanguageModelSession instances with memory storage.
+// MARK: - Session Context
+
+/// Task-local storage for LanguageModelSession
 ///
-/// `Session` provides a convenient way to create and share LanguageModelSession instances
-/// across multiple Steps, using the Memory pattern for value management.
+/// This allows session to be implicitly passed through the async call tree,
+/// similar to SwiftUI's @Environment.
+public enum SessionContext {
+    @TaskLocal public static var current: LanguageModelSession?
+}
+
+// MARK: - Session Property Wrapper
+
+/// A property wrapper that provides access to the current LanguageModelSession from the task context.
 ///
-/// Example usage:
+/// Usage:
 /// ```swift
-/// struct MyAgent {
-///     @Session
-///     var session = LanguageModelSession(
-///         instructions: Instructions("You are a helpful assistant")
-///     )
+/// struct MyStep: Step {
+///     @Session var session: LanguageModelSession
 ///
-///     // Or using InstructionsBuilder
-///     @Session {
-///         "You are an expert"
-///         "Be concise"
+///     func run(_ input: String) async throws -> String {
+///         // session is automatically available from context
+///         let response = try await session.respond { Prompt(input) }
+///         return response.content
 ///     }
-///     var expertSession
 /// }
 /// ```
 @propertyWrapper
 public struct Session: Sendable {
-    private let storage: Memory<LanguageModelSession>
-    
-    /// Initializes a Session with an existing LanguageModelSession
-    public init(wrappedValue: LanguageModelSession) {
-        self.storage = Memory(wrappedValue: wrappedValue)
-    }
-    
-    
-    /// The wrapped LanguageModelSession value
+    public init() {}
+
     public var wrappedValue: LanguageModelSession {
-        get { storage.wrappedValue }
-        nonmutating set { storage.wrappedValue = newValue }
+        guard let session = SessionContext.current else {
+            fatalError("No LanguageModelSession available in current context. Use withSession { } to provide one.")
+        }
+        return session
     }
-    
-    /// A Relay projection for sharing the session across Steps
-    public var projectedValue: Relay<LanguageModelSession> {
-        storage.projectedValue
+}
+
+// MARK: - Session Runner
+
+/// Runs an async operation with a LanguageModelSession in context.
+///
+/// Usage:
+/// ```swift
+/// let session = LanguageModelSession(model: myModel) {
+///     Instructions("You are a helpful assistant")
+/// }
+///
+/// let result = try await withSession(session) {
+///     try await myStep.run("Hello")
+/// }
+/// ```
+///
+/// - Parameters:
+///   - session: The LanguageModelSession to make available
+///   - operation: The async operation to run with the session in context
+/// - Returns: The result of the operation
+public func withSession<T: Sendable>(
+    _ session: LanguageModelSession,
+    operation: () async throws -> T
+) async rethrows -> T {
+    try await SessionContext.$current.withValue(session, operation: operation)
+}
+
+// MARK: - Step Extension for Session
+
+extension Step {
+    /// Runs this step with a LanguageModelSession in context.
+    ///
+    /// Usage:
+    /// ```swift
+    /// let result = try await myStep.run("input", session: session)
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - input: The input to the step
+    ///   - session: The LanguageModelSession to make available
+    /// - Returns: The output of the step
+    public func run(_ input: Input, session: LanguageModelSession) async throws -> Output {
+        try await withSession(session) {
+            try await self.run(input)
+        }
     }
 }

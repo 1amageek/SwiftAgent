@@ -11,13 +11,17 @@ let package = Package(
             name: "SwiftAgent",
             targets: ["SwiftAgent"]),
         .library(
+            name: "SwiftAgentMCP",
+            targets: ["SwiftAgentMCP"]),
+        .library(
             name: "AgentTools",
             targets: ["AgentTools"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", branch: "main")
+        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.0.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2")
     ],
     targets: [
         .target(
@@ -26,6 +30,13 @@ let package = Package(
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing")
+            ]
+        ),
+        .target(
+            name: "SwiftAgentMCP",
+            dependencies: [
+                "SwiftAgent",
+                .product(name: "MCP", package: "swift-sdk")
             ]
         ),
         .target(

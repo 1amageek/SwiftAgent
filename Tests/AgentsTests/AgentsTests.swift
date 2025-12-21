@@ -6,7 +6,7 @@ import Foundation
 
 @Suite("Agents Tests")
 struct AgentsTests {
-    
+
     // Mock LanguageModel for testing
     struct MockLanguageModel: LanguageModel, Sendable {
         public var id: String { "mock-model" }
@@ -44,57 +44,89 @@ struct AgentsTests {
             }
         }
     }
-    
-    // Test Agent を定義（テスト用）
-    struct TestAgent: Agent {
-        @Session
-        var session: LanguageModelSession
-        
-        init(instructions: String = "You are a helpful assistant", tools: [any OpenFoundationModels.Tool] = []) {
-            self._session = Session(wrappedValue: LanguageModelSession(
-                model: MockLanguageModel(),
-                tools: tools
-            ) {
-                Instructions(instructions)
-            })
+
+    // Helper to create a mock session
+    func createMockSession(instructions: String = "You are a helpful assistant", tools: [any OpenFoundationModels.Tool] = []) -> LanguageModelSession {
+        LanguageModelSession(
+            model: MockLanguageModel(),
+            tools: tools
+        ) {
+            Instructions(instructions)
         }
-        
-        @StepBuilder
-        var body: some Step {
-            GenerateText<String>(session: $session) { input in
-                Prompt(input)
+    }
+
+    @Test("LanguageModelSession Creation")
+    func languageModelSessionCreation() async throws {
+        let session = createMockSession()
+        #expect(session.isResponding == false)
+    }
+
+    @Test("LanguageModelSession with Instructions")
+    func languageModelSessionWithInstructions() async throws {
+        let session = createMockSession(instructions: "You are a specialized assistant")
+        #expect(session.isResponding == false)
+    }
+
+    @Test("LanguageModelSession with Tools")
+    func languageModelSessionWithTools() async throws {
+        let readTool = ReadTool(workingDirectory: "/tmp")
+        let session = createMockSession(tools: [readTool])
+        #expect(session.isResponding == false)
+    }
+
+    @Test("GenerateText Step Creation")
+    func generateTextStepCreation() async throws {
+        let session = createMockSession()
+
+        // GenerateText can be created and is a valid Step
+        let step = GenerateText<String>(session: session) { input in
+            Prompt(input)
+        }
+
+        // Verify it conforms to Step protocol by checking the type
+        #expect(type(of: step) == GenerateText<String>.self)
+    }
+
+    @Test("Transform Step")
+    func transformStep() async throws {
+        let transform = Transform<String, Int> { input in
+            input.count
+        }
+
+        let result = try await transform.run("hello")
+        #expect(result == 5)
+    }
+
+    @Test("Session Property Wrapper with withSession")
+    func sessionPropertyWrapper() async throws {
+        // Step that uses @Session property wrapper
+        struct SessionAwareStep: Step {
+            @Session var session: LanguageModelSession
+
+            func run(_ input: String) async throws -> Bool {
+                // Just verify session is accessible
+                return !session.isResponding
             }
         }
+
+        let session = createMockSession()
+        let step = SessionAwareStep()
+
+        // Run with session context
+        let result = try await withSession(session) {
+            try await step.run("test")
+        }
+
+        #expect(result == true)
     }
-    
-    @Test("Basic Agent Creation")
-    func basicAgentCreation() async throws {
-        // Test basic agent creation
-        let agent = TestAgent()
-        // エージェントが正しく作成されていることを確認
-        #expect(agent.session.isResponding == false)
-    }
-    
-    @Test("Agent with Instructions")
-    func agentWithInstructions() async throws {
-        let instructions = "You are a specialized assistant"
-        let agent = TestAgent(instructions: instructions)
-        // セッションが正しく作成されていることを確認
-        #expect(agent.session.isResponding == false)
-    }
-    
-    @Test("Agent with Tools")
-    func agentWithTools() async throws {
-        let readTool = ReadTool(workingDirectory: "/tmp")
-        let agent = TestAgent(tools: [readTool])
-        // ツールが設定されたセッションが作成されていることを確認
-        #expect(agent.session.isResponding == false)
-    }
-    
-    @Test("Agent Protocol Conformance")
-    func agentProtocolConformance() async throws {
-        let agent = TestAgent()
-        
-        #expect(agent.guardrails.isEmpty)
+
+    @Test("Step run with session parameter")
+    func stepRunWithSessionParameter() async throws {
+        let transform = Transform<String, Int> { $0.count }
+        let session = createMockSession()
+
+        // Use the step extension that takes session parameter
+        let result = try await transform.run("hello", session: session)
+        #expect(result == 5)
     }
 }

@@ -1,13 +1,22 @@
 {
-  "originHash" : "ac53b6f3aa84343ff68a9d84bd9a06c174714bbbd5096bb8822255cf4d7fc390",
+  "originHash" : "7190649ecf40e6175dff2320824162de8dcb7953a5ab6a5463b26c361a4be5d4",
   "pins" : [
+    {
+      "identity" : "eventsource",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattt/eventsource.git",
+      "state" : {
+        "revision" : "ca2a9d90cbe49e09b92f4b6ebd922c03ebea51d0",
+        "version" : "1.3.0"
+      }
+    },
     {
       "identity" : "openfoundationmodels",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/OpenFoundationModels.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "c0ec944c7eb8f8db9f53c4f728c869b2522cd714"
+        "revision" : "b473875608da5bf948aa2c8d07fbe3b6c7c4ccd7",
+        "version" : "1.0.0"
       }
     },
     {
@@ -47,6 +56,24 @@
       }
     },
     {
+      "identity" : "swift-log",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-log.git",
+      "state" : {
+        "revision" : "bc386b95f2a16ccd0150a8235e7c69eab2b866ca",
+        "version" : "1.8.0"
+      }
+    },
+    {
+      "identity" : "swift-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/modelcontextprotocol/swift-sdk.git",
+      "state" : {
+        "revision" : "c0407a0b52677cb395d824cac2879b963075ba8c",
+        "version" : "0.10.2"
+      }
+    },
+    {
       "identity" : "swift-service-context",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-service-context.git",
@@ -62,6 +89,15 @@
       "state" : {
         "revision" : "0687f71944021d616d34d922343dcef086855920",
         "version" : "600.0.1"
+      }
+    },
+    {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system.git",
+      "state" : {
+        "revision" : "395a77f0aa927f0ff73941d7ac35f2b46d47c9db",
+        "version" : "1.6.3"
       }
     }
   ],

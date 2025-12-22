@@ -9,7 +9,7 @@ SwiftAgent is a powerful Swift framework for building AI agents using a declarat
 ```mermaid
 graph TB
     subgraph "Core Protocol"
-        Step["Step<Input, Output>"]
+        Step["Step&lt;Input, Output&gt;"]
     end
 
     subgraph "OpenFoundationModels Integration"
@@ -18,6 +18,7 @@ graph TB
         Generable["@Generable"]
         Prompt["@PromptBuilder"]
         Instructions["@InstructionsBuilder"]
+        GenOpts["GenerationOptions"]
     end
 
     subgraph "Session Management"
@@ -41,8 +42,9 @@ graph TB
         end
 
         subgraph "AI Generation"
-            Generate["Generate<T>"]
+            Generate["Generate&lt;T&gt;"]
             GenerateText["GenerateText"]
+            Streaming["Streaming Support"]
         end
     end
 
@@ -51,7 +53,13 @@ graph TB
         Tracing["Distributed Tracing"]
     end
 
-    subgraph "Tools"
+    subgraph "Utilities"
+        PromptTemplates["PromptTemplates"]
+        SystemInfo["SystemInfo"]
+        StepAsTool["Step as Tool"]
+    end
+
+    subgraph "Tools (AgentTools)"
         ReadTool["ReadTool"]
         WriteTool["WriteTool"]
         EditTool["EditTool"]
@@ -62,7 +70,7 @@ graph TB
         URLFetchTool["URLFetchTool"]
     end
 
-    subgraph "MCP Integration"
+    subgraph "MCP Integration (SwiftAgentMCP)"
         MCPClient["MCPClient"]
         MCPDynamicTool["MCPDynamicTool"]
     end
@@ -71,6 +79,7 @@ graph TB
     Step --> Map
     Step --> Loop
     Step --> Parallel
+    Step --> Race
     Step --> Generate
     Step --> GenerateText
 
@@ -79,8 +88,13 @@ graph TB
     SessionContext --> LMS
 
     Generate --> LMS
+    Generate --> Streaming
     GenerateText --> LMS
+    GenerateText --> Streaming
+    Generate --> GenOpts
+    GenerateText --> GenOpts
 
+    StepAsTool --> Tool
     Tool --> ReadTool
     Tool --> WriteTool
     Tool --> EditTool
@@ -101,10 +115,13 @@ graph TB
 - **Protocol-Based**: Flexible and extensible architecture
 - **@Session**: TaskLocal-based session management with property wrapper
 - **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
+- **Streaming**: Real-time streaming support for both text and structured output generation
+- **GenerationOptions**: Fine-grained control over sampling, temperature, and token limits
 - **Monitoring**: Built-in monitoring and distributed tracing support
 - **OpenTelemetry**: Industry-standard distributed tracing with swift-distributed-tracing
 - **MCP Integration**: Optional Model Context Protocol support via SwiftAgentMCP
 - **Chain Support**: Chain up to 8 steps with type-safe composition
+- **Step as Tool**: Use Steps directly as Tools with automatic schema generation
 
 ## Core Components
 
@@ -329,6 +346,31 @@ struct TextGenerator: Step {
 }
 ```
 
+### PromptRepresentable Input
+
+When your input type conforms to `PromptRepresentable`, you can omit the prompt builder:
+
+```swift
+struct UserQuery: PromptRepresentable {
+    let question: String
+    let context: String
+
+    var promptRepresentation: Prompt {
+        Prompt {
+            "Context: \(context)"
+            "Question: \(question)"
+        }
+    }
+}
+
+// No prompt builder needed
+let step = GenerateText<UserQuery>(session: session)
+let answer = try await step.run(UserQuery(
+    question: "What is Swift?",
+    context: "Programming languages"
+))
+```
+
 ### Loop
 
 Iterate with a condition:
@@ -362,6 +404,37 @@ Parallel<String, Int> {
     CountWordsStep()
     CountCharactersStep()
     CountLinesStep()
+}
+```
+
+### Race
+
+Execute steps concurrently and return the first successful result:
+
+```swift
+// Without timeout
+Race<String, String> {
+    FastAPIStep()
+    SlowAPIStep()
+}
+
+// With timeout
+Race<String, String>(timeout: .seconds(5)) {
+    APIStep1()
+    APIStep2()
+    FallbackStep()
+}
+```
+
+### Reduce
+
+Combine collection elements into a single value:
+
+```swift
+Reduce<[Metric], Summary>(initial: Summary()) { summary, metric, index in
+    Transform { current in
+        current.adding(metric, at: index)
+    }
 }
 ```
 
@@ -576,9 +649,9 @@ try await withSession(session) {
 
 ## Requirements
 
-- Swift 6.0+
+- Swift 6.2+
 - iOS 18.0+ / macOS 15.0+
-- Xcode 15.0+
+- Xcode 16.0+
 
 ## Installation
 
@@ -703,6 +776,136 @@ GenerateText(session: session) { input in
     Prompt("Process: \(input)")
 }
 .trace("TextGeneration", kind: .client)
+```
+
+### Streaming Support
+
+SwiftAgent supports streaming for both `Generate` and `GenerateText` steps, allowing you to process output as it's generated.
+
+#### Streaming with GenerateText
+
+```swift
+var previousContent = ""
+let step = GenerateText<String>(
+    session: session,
+    prompt: { input in
+        Prompt("Generate a story about: \(input)")
+    },
+    onStream: { snapshot in
+        // snapshot.content is the accumulated string
+        let accumulated = snapshot.content
+
+        // Calculate new chunk
+        let chunk = String(accumulated.dropFirst(previousContent.count))
+        previousContent = accumulated
+
+        print(chunk, terminator: "")
+
+        // Check completion via rawContent
+        if snapshot.rawContent.isComplete {
+            print("\n[Generation complete]")
+        }
+    }
+)
+let fullStory = try await step.run("a brave knight")
+```
+
+#### Streaming with Structured Output
+
+```swift
+@Generable
+struct BlogPost: Sendable {
+    @Guide(description: "The title")
+    let title: String
+    @Guide(description: "The content")
+    let content: String
+}
+
+let step = Generate<String, BlogPost>(
+    session: session,
+    prompt: { input in
+        Prompt("Write a blog post about: \(input)")
+    },
+    onStream: { snapshot in
+        // snapshot.content is BlogPost.PartiallyGenerated
+        // Properties are Optional in PartiallyGenerated
+        let partialPost = snapshot.content
+
+        if let title = partialPost.title {
+            print("Title: \(title)")
+        }
+        if let content = partialPost.content {
+            print("Content preview: \(content.prefix(100))...")
+        }
+    }
+)
+let finalPost = try await step.run("Swift Concurrency")
+```
+
+### Generation Options
+
+Control output generation with `GenerationOptions`:
+
+```swift
+let step = GenerateText<String>(
+    session: session,
+    options: GenerationOptions(
+        sampling: .random(probabilityThreshold: 0.95),
+        temperature: 0.7,
+        maximumResponseTokens: 2000
+    )
+) { input in
+    Prompt("Write a creative story about: \(input)")
+}
+
+// For more deterministic output
+let deterministicStep = Generate<String, Analysis>(
+    session: session,
+    options: GenerationOptions(
+        sampling: .greedy,
+        temperature: 0.3,
+        maximumResponseTokens: 500
+    )
+) { input in
+    Prompt("Analyze: \(input)")
+}
+```
+
+### Step as Tool
+
+Steps can be used directly as Tools when they conform to the appropriate protocols. This enables seamless integration between Steps and the tool system.
+
+```swift
+@Generable
+struct TextInput: Sendable {
+    @Guide(description: "The text to process")
+    let text: String
+}
+
+struct TextOutput: Sendable, PromptRepresentable {
+    let result: String
+
+    var promptRepresentation: Prompt {
+        Prompt(result)
+    }
+}
+
+struct UppercaseStep: Step, Tool, Sendable {
+    let name = "uppercase"
+    let description = "Converts text to uppercase"
+
+    func run(_ input: TextInput) async throws -> TextOutput {
+        TextOutput(result: input.text.uppercased())
+    }
+}
+
+// Use as a Tool in LanguageModelSession
+let session = LanguageModelSession(
+    model: myModel,
+    tools: [UppercaseStep()]
+) {
+    Instructions("You can convert text to uppercase")
+}
 ```
 
 ## License

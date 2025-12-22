@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// Configuration for an agent session.
 ///
@@ -52,30 +51,13 @@ public struct AgentConfiguration: Sendable {
     /// Working directory for file operations.
     public var workingDirectory: String
 
-    /// Maximum number of tool execution loops per prompt.
-    public var maxToolLoops: Int
-
-    /// Timeout for the entire prompt execution.
-    public var promptTimeout: Duration?
-
-    /// Timeout for individual tool executions.
-    public var toolTimeout: Duration
-
-    // MARK: - Behavior Options
-
     /// Whether to automatically save sessions.
     public var autoSave: Bool
 
     /// Session store for persistence.
     public var sessionStore: (any SessionStore)?
 
-    /// Whether to include tool results in the response.
-    public var includeToolResults: Bool
-
-    /// Whether to stream responses by default.
-    public var streamByDefault: Bool
-
-    // MARK: - Advanced Tool Options
+    // MARK: - Pipeline Configuration
 
     /// Advanced tool execution options.
     ///
@@ -93,14 +75,9 @@ public struct AgentConfiguration: Sendable {
     ///   - modelProvider: Model provider for the agent.
     ///   - modelConfiguration: Model configuration options.
     ///   - workingDirectory: Working directory for file operations.
-    ///   - maxToolLoops: Maximum tool execution loops (default: 20).
-    ///   - promptTimeout: Timeout for prompt execution (default: nil).
-    ///   - toolTimeout: Timeout for tool execution (default: 60 seconds).
     ///   - autoSave: Whether to auto-save sessions (default: false).
     ///   - sessionStore: Session store for persistence (default: nil).
-    ///   - includeToolResults: Include tool results in response (default: true).
-    ///   - streamByDefault: Stream responses by default (default: false).
-    ///   - pipelineConfiguration: Advanced tool execution options (default: .default).
+    ///   - pipelineConfiguration: Pipeline configuration for tool execution (default: .default).
     public init(
         instructions: Instructions,
         tools: ToolConfiguration = .preset(.default),
@@ -108,13 +85,8 @@ public struct AgentConfiguration: Sendable {
         modelProvider: any ModelProvider,
         modelConfiguration: ModelConfiguration = .default,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
-        maxToolLoops: Int = 20,
-        promptTimeout: Duration? = nil,
-        toolTimeout: Duration = .seconds(60),
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        includeToolResults: Bool = true,
-        streamByDefault: Bool = false,
         pipelineConfiguration: ToolPipelineConfiguration = .default
     ) {
         self.instructions = instructions
@@ -123,13 +95,8 @@ public struct AgentConfiguration: Sendable {
         self.modelProvider = modelProvider
         self.modelConfiguration = modelConfiguration
         self.workingDirectory = workingDirectory
-        self.maxToolLoops = maxToolLoops
-        self.promptTimeout = promptTimeout
-        self.toolTimeout = toolTimeout
         self.autoSave = autoSave
         self.sessionStore = sessionStore
-        self.includeToolResults = includeToolResults
-        self.streamByDefault = streamByDefault
         self.pipelineConfiguration = pipelineConfiguration
     }
 
@@ -141,14 +108,9 @@ public struct AgentConfiguration: Sendable {
     ///   - modelProvider: Model provider for the agent.
     ///   - modelConfiguration: Model configuration options.
     ///   - workingDirectory: Working directory for file operations.
-    ///   - maxToolLoops: Maximum tool execution loops.
-    ///   - promptTimeout: Timeout for prompt execution.
-    ///   - toolTimeout: Timeout for tool execution.
     ///   - autoSave: Whether to auto-save sessions.
     ///   - sessionStore: Session store for persistence.
-    ///   - includeToolResults: Include tool results in response.
-    ///   - streamByDefault: Stream responses by default.
-    ///   - pipelineConfiguration: Advanced tool execution options.
+    ///   - pipelineConfiguration: Pipeline configuration for tool execution.
     ///   - instructions: Instructions builder.
     public init(
         tools: ToolConfiguration = .preset(.default),
@@ -156,13 +118,8 @@ public struct AgentConfiguration: Sendable {
         modelProvider: any ModelProvider,
         modelConfiguration: ModelConfiguration = .default,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
-        maxToolLoops: Int = 20,
-        promptTimeout: Duration? = nil,
-        toolTimeout: Duration = .seconds(60),
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        includeToolResults: Bool = true,
-        streamByDefault: Bool = false,
         pipelineConfiguration: ToolPipelineConfiguration = .default,
         @InstructionsBuilder instructions: () throws -> Instructions
     ) rethrows {
@@ -172,13 +129,8 @@ public struct AgentConfiguration: Sendable {
         self.modelProvider = modelProvider
         self.modelConfiguration = modelConfiguration
         self.workingDirectory = workingDirectory
-        self.maxToolLoops = maxToolLoops
-        self.promptTimeout = promptTimeout
-        self.toolTimeout = toolTimeout
         self.autoSave = autoSave
         self.sessionStore = sessionStore
-        self.includeToolResults = includeToolResults
-        self.streamByDefault = streamByDefault
         self.pipelineConfiguration = pipelineConfiguration
     }
 }
@@ -229,21 +181,6 @@ extension AgentConfiguration {
         return copy
     }
 
-    /// Returns a copy with modified timeouts.
-    public func with(
-        promptTimeout: Duration? = nil,
-        toolTimeout: Duration? = nil
-    ) -> AgentConfiguration {
-        var copy = self
-        if let pt = promptTimeout {
-            copy.promptTimeout = pt
-        }
-        if let tt = toolTimeout {
-            copy.toolTimeout = tt
-        }
-        return copy
-    }
-
     /// Returns a copy with auto-save enabled.
     public func withAutoSave(_ store: any SessionStore) -> AgentConfiguration {
         var copy = self
@@ -282,20 +219,6 @@ extension AgentConfiguration {
     ///
     /// - Throws: `AgentError.invalidConfiguration` if validation fails.
     public func validate() throws {
-        // Validate max tool loops
-        if maxToolLoops < 1 {
-            throw AgentError.invalidConfiguration(
-                reason: "maxToolLoops must be at least 1"
-            )
-        }
-
-        // Validate tool timeout
-        if toolTimeout <= .zero {
-            throw AgentError.invalidConfiguration(
-                reason: "toolTimeout must be positive"
-            )
-        }
-
         // Validate subagent names are unique
         let names = subagents.map { $0.name }
         let uniqueNames = Set(names)

@@ -86,6 +86,14 @@ graph TB
         MCPDynamicTool["MCPDynamicTool"]
     end
 
+    subgraph "Skills System"
+        SkillRegistry["SkillRegistry"]
+        SkillLoader["SkillLoader"]
+        SkillDiscovery["SkillDiscovery"]
+        SkillTool["SkillTool"]
+        SkillsConfig["SkillsConfiguration"]
+    end
+
     Step --> Transform
     Step --> Map
     Step --> Loop
@@ -122,6 +130,13 @@ graph TB
 
     MCPClient --> MCPDynamicTool
     MCPDynamicTool --> Tool
+
+    AgentSession --> SkillRegistry
+    SkillRegistry --> SkillLoader
+    SkillDiscovery --> SkillLoader
+    SkillTool --> SkillRegistry
+    AgentConfig --> SkillsConfig
+    SkillsConfig --> SkillRegistry
 ```
 
 ## Features
@@ -145,6 +160,7 @@ graph TB
 - **Agent Session**: High-level agent management with session forking and persistence
 - **Subagent Delegation**: Delegate tasks to specialized subagents with circular dependency detection
 - **Model Providers**: Flexible model configuration with provider abstraction
+- **Agent Skills**: Portable skill packages with auto-discovery and progressive disclosure
 
 ## Core Components
 
@@ -846,6 +862,115 @@ let (description, messages) = try await mcpClient.getPrompt(
     name: "code_review",
     arguments: ["language": "swift"]
 )
+```
+
+## Agent Skills
+
+Agent Skills are portable skill packages that extend agent capabilities. They follow an open specification using SKILL.md files with YAML frontmatter.
+
+### Skill Directory Structure
+
+```
+~/.agent/skills/
+└── pdf-processing/
+    ├── SKILL.md          # Required: metadata + instructions
+    ├── scripts/          # Optional: executable scripts
+    ├── references/       # Optional: reference documents
+    └── assets/           # Optional: images and other assets
+```
+
+### SKILL.md Format
+
+```markdown
+---
+name: pdf-processing
+description: Extract text and tables from PDF files.
+license: MIT
+compatibility: Requires poppler
+metadata:
+  author: example-org
+  version: "1.0"
+allowed-tools: Bash(pdftotext:*) Read
+---
+
+# PDF Processing Skill
+
+Instructions for the agent on how to process PDFs...
+```
+
+### Discovery Paths
+
+Skills are automatically discovered from:
+
+1. `~/.agent/skills/` - User-level skills
+2. `./.agent/skills/` - Project-level skills
+3. `$AGENT_SKILLS_PATH` - Environment variable paths
+
+### Enabling Skills
+
+```swift
+// Enable auto-discovery
+let config = AgentConfiguration(
+    modelProvider: myProvider,
+    instructions: Instructions("You are a helpful assistant"),
+    skills: .autoDiscover()
+)
+
+// With additional search paths
+let config = AgentConfiguration(
+    modelProvider: myProvider,
+    instructions: Instructions("You are a helpful assistant"),
+    skills: .autoDiscover(additionalPaths: ["/custom/skills/path"])
+)
+
+// Using a custom registry
+let registry = SkillRegistry()
+let skill = try SkillLoader.loadMetadata(from: "~/.agent/skills/pdf-processing")
+await registry.register(skill)
+
+let config = AgentConfiguration(
+    modelProvider: myProvider,
+    instructions: Instructions("You are a helpful assistant"),
+    skills: .custom(registry: registry)
+)
+```
+
+### Using Skills in AgentSession
+
+```swift
+let session = try await AgentSession.create(configuration: config)
+
+// List available skills
+let skills = await session.listSkills()
+for skill in skills {
+    print("\(skill.metadata.name): \(skill.metadata.description)")
+}
+
+// Skills are automatically presented to the LLM
+// The LLM can activate skills using the activate_skill tool
+let response = try await session.prompt("Process this PDF file")
+```
+
+### Progressive Disclosure Model
+
+Skills use a three-phase progressive disclosure model:
+
+1. **Discovery**: Only metadata (name, description) is loaded initially
+2. **Activation**: LLM calls `activate_skill` to load full instructions
+3. **Execution**: Agent follows skill instructions to complete the task
+
+This minimizes context usage while allowing rich, detailed skill instructions.
+
+### Prompt Injection
+
+When skills are enabled, an `<available_skills>` XML block is injected into the system prompt:
+
+```xml
+<available_skills>
+<skill name="pdf-processing" location="~/.agent/skills/pdf-processing">
+Extract text and tables from PDF files.
+</skill>
+</available_skills>
 ```
 
 ## Examples

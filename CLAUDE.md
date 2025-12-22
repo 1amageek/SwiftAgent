@@ -253,6 +253,102 @@ struct ToolOutput: Sendable, PromptRepresentable {
 - enum は直接サポートされない（@Guide の enumeration を使用）
 - すべてのプロパティに @Guide を付ける必要がある
 
+## Skills
+
+Agent Skills は、エージェントの機能を拡張するためのポータブルなスキルパッケージ。SKILL.md ファイルとオプションのリソースディレクトリで構成される。
+
+### スキルディレクトリ構造
+
+```
+~/.agent/skills/
+└── pdf-processing/
+    ├── SKILL.md          # 必須: メタデータ + 指示
+    ├── scripts/          # オプション: 実行可能スクリプト
+    ├── references/       # オプション: 参照ドキュメント
+    └── assets/           # オプション: 画像等のアセット
+```
+
+### SKILL.md フォーマット
+
+```markdown
+---
+name: pdf-processing
+description: Extract text and tables from PDF files.
+license: MIT
+compatibility: Requires poppler
+metadata:
+  author: example-org
+  version: "1.0"
+allowed-tools: Bash(pdftotext:*) Read
+---
+
+# PDF Processing Skill
+
+Instructions for the agent...
+```
+
+### 主要コンポーネント
+
+| コンポーネント | 説明 |
+|--------------|------|
+| `Skill` | スキルのメタデータと指示を保持 |
+| `SkillMetadata` | YAMLフロントマターのデータモデル |
+| `SkillRegistry` | スキルの登録・アクティベーション管理（Actor） |
+| `SkillLoader` | SKILL.mdファイルのパーサー |
+| `SkillDiscovery` | 標準パスからのスキル自動検出 |
+| `SkillTool` | LLMがスキルをアクティベートするためのツール |
+| `SkillsConfiguration` | スキル設定の統合構造体 |
+
+### 検出パス
+
+1. `~/.agent/skills/` - ユーザーレベル
+2. `./.agent/skills/` - プロジェクトレベル
+3. `$AGENT_SKILLS_PATH` - 環境変数
+
+### 使用例
+
+```swift
+// 自動検出を有効化
+let config = AgentConfiguration(
+    instructions: Instructions("You are a helpful assistant."),
+    modelProvider: myProvider,
+    skills: .autoDiscover()
+)
+
+// カスタムレジストリを使用
+let registry = SkillRegistry()
+let skill = try SkillLoader.loadMetadata(from: "~/.agent/skills/pdf-processing")
+await registry.register(skill)
+
+let config = AgentConfiguration(
+    instructions: Instructions("..."),
+    modelProvider: myProvider,
+    skills: .custom(registry: registry)
+)
+
+// AgentSession でスキルを使用
+let session = try await AgentSession.create(configuration: config)
+let skills = await session.listSkills()  // 利用可能なスキル一覧
+```
+
+### Progressive Disclosure モデル
+
+1. **Discovery**: メタデータのみ読み込み（name, description）
+2. **Activation**: LLMが `activate_skill` ツールで完全な指示を取得
+3. **Execution**: スキルの指示に従ってタスクを実行
+
+### プロンプト注入
+
+AgentSession 作成時に `<available_skills>` XML がシステムプロンプトに注入される:
+
+```xml
+<available_skills>
+<skill name="pdf-processing" location="~/.agent/skills/pdf-processing">
+Extract text and tables from PDF files.
+</skill>
+</available_skills>
+```
+
 ## SwiftAgentMCP
 
 MCP (Model Context Protocol) をSwiftAgentと統合するオプショナルモジュール。
@@ -295,11 +391,18 @@ let session = LanguageModelSession(model: model, tools: mcpTools) {
 
 ## ファイル構成
 
+### Core
 | ファイル | 責務 |
 |----------|------|
 | `Agent.swift` | Step プロトコル、Chain2-8、StepBuilder |
 | `Session.swift` | @Session、withSession、SessionContext |
 | `Generate.swift` | Generate、GenerateText |
+| `AgentConfiguration.swift` | エージェント設定 |
+| `AgentSession.swift` | エージェントセッション管理 |
+
+### Steps
+| ファイル | 責務 |
+|----------|------|
 | `Loop.swift` | 繰り返し制御 |
 | `Parallel.swift` | 並列実行 |
 | `Race.swift` | 競合実行 |
@@ -312,6 +415,18 @@ let session = LanguageModelSession(model: model, tools: mcpTools) {
 | `Tracing.swift` | 分散トレーシング |
 | `StepModifier.swift` | モディファイアパターン |
 | `Tool+Step.swift` | Step を Tool として使用 |
+
+### Skills
+| ファイル | 責務 |
+|----------|------|
+| `Skills/Skill.swift` | スキルデータモデル |
+| `Skills/SkillMetadata.swift` | YAMLフロントマターモデル |
+| `Skills/SkillError.swift` | スキルエラー定義 |
+| `Skills/SkillLoader.swift` | SKILL.mdパーサー |
+| `Skills/SkillRegistry.swift` | スキル登録・管理Actor |
+| `Skills/SkillDiscovery.swift` | スキル自動検出 |
+| `Skills/SkillTool.swift` | スキルアクティベーションツール |
+| `Skills/SkillsConfiguration.swift` | スキル設定構造体 |
 
 ## 依存関係
 

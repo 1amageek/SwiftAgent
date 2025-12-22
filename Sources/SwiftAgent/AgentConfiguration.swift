@@ -64,6 +64,14 @@ public struct AgentConfiguration: Sendable {
     /// Configure hooks, permissions, timeout, and retry behavior for tool execution.
     public var pipelineConfiguration: ToolPipelineConfiguration
 
+    // MARK: - Skills Configuration
+
+    /// Skills configuration for this agent.
+    ///
+    /// Set to `nil` to disable skills, or use `.autoDiscover()` to enable
+    /// automatic skill discovery from standard paths.
+    public var skills: SkillsConfiguration?
+
     // MARK: - Initialization
 
     /// Creates an agent configuration.
@@ -78,6 +86,7 @@ public struct AgentConfiguration: Sendable {
     ///   - autoSave: Whether to auto-save sessions (default: false).
     ///   - sessionStore: Session store for persistence (default: nil).
     ///   - pipelineConfiguration: Pipeline configuration for tool execution (default: .default).
+    ///   - skills: Skills configuration (default: nil, skills disabled).
     public init(
         instructions: Instructions,
         tools: ToolConfiguration = .preset(.default),
@@ -87,7 +96,8 @@ public struct AgentConfiguration: Sendable {
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        pipelineConfiguration: ToolPipelineConfiguration = .default
+        pipelineConfiguration: ToolPipelineConfiguration = .default,
+        skills: SkillsConfiguration? = nil
     ) {
         self.instructions = instructions
         self.tools = tools
@@ -98,6 +108,7 @@ public struct AgentConfiguration: Sendable {
         self.autoSave = autoSave
         self.sessionStore = sessionStore
         self.pipelineConfiguration = pipelineConfiguration
+        self.skills = skills
     }
 
     /// Creates an agent configuration with an instructions builder.
@@ -111,6 +122,7 @@ public struct AgentConfiguration: Sendable {
     ///   - autoSave: Whether to auto-save sessions.
     ///   - sessionStore: Session store for persistence.
     ///   - pipelineConfiguration: Pipeline configuration for tool execution.
+    ///   - skills: Skills configuration (default: nil, skills disabled).
     ///   - instructions: Instructions builder.
     public init(
         tools: ToolConfiguration = .preset(.default),
@@ -121,6 +133,7 @@ public struct AgentConfiguration: Sendable {
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
         pipelineConfiguration: ToolPipelineConfiguration = .default,
+        skills: SkillsConfiguration? = nil,
         @InstructionsBuilder instructions: () throws -> Instructions
     ) rethrows {
         self.instructions = try instructions()
@@ -132,6 +145,7 @@ public struct AgentConfiguration: Sendable {
         self.autoSave = autoSave
         self.sessionStore = sessionStore
         self.pipelineConfiguration = pipelineConfiguration
+        self.skills = skills
     }
 }
 
@@ -207,6 +221,23 @@ extension AgentConfiguration {
     public func withPermissionDelegate(_ delegate: any ToolPermissionDelegate) -> AgentConfiguration {
         var copy = self
         copy.pipelineConfiguration = copy.pipelineConfiguration.withPermissionDelegate(delegate)
+        return copy
+    }
+
+    /// Returns a copy with skills enabled.
+    ///
+    /// - Parameter configuration: Skills configuration.
+    /// - Returns: A copy with skills configured.
+    public func withSkills(_ configuration: SkillsConfiguration = .autoDiscover()) -> AgentConfiguration {
+        var copy = self
+        copy.skills = configuration
+        return copy
+    }
+
+    /// Returns a copy with skills disabled.
+    public func withoutSkills() -> AgentConfiguration {
+        var copy = self
+        copy.skills = nil
         return copy
     }
 }

@@ -77,6 +77,9 @@ public actor AgentSession: Identifiable {
     /// The tool context store for tracking tool calls per turn.
     private let contextStore: ToolContextStore?
 
+    /// The skill registry for managing agent skills.
+    private let skillRegistry: SkillRegistry?
+
     // MARK: - Initialization
 
     /// Creates a new agent session.
@@ -91,6 +94,7 @@ public actor AgentSession: Identifiable {
         tools: [any Tool],
         pipeline: ToolExecutionPipeline?,
         contextStore: ToolContextStore?,
+        skillRegistry: SkillRegistry?,
         createdAt: Date,
         parentSessionID: String?
     ) {
@@ -102,6 +106,7 @@ public actor AgentSession: Identifiable {
         self.tools = tools
         self.pipeline = pipeline
         self.contextStore = contextStore
+        self.skillRegistry = skillRegistry
         self.createdAt = createdAt
         self.parentSessionID = parentSessionID
     }
@@ -137,6 +142,29 @@ public actor AgentSession: Identifiable {
             definitions: configuration.subagents
         )
 
+        // Initialize skill registry if configured
+        let skillRegistry: SkillRegistry?
+        if let skillsConfig = configuration.skills {
+            // Use provided registry or create new one
+            let registry = skillsConfig.registry ?? SkillRegistry()
+
+            // Auto-discover skills if enabled
+            if skillsConfig.autoDiscover {
+                let discoveredSkills = try SkillDiscovery.discoverAll()
+                await registry.register(discoveredSkills)
+
+                // Discover from additional paths
+                for path in skillsConfig.searchPaths {
+                    let skills = try SkillDiscovery.discover(in: path)
+                    await registry.register(skills)
+                }
+            }
+
+            skillRegistry = registry
+        } else {
+            skillRegistry = nil
+        }
+
         // Build instructions with subagent info
         var instructionsText = configuration.instructions.description
 
@@ -146,8 +174,22 @@ public actor AgentSession: Identifiable {
             instructionsText += "\n\n" + subagentDescriptions
         }
 
+        // Add available skills prompt if any
+        if let registry = skillRegistry {
+            let skillsPrompt = await registry.generateAvailableSkillsPrompt()
+            if !skillsPrompt.isEmpty {
+                instructionsText += "\n\n" + skillsPrompt
+            }
+        }
+
         // Generate a single session ID to be shared
         let sessionID = UUID().uuidString
+
+        // Add SkillTool if skills are enabled
+        var allTools: [any Tool] = resolvedTools
+        if let registry = skillRegistry {
+            allTools.append(SkillTool(registry: registry))
+        }
 
         // Create pipeline if there are hooks, permission delegate, or custom options
         let advancedOptions = configuration.pipelineConfiguration
@@ -172,7 +214,7 @@ public actor AgentSession: Identifiable {
             contextStore = store
 
             // Wrap tools with pipeline, recording each tool call
-            toolsForSession = resolvedTools.wrapped(
+            toolsForSession = allTools.wrapped(
                 with: pipeline!,
                 contextProvider: { [store] in
                     await store.createContext()
@@ -184,7 +226,7 @@ public actor AgentSession: Identifiable {
         } else {
             pipeline = nil
             contextStore = nil
-            toolsForSession = resolvedTools
+            toolsForSession = allTools
         }
 
         // Create language model session
@@ -203,6 +245,7 @@ public actor AgentSession: Identifiable {
             tools: resolvedTools,
             pipeline: pipeline,
             contextStore: contextStore,
+            skillRegistry: skillRegistry,
             createdAt: Date(),
             parentSessionID: nil
         )
@@ -247,6 +290,29 @@ public actor AgentSession: Identifiable {
             definitions: config.subagents
         )
 
+        // Initialize skill registry if configured
+        let skillRegistry: SkillRegistry?
+        if let skillsConfig = config.skills {
+            let registry = skillsConfig.registry ?? SkillRegistry()
+            if skillsConfig.autoDiscover {
+                let discoveredSkills = try SkillDiscovery.discoverAll()
+                await registry.register(discoveredSkills)
+                for path in skillsConfig.searchPaths {
+                    let skills = try SkillDiscovery.discover(in: path)
+                    await registry.register(skills)
+                }
+            }
+            skillRegistry = registry
+        } else {
+            skillRegistry = nil
+        }
+
+        // Add SkillTool if skills are enabled
+        var allTools: [any Tool] = resolvedTools
+        if let registry = skillRegistry {
+            allTools.append(SkillTool(registry: registry))
+        }
+
         // Create pipeline if configured
         let advancedOptions = config.pipelineConfiguration
         let hasPipelineConfig = !advancedOptions.globalHooks.isEmpty
@@ -265,7 +331,7 @@ public actor AgentSession: Identifiable {
                 maxPermissionLevel: advancedOptions.maxPermissionLevel
             )
             contextStore = store
-            toolsForSession = resolvedTools.wrapped(
+            toolsForSession = allTools.wrapped(
                 with: pipeline!,
                 contextProvider: { [store] in
                     await store.createContext()
@@ -277,7 +343,7 @@ public actor AgentSession: Identifiable {
         } else {
             pipeline = nil
             contextStore = nil
-            toolsForSession = resolvedTools
+            toolsForSession = allTools
         }
 
         // Create language model session with existing transcript
@@ -296,6 +362,7 @@ public actor AgentSession: Identifiable {
             tools: resolvedTools,
             pipeline: pipeline,
             contextStore: contextStore,
+            skillRegistry: skillRegistry,
             createdAt: snapshot.createdAt,
             parentSessionID: snapshot.parentSessionID
         )
@@ -558,6 +625,48 @@ public actor AgentSession: Identifiable {
     /// Lists available subagents.
     public func listSubagents() async -> [SubagentDefinition] {
         await subagentRegistry.allDefinitions
+    }
+
+    // MARK: - Skills
+
+    /// Lists available skills.
+    ///
+    /// Returns all skills that have been discovered and registered.
+    public func listSkills() async -> [Skill] {
+        guard let registry = skillRegistry else { return [] }
+        return await registry.allSkills
+    }
+
+    /// Activates a skill by name.
+    ///
+    /// This loads the skill's full instructions into memory.
+    ///
+    /// - Parameter name: The skill name.
+    /// - Returns: The activated skill with full instructions.
+    /// - Throws: `SkillError.skillNotFound` if skill doesn't exist.
+    public func activateSkill(_ name: String) async throws -> Skill {
+        guard let registry = skillRegistry else {
+            throw SkillError.skillNotFound(name: name)
+        }
+        return try await registry.activate(name)
+    }
+
+    /// Deactivates a skill.
+    ///
+    /// - Parameter name: The skill name.
+    public func deactivateSkill(_ name: String) async {
+        await skillRegistry?.deactivate(name)
+    }
+
+    /// Gets currently active skill names.
+    public func activeSkillNames() async -> [String] {
+        guard let registry = skillRegistry else { return [] }
+        return await registry.activeSkillNames
+    }
+
+    /// Checks if skills are enabled for this session.
+    public var skillsEnabled: Bool {
+        skillRegistry != nil
     }
 
     // MARK: - Session Management

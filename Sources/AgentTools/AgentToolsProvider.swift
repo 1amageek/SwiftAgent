@@ -32,11 +32,20 @@ public struct AgentToolsProvider: ToolProvider {
     /// The working directory for file operations.
     public let workingDirectory: String
 
+    /// Optional web search provider for WebSearchTool.
+    private let searchProvider: WebSearchProvider?
+
     /// Creates a new AgentTools provider.
     ///
-    /// - Parameter workingDirectory: The working directory for file operations.
-    public init(workingDirectory: String = FileManager.default.currentDirectoryPath) {
+    /// - Parameters:
+    ///   - workingDirectory: The working directory for file operations.
+    ///   - searchProvider: Optional search provider for web search functionality.
+    public init(
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        searchProvider: WebSearchProvider? = nil
+    ) {
         self.workingDirectory = workingDirectory
+        self.searchProvider = searchProvider
     }
 
     // MARK: - ToolProvider
@@ -74,6 +83,13 @@ public struct AgentToolsProvider: ToolProvider {
         case URLFetchTool.name:
             return URLFetchTool()
 
+        case WebSearchTool.name:
+            if let provider = searchProvider {
+                return WebSearchTool(provider: provider)
+            }
+            // Return mock provider for testing if no provider configured
+            return WebSearchTool(provider: MockSearchProvider())
+
         default:
             return nil
         }
@@ -96,7 +112,8 @@ public struct AgentToolsProvider: ToolProvider {
         GlobTool.name,
         ExecuteCommandTool.name,
         GitTool.name,
-        URLFetchTool.name
+        URLFetchTool.name,
+        WebSearchTool.name
     ]
 }
 

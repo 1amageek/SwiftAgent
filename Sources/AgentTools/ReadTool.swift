@@ -9,16 +9,22 @@ import Foundation
 import OpenFoundationModels
 import SwiftAgent
 
-/// A tool for reading file contents with line numbers.
+/// A tool for reading file contents from the local filesystem.
 ///
 /// `ReadTool` provides controlled file reading with line number formatting,
-/// range selection, and safety checks.
+/// offset/limit pagination, and safety checks.
 ///
 /// ## Features
-/// - Read entire files or specific line ranges
+/// - Read entire files or specific line ranges with offset/limit
 /// - Line number formatting (e.g., `123→content`)
 /// - UTF-8 text file support
-/// - Binary file detection and rejection
+/// - Default limit of 2000 lines (configurable)
+/// - Long line truncation (2000 characters)
+///
+/// ## Path Formats
+/// - Absolute paths: `/path/to/file`
+/// - Home directory: `~/path/to/file`
+/// - Relative paths: `path/to/file`
 ///
 /// ## Limitations
 /// - Maximum file size: 1MB
@@ -27,100 +33,130 @@ import SwiftAgent
 public struct ReadTool: OpenFoundationModels.Tool {
     public typealias Arguments = ReadInput
     public typealias Output = ReadOutput
-    
+
     public static let name = "file_read"
     public var name: String { Self.name }
-    
+
+    /// Default number of lines to read if no limit specified
+    public static let defaultLineLimit = 2000
+
+    /// Maximum characters per line before truncation
+    public static let maxLineLength = 2000
+
     public static let description = """
-    Reads file contents with line numbers.
-    
+    Reads a file from the local filesystem.
+
+    Usage:
+    - The path parameter can be absolute, relative, or use ~ for home directory
+    - By default, reads up to 2000 lines starting from the beginning
+    - Use offset and limit parameters for pagination (handy for long files)
+    - Lines longer than 2000 characters will be truncated
+    - Results include line numbers (e.g., "1→content")
+
     Use this tool to:
     - Read entire text files
-    - Read specific line ranges
-    - View file contents with line numbers
-    
-    Features:
-    - Line number formatting (123→content)
-    - Range selection (startLine, endLine)
-    - UTF-8 text file support
-    
+    - Read specific portions of large files using offset/limit
+    - View file contents with line numbers for reference
+
     Limitations:
     - Maximum file size: 1MB
-    - Text files only (no binary)
+    - Text files only (binary files will be rejected)
+    - UTF-8 encoding only
     """
-    
+
     public var description: String { Self.description }
-    
+
     public var parameters: GenerationSchema {
         ReadInput.generationSchema
     }
-    
+
     private let workingDirectory: String
     private let fsActor: FileSystemActor
-    
+
     public init(workingDirectory: String = FileManager.default.currentDirectoryPath) {
         self.workingDirectory = workingDirectory
         self.fsActor = FileSystemActor(workingDirectory: workingDirectory)
     }
-    
+
     public func call(arguments: ReadInput) async throws -> ReadOutput {
         // Normalize and validate path
         let normalizedPath = await fsActor.normalizePath(arguments.path)
         guard await fsActor.isPathSafe(normalizedPath) else {
             throw FileSystemError.pathNotSafe(path: arguments.path)
         }
-        
+
         // Check if file exists
         guard await fsActor.fileExists(atPath: normalizedPath) else {
             throw FileSystemError.fileNotFound(path: normalizedPath)
         }
-        
+
         // Check if it's a file (not a directory)
         var isDirectory: ObjCBool = false
         _ = await fsActor.fileExists(atPath: normalizedPath, isDirectory: &isDirectory)
         guard !isDirectory.boolValue else {
             throw FileSystemError.notAFile(path: normalizedPath)
         }
-        
+
         // Read file content
         let content = try await fsActor.readFile(atPath: normalizedPath)
-        
+
         // Split into lines
         let lines = content.components(separatedBy: .newlines)
         let totalLines = lines.count
-        
-        // Determine range to read
-        let startLine = max(1, arguments.startLine)
-        let endLine = arguments.endLine > 0 ? min(arguments.endLine, totalLines) : totalLines
-        
+
+        // Calculate offset and limit
+        // offset is 0-based line index, limit is number of lines to read
+        let offset = max(0, arguments.offset)
+        let limit = arguments.limit > 0 ? arguments.limit : Self.defaultLineLimit
+
+        // Convert to 1-based line numbers for output
+        let startLine = offset + 1
+        let endLine = min(offset + limit, totalLines)
+
         // Validate range
-        guard startLine <= endLine else {
-            throw FileSystemError.operationFailed(
-                reason: "Invalid line range: start(\(startLine)) > end(\(endLine))"
+        guard startLine <= totalLines else {
+            return ReadOutput(
+                content: "",
+                totalLines: totalLines,
+                linesRead: 0,
+                path: normalizedPath,
+                startLine: startLine,
+                endLine: startLine,
+                truncatedLines: 0
             )
         }
-        
+
         // Format output with line numbers
         var formattedLines: [String] = []
-        for lineNum in startLine...min(endLine, totalLines) {
+        var truncatedLines = 0
+
+        for lineNum in startLine...endLine {
             let lineIndex = lineNum - 1
             if lineIndex < lines.count {
-                let line = lines[lineIndex]
+                var line = lines[lineIndex]
+
+                // Truncate long lines
+                if line.count > Self.maxLineLength {
+                    line = String(line.prefix(Self.maxLineLength)) + "..."
+                    truncatedLines += 1
+                }
+
                 // Use the same arrow format as Claude Code
                 formattedLines.append("\(lineNum)→\(line)")
             }
         }
-        
+
         let formattedContent = formattedLines.joined(separator: "\n")
-        let linesRead = min(endLine, totalLines) - startLine + 1
-        
+        let linesRead = formattedLines.count
+
         return ReadOutput(
             content: formattedContent,
             totalLines: totalLines,
             linesRead: linesRead,
             path: normalizedPath,
             startLine: startLine,
-            endLine: min(endLine, totalLines)
+            endLine: endLine,
+            truncatedLines: truncatedLines
         )
     }
 }
@@ -130,43 +166,47 @@ public struct ReadTool: OpenFoundationModels.Tool {
 /// Input structure for the read operation.
 @Generable
 public struct ReadInput: Sendable {
-    /// The file path to read.
+    @Guide(description: "The absolute path to the file to read")
     public let path: String
-    
-    /// Starting line number (1-based, 0 for beginning).
-    public let startLine: Int
-    
-    /// Ending line number (0 for end of file).
-    public let endLine: Int
+
+    @Guide(description: "The line number to start reading from (0-based). Defaults to 0 for beginning of file.")
+    public let offset: Int
+
+    @Guide(description: "The number of lines to read. Defaults to 0 which means read up to 2000 lines.")
+    public let limit: Int
 }
 
 /// Output structure for the read operation.
 public struct ReadOutput: Sendable {
     /// The formatted file content with line numbers.
     public let content: String
-    
+
     /// Total number of lines in the file.
     public let totalLines: Int
-    
+
     /// Number of lines actually read.
     public let linesRead: Int
-    
+
     /// The normalized file path.
     public let path: String
-    
-    /// The actual start line read.
+
+    /// The actual start line read (1-based).
     public let startLine: Int
-    
-    /// The actual end line read.
+
+    /// The actual end line read (1-based).
     public let endLine: Int
-    
+
+    /// Number of lines that were truncated due to length.
+    public let truncatedLines: Int
+
     public init(
         content: String,
         totalLines: Int,
         linesRead: Int,
         path: String,
         startLine: Int,
-        endLine: Int
+        endLine: Int,
+        truncatedLines: Int = 0
     ) {
         self.content = content
         self.totalLines = totalLines
@@ -174,6 +214,7 @@ public struct ReadOutput: Sendable {
         self.path = path
         self.startLine = startLine
         self.endLine = endLine
+        self.truncatedLines = truncatedLines
     }
 }
 
@@ -185,11 +226,12 @@ extension ReadOutput: PromptRepresentable {
 
 extension ReadOutput: CustomStringConvertible {
     public var description: String {
-        """
+        let truncateNote = truncatedLines > 0 ? " (\(truncatedLines) lines truncated)" : ""
+        return """
         Read Operation [Success]
         Path: \(path)
-        Lines: \(startLine)-\(endLine) of \(totalLines) (\(linesRead) lines read)
-        
+        Lines: \(startLine)-\(endLine) of \(totalLines) (\(linesRead) lines read)\(truncateNote)
+
         \(content)
         """
     }

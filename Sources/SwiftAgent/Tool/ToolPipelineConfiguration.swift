@@ -10,11 +10,13 @@ import Foundation
 /// Configuration options for the tool execution pipeline.
 ///
 /// This struct contains global settings that apply to all tools,
-/// as well as per-tool overrides.
+/// as well as per-tool overrides. Supports both legacy hooks and the new
+/// `HookManager`/`PermissionManager` system.
 ///
 /// ## Usage
 ///
 /// ```swift
+/// // Legacy style
 /// let options = ToolPipelineConfiguration(
 ///     defaultTimeout: .seconds(30),
 ///     defaultRetry: RetryConfiguration(maxAttempts: 2),
@@ -24,6 +26,18 @@ import Foundation
 ///         "WriteTool": .fileModification,
 ///         "ExecuteCommandTool": .commandExecution
 ///     ]
+/// )
+///
+/// // New style with managers
+/// let hookManager = HookManager()
+/// let permissionManager = PermissionManager(
+///     mode: .default,
+///     rules: [.allow("Read"), .deny("Bash(rm:*)")]
+/// )
+///
+/// let options = ToolPipelineConfiguration(
+///     hookManager: hookManager,
+///     permissionManager: permissionManager
 /// )
 /// ```
 public struct ToolPipelineConfiguration: Sendable {
@@ -38,14 +52,16 @@ public struct ToolPipelineConfiguration: Sendable {
     /// Individual tools can override this with their own retry configuration.
     public var defaultRetry: RetryConfiguration?
 
-    /// Global hooks that apply to all tool executions.
+    /// Global hooks that apply to all tool executions (legacy).
     ///
     /// These are executed in addition to any tool-specific hooks.
+    /// Consider using `hookManager` for more advanced hook management.
     public var globalHooks: [any ToolExecutionHook]
 
-    /// Delegate for permission decisions.
+    /// Delegate for permission decisions (legacy).
     ///
     /// If nil, all tools are allowed.
+    /// Consider using `permissionManager` for more advanced permission management.
     public var permissionDelegate: (any ToolPermissionDelegate)?
 
     /// Per-tool execution options.
@@ -59,6 +75,28 @@ public struct ToolPipelineConfiguration: Sendable {
     /// Default is `.standard`.
     public var maxPermissionLevel: ToolPermissionLevel
 
+    // MARK: - New Manager-Based Configuration
+
+    /// The hook manager for advanced hook management.
+    ///
+    /// When set, hooks are managed through this actor instead of `globalHooks`.
+    public var hookManager: HookManager?
+
+    /// The permission manager for advanced permission checking.
+    ///
+    /// When set, permissions are checked through this actor instead of `permissionDelegate`.
+    public var permissionManager: PermissionManager?
+
+    /// Permission configuration for rule-based permissions.
+    ///
+    /// Applied to `permissionManager` if set, or creates a new manager.
+    public var permissionConfiguration: PermissionConfiguration?
+
+    /// Hook configuration for declarative hook setup.
+    ///
+    /// Applied to `hookManager` if set.
+    public var hookConfiguration: HookConfiguration?
+
     /// Creates a tool pipeline configuration.
     ///
     /// - Parameters:
@@ -68,13 +106,21 @@ public struct ToolPipelineConfiguration: Sendable {
     ///   - permissionDelegate: Permission delegate. Default is nil (allow all).
     ///   - toolOptions: Per-tool options. Default is empty.
     ///   - maxPermissionLevel: Maximum permission level allowed. Default is `.standard`.
+    ///   - hookManager: Hook manager for advanced hooks. Default is nil.
+    ///   - permissionManager: Permission manager for advanced permissions. Default is nil.
+    ///   - permissionConfiguration: Permission configuration. Default is nil.
+    ///   - hookConfiguration: Hook configuration. Default is nil.
     public init(
         defaultTimeout: Duration = .seconds(60),
         defaultRetry: RetryConfiguration? = nil,
         globalHooks: [any ToolExecutionHook] = [],
         permissionDelegate: (any ToolPermissionDelegate)? = nil,
         toolOptions: [String: ToolExecutionOptions] = [:],
-        maxPermissionLevel: ToolPermissionLevel = .standard
+        maxPermissionLevel: ToolPermissionLevel = .standard,
+        hookManager: HookManager? = nil,
+        permissionManager: PermissionManager? = nil,
+        permissionConfiguration: PermissionConfiguration? = nil,
+        hookConfiguration: HookConfiguration? = nil
     ) {
         self.defaultTimeout = defaultTimeout
         self.defaultRetry = defaultRetry
@@ -82,6 +128,10 @@ public struct ToolPipelineConfiguration: Sendable {
         self.permissionDelegate = permissionDelegate
         self.toolOptions = toolOptions
         self.maxPermissionLevel = maxPermissionLevel
+        self.hookManager = hookManager
+        self.permissionManager = permissionManager
+        self.permissionConfiguration = permissionConfiguration
+        self.hookConfiguration = hookConfiguration
     }
 
     /// Default options with no special configuration.
@@ -119,6 +169,62 @@ public struct ToolPipelineConfiguration: Sendable {
                 )
             ]
         )
+    }
+
+    /// Options for development workflows.
+    ///
+    /// - Allows read operations and safe build commands
+    /// - Requires approval for file modifications and git operations
+    public static var development: ToolPipelineConfiguration {
+        ToolPipelineConfiguration(
+            defaultTimeout: .seconds(120),
+            permissionConfiguration: .development,
+            hookConfiguration: .logging
+        )
+    }
+
+    /// Options with permissive settings.
+    ///
+    /// - Allows most operations without confirmation
+    /// - Still blocks dangerous commands like `rm -rf /`
+    public static var permissive: ToolPipelineConfiguration {
+        ToolPipelineConfiguration(
+            defaultTimeout: .seconds(120),
+            permissionConfiguration: .permissive
+        )
+    }
+
+    /// Options for read-only mode.
+    ///
+    /// - Only allows read operations
+    /// - Blocks all write operations
+    public static var readOnly: ToolPipelineConfiguration {
+        ToolPipelineConfiguration(
+            defaultTimeout: .seconds(60),
+            permissionConfiguration: .readOnly
+        )
+    }
+
+    /// Creates configuration from a settings file.
+    ///
+    /// - Parameter path: Path to the settings file.
+    /// - Returns: Configuration loaded from the file.
+    public static func fromSettings(at path: String) throws -> ToolPipelineConfiguration {
+        let settings = try SettingsLoader.load(from: path)
+        return ToolPipelineConfiguration().with(settings: settings)
+    }
+
+    /// Creates configuration from default settings locations.
+    ///
+    /// Searches in:
+    /// 1. Environment variable path
+    /// 2. Project-level settings
+    /// 3. User-level settings
+    ///
+    /// - Returns: Configuration loaded from settings, or default if none found.
+    public static func fromDefaultSettings() throws -> ToolPipelineConfiguration {
+        let settings = try SettingsLoader.loadFromDefaultLocations()
+        return ToolPipelineConfiguration().with(settings: settings)
     }
 
     // MARK: - Builder Methods
@@ -165,6 +271,46 @@ public struct ToolPipelineConfiguration: Sendable {
     public func withMaxPermissionLevel(_ level: ToolPermissionLevel) -> ToolPipelineConfiguration {
         var copy = self
         copy.maxPermissionLevel = level
+        return copy
+    }
+
+    /// Returns a copy with the specified hook manager.
+    public func withHookManager(_ manager: HookManager) -> ToolPipelineConfiguration {
+        var copy = self
+        copy.hookManager = manager
+        return copy
+    }
+
+    /// Returns a copy with the specified permission manager.
+    public func withPermissionManager(_ manager: PermissionManager) -> ToolPipelineConfiguration {
+        var copy = self
+        copy.permissionManager = manager
+        return copy
+    }
+
+    /// Returns a copy with the specified permission configuration.
+    public func withPermissionConfiguration(_ config: PermissionConfiguration) -> ToolPipelineConfiguration {
+        var copy = self
+        copy.permissionConfiguration = config
+        return copy
+    }
+
+    /// Returns a copy with the specified hook configuration.
+    public func withHookConfiguration(_ config: HookConfiguration) -> ToolPipelineConfiguration {
+        var copy = self
+        copy.hookConfiguration = config
+        return copy
+    }
+
+    /// Returns a copy configured from agent settings.
+    public func with(settings: AgentSettings) -> ToolPipelineConfiguration {
+        var copy = self
+        if let permissions = settings.permissions {
+            copy.permissionConfiguration = permissions
+        }
+        if let hooks = settings.hooks {
+            copy.hookConfiguration = hooks
+        }
         return copy
     }
 

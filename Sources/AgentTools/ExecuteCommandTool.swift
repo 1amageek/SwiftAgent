@@ -17,46 +17,75 @@ import SwiftAgent
 /// ## Features
 /// - Direct process execution (no shell interpretation)
 /// - Whitelist-based command validation
-/// - Timeout and output size limits
+/// - Configurable timeout (up to 10 minutes)
+/// - Working directory specification
+/// - Output size limits (1MB)
+///
+/// ## Usage
+/// - Specify the executable name (e.g., "ls", "git", "swift")
+/// - Provide arguments as a JSON array
+/// - Optionally set a custom timeout (default: 120 seconds)
+/// - Optionally specify working directory
 ///
 /// ## Limitations
 /// - Only whitelisted commands allowed
 /// - No shell features (pipes, redirects, variables)
-/// - Maximum 60 second execution time
+/// - Maximum 10 minute execution time
 /// - Maximum 1MB output size
+/// - No interactive commands
 public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
-    
+
     public static let name = "command_execute"
     public var name: String { Self.name }
-    
+
+    /// Default timeout in seconds
+    public static let defaultTimeout: TimeInterval = 120
+
+    /// Maximum allowed timeout in seconds (10 minutes)
+    public static let maxTimeout: TimeInterval = 600
+
+    /// Maximum output size in bytes (1MB)
+    public static let maxOutputSize = 1024 * 1024
+
     public static let description = """
     Executes commands directly without shell interpretation.
-    
-    Use this tool to:
-    - Run system commands safely
-    - Execute development tools
-    - Perform file operations
-    
+
+    Usage:
+    - Provide the executable name (e.g., "ls", "git", "swift")
+    - Arguments should be a JSON array: ["arg1", "arg2"]
+    - Optionally set timeout in milliseconds (max 600000ms / 10 minutes)
+    - Optionally specify working directory
+
     Features:
     - Direct process execution (no shell)
     - Whitelist-based security
-    - 60 second timeout
-    - 1MB output limit
-    
+    - Configurable timeout (default: 2 minutes, max: 10 minutes)
+    - Custom working directory support
+    - 1MB output limit (truncated if exceeded)
+
+    Allowed commands:
+    - File ops: ls, cat, head, tail, wc, sort, uniq, find, which, file, stat, du, df
+    - Text: grep, sed, awk
+    - System: pwd, whoami, date, uname, ps, uptime
+    - Dev tools: git, swift, python3, node, npm, make, cmake, gcc, clang
+    - Network: ping, nslookup, dig
+
     Limitations:
-    - No shell features (pipes, redirects)
-    - Only allowed commands
+    - No shell features (pipes, redirects, &&, ||)
     - No interactive commands
+    - curl/wget excluded (use URLFetchTool instead)
     """
-    
+
     public var description: String { Self.description }
-    
+
     public var parameters: GenerationSchema {
         ExecuteCommandInput.generationSchema
     }
-    
+
+    private let workingDirectory: String
+
     // Allowed executables with their common paths
     private let allowedCommands: [String: String] = [
         // File operations
@@ -73,71 +102,110 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
         "stat": "/usr/bin/stat",
         "du": "/usr/bin/du",
         "df": "/bin/df",
-        
+        "mkdir": "/bin/mkdir",
+        "cp": "/bin/cp",
+        "mv": "/bin/mv",
+        "rm": "/bin/rm",
+        "touch": "/usr/bin/touch",
+        "chmod": "/bin/chmod",
+
         // Text processing
         "grep": "/usr/bin/grep",
         "sed": "/usr/bin/sed",
         "awk": "/usr/bin/awk",
-        
+        "diff": "/usr/bin/diff",
+        "tr": "/usr/bin/tr",
+        "cut": "/usr/bin/cut",
+
         // System info
         "pwd": "/bin/pwd",
         "whoami": "/usr/bin/whoami",
         "date": "/bin/date",
         "uname": "/usr/bin/uname",
         "ps": "/bin/ps",
-        "top": "/usr/bin/top",
         "uptime": "/usr/bin/uptime",
-        "free": "/usr/bin/free",
-        
+        "env": "/usr/bin/env",
+        "printenv": "/usr/bin/printenv",
+
         // Development tools
         "git": "/usr/bin/git",
         "swift": "/usr/bin/swift",
+        "swiftc": "/usr/bin/swiftc",
+        "xcodebuild": "/usr/bin/xcodebuild",
+        "xcrun": "/usr/bin/xcrun",
         "python3": "/usr/bin/python3",
+        "pip3": "/usr/bin/pip3",
         "node": "/usr/local/bin/node",
         "npm": "/usr/local/bin/npm",
+        "npx": "/usr/local/bin/npx",
         "make": "/usr/bin/make",
         "cmake": "/usr/local/bin/cmake",
         "gcc": "/usr/bin/gcc",
         "clang": "/usr/bin/clang",
-        
+        "cargo": "/usr/local/bin/cargo",
+        "rustc": "/usr/local/bin/rustc",
+        "go": "/usr/local/bin/go",
+
+        // Package managers
+        "brew": "/opt/homebrew/bin/brew",
+
         // Network (limited)
         "ping": "/sbin/ping",
         "nslookup": "/usr/bin/nslookup",
-        "dig": "/usr/bin/dig"
-        // curl and wget intentionally excluded (SSRF risk)
+        "dig": "/usr/bin/dig",
+        "host": "/usr/bin/host"
+        // curl and wget intentionally excluded (SSRF risk - use URLFetchTool)
     ]
-    
-    public init() {}
+
+    public init(workingDirectory: String = FileManager.default.currentDirectoryPath) {
+        self.workingDirectory = workingDirectory
+    }
     
     public func call(arguments: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
         // Validate command
         guard !arguments.executable.isEmpty else {
             throw FileSystemError.operationFailed(reason: "Command cannot be empty")
         }
-        
+
         // Extract base command name
         let commandName = URL(fileURLWithPath: arguments.executable).lastPathComponent
-        
+
         // Check if command is allowed
         guard let executablePath = allowedCommands[commandName] else {
             throw FileSystemError.operationFailed(
                 reason: "Command '\(commandName)' is not allowed. Allowed commands: \(allowedCommands.keys.sorted().joined(separator: ", "))"
             )
         }
-        
-        // Verify executable exists
-        let finalExecutablePath: String
-        if FileManager.default.fileExists(atPath: executablePath) {
-            finalExecutablePath = executablePath
-        } else if arguments.executable.hasPrefix("/") && FileManager.default.fileExists(atPath: arguments.executable) {
-            // Use provided path if it exists and command is allowed
+
+        // Verify executable exists - check multiple possible paths
+        let possiblePaths = [
+            executablePath,
+            "/usr/bin/\(commandName)",
+            "/bin/\(commandName)",
+            "/usr/local/bin/\(commandName)",
+            "/opt/homebrew/bin/\(commandName)"
+        ]
+
+        var finalExecutablePath: String?
+        for path in possiblePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                finalExecutablePath = path
+                break
+            }
+        }
+
+        // Also check user-provided path if it's absolute
+        if finalExecutablePath == nil && arguments.executable.hasPrefix("/") &&
+           FileManager.default.fileExists(atPath: arguments.executable) {
             finalExecutablePath = arguments.executable
-        } else {
+        }
+
+        guard let execPath = finalExecutablePath else {
             throw FileSystemError.operationFailed(
-                reason: "Executable not found: \(executablePath)"
+                reason: "Executable not found: \(commandName). Checked paths: \(possiblePaths.joined(separator: ", "))"
             )
         }
-        
+
         // Parse arguments from JSON array
         let args: [String]
         if arguments.argsJson.isEmpty || arguments.argsJson == "[]" {
@@ -148,7 +216,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
                     reason: "Invalid UTF-8 in argsJson"
                 )
             }
-            
+
             do {
                 args = try JSONDecoder().decode([String].self, from: jsonData)
             } catch {
@@ -157,11 +225,21 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
                 )
             }
         }
-        
+
+        // Calculate timeout (convert from milliseconds to seconds, with bounds)
+        let timeoutMs = arguments.timeout > 0 ? arguments.timeout : Int(Self.defaultTimeout * 1000)
+        let timeoutSeconds = min(Double(timeoutMs) / 1000.0, Self.maxTimeout)
+
+        // Determine working directory
+        let execWorkingDir = arguments.workingDirectory.isEmpty ? workingDirectory : arguments.workingDirectory
+
         // Execute command
         return try await executeCommand(
-            executable: finalExecutablePath,
-            arguments: args
+            executable: execPath,
+            arguments: args,
+            workingDirectory: execWorkingDir,
+            timeout: timeoutSeconds,
+            description: arguments.description
         )
     }
 }
@@ -171,11 +249,20 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
 /// The input structure for command execution.
 @Generable
 public struct ExecuteCommandInput: Sendable {
-    /// The command executable name or path.
+    @Guide(description: "The command executable name (e.g., 'ls', 'git', 'swift')")
     public let executable: String
-    
-    /// JSON array of arguments for the command.
+
+    @Guide(description: "JSON array of arguments for the command (e.g., [\"-la\", \"/path\"])")
     public let argsJson: String
+
+    @Guide(description: "Optional timeout in milliseconds (max 600000ms / 10 minutes). Defaults to 120000ms (2 minutes).")
+    public let timeout: Int
+
+    @Guide(description: "Optional working directory for command execution. Defaults to current directory.")
+    public let workingDirectory: String
+
+    @Guide(description: "Clear, concise description of what this command does in 5-10 words")
+    public let description: String
 }
 
 /// Output structure for command execution operations.
@@ -240,32 +327,40 @@ extension ExecuteCommandOutput: CustomStringConvertible {
 // MARK: - Private Methods
 
 private extension ExecuteCommandTool {
-    func executeCommand(executable: String, arguments: [String]) async throws -> ExecuteCommandOutput {
+    func executeCommand(
+        executable: String,
+        arguments: [String],
+        workingDirectory: String,
+        timeout: TimeInterval,
+        description: String
+    ) async throws -> ExecuteCommandOutput {
         let startTime = Date()
-        
+
         return try await withThrowingTaskGroup(of: ExecuteCommandOutput.self) { group in
             let process = Process()
             let outputPipe = Pipe()
             let errorPipe = Pipe()
-            
+
             // Configure process
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
             process.standardOutput = outputPipe
             process.standardError = errorPipe
-            
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+
             // Minimal, safe environment
             process.environment = [
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
                 "HOME": NSHomeDirectory(),
                 "USER": NSUserName(),
                 "SHELL": "/bin/bash",
-                "LANG": "en_US.UTF-8"
+                "LANG": "en_US.UTF-8",
+                "LC_ALL": "en_US.UTF-8"
             ]
-            
-            // Add timeout task (60 seconds)
+
+            // Add timeout task
             group.addTask {
-                try await Task.sleep(for: .seconds(60))
+                try await Task.sleep(for: .seconds(timeout))
                 if process.isRunning {
                     process.terminate()
                     // Wait briefly for graceful termination
@@ -279,62 +374,67 @@ private extension ExecuteCommandTool {
                         }
                     }
                 }
-                throw FileSystemError.operationFailed(reason: "Command timed out after 60 seconds")
+                throw FileSystemError.operationFailed(reason: "Command timed out after \(Int(timeout)) seconds")
             }
-            
+
             // Add execution task
             group.addTask {
                 try process.run()
                 process.waitUntilExit()
-                
+
                 let executionTime = Date().timeIntervalSince(startTime)
-                
-                // Read output with size limit (1MB)
-                let maxOutputSize = 1024 * 1024
+
+                // Read output with size limit
+                let maxOutputSize = ExecuteCommandTool.maxOutputSize
                 let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                
+
                 // Combine and truncate if needed
                 var combinedData = outputData
-                if !errorData.isEmpty {
+                if !errorData.isEmpty && process.terminationStatus != 0 {
                     combinedData.append("\n[STDERR]\n".data(using: .utf8) ?? Data())
                     combinedData.append(errorData)
                 }
-                
+
                 let truncated = combinedData.count > maxOutputSize
                 if truncated {
-                    combinedData = combinedData.prefix(maxOutputSize)
+                    // Truncate from the middle to preserve beginning and end
+                    let keepSize = maxOutputSize / 2
+                    let prefix = combinedData.prefix(keepSize)
+                    let suffix = combinedData.suffix(keepSize)
+                    combinedData = prefix + "\n... [Output truncated - \(combinedData.count - maxOutputSize) bytes removed] ...\n".data(using: .utf8)! + suffix
                 }
-                
+
                 let output = String(data: combinedData, encoding: .utf8) ?? ""
-                let finalOutput = truncated ? output + "\n... [Output truncated]" : output
-                
+
                 let metadata: [String: String] = [
                     "command": executable,
                     "arguments": arguments.joined(separator: " "),
+                    "working_directory": workingDirectory,
                     "exit_code": String(process.terminationStatus),
                     "execution_time": String(format: "%.3f", executionTime),
                     "output_size": String(combinedData.count),
-                    "truncated": String(truncated)
+                    "truncated": String(truncated),
+                    "description": description
                 ]
-                
+
                 return ExecuteCommandOutput(
                     success: process.terminationStatus == 0,
-                    output: finalOutput,
+                    output: output,
                     exitCode: process.terminationStatus,
                     executionTime: executionTime,
                     truncated: truncated,
                     metadata: metadata
                 )
             }
-            
+
             // Wait for either completion or timeout
             for try await result in group {
                 // Cancel remaining tasks
                 group.cancelAll()
                 return result
             }
-            
+
             // Should not reach here
             throw FileSystemError.operationFailed(reason: "Unexpected execution error")
         }

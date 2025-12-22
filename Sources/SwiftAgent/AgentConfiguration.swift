@@ -240,6 +240,62 @@ extension AgentConfiguration {
         copy.skills = nil
         return copy
     }
+
+    /// Returns a copy with the specified permission configuration.
+    ///
+    /// This applies the permission rules to the pipeline configuration.
+    ///
+    /// - Parameter configuration: The permission configuration.
+    /// - Returns: A copy with the permission configuration applied.
+    public func withPermissions(_ configuration: PermissionConfiguration) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = copy.pipelineConfiguration.withPermissionConfiguration(configuration)
+        return copy
+    }
+
+    /// Returns a copy with the specified hook configuration.
+    ///
+    /// This applies the hook definitions to the pipeline configuration.
+    ///
+    /// - Parameter configuration: The hook configuration.
+    /// - Returns: A copy with the hook configuration applied.
+    public func withHooks(_ configuration: HookConfiguration) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = copy.pipelineConfiguration.withHookConfiguration(configuration)
+        return copy
+    }
+
+    /// Returns a copy configured from agent settings.
+    ///
+    /// - Parameter settings: The agent settings to apply.
+    /// - Returns: A copy with settings applied.
+    public func with(settings: AgentSettings) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = copy.pipelineConfiguration.with(settings: settings)
+        return copy
+    }
+
+    /// Returns a copy configured from a settings file.
+    ///
+    /// - Parameter path: The path to the settings file.
+    /// - Returns: A copy with settings from the file applied.
+    public func withSettings(from path: String) throws -> AgentConfiguration {
+        let settings = try SettingsLoader.load(from: path)
+        return with(settings: settings)
+    }
+
+    /// Returns a copy configured from default settings locations.
+    ///
+    /// Searches in:
+    /// 1. Environment variable path
+    /// 2. Project-level settings
+    /// 3. User-level settings
+    ///
+    /// - Returns: A copy with settings from default locations applied.
+    public func withDefaultSettings() throws -> AgentConfiguration {
+        let settings = try SettingsLoader.loadFromDefaultLocations()
+        return with(settings: settings)
+    }
 }
 
 // MARK: - Validation

@@ -23,7 +23,7 @@ import OpenFoundationModels
 /// try await store.save(snapshot)
 ///
 /// // Load a session
-/// if let snapshot = try await store.load(id: sessionId) {
+/// if let snapshot = try await store.load(id: sessionID) {
 ///     let session = try await AgentSession.resume(from: snapshot)
 /// }
 /// ```
@@ -94,7 +94,7 @@ public struct SessionSnapshot: Codable, Sendable, Identifiable {
     public let metadata: [String: String]
 
     /// The parent session ID if this is a forked session.
-    public let parentSessionId: String?
+    public let parentSessionID: String?
 
     /// Creates a session snapshot.
     public init(
@@ -103,14 +103,14 @@ public struct SessionSnapshot: Codable, Sendable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         metadata: [String: String] = [:],
-        parentSessionId: String? = nil
+        parentSessionID: String? = nil
     ) {
         self.id = id
         self.transcript = transcript
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.metadata = metadata
-        self.parentSessionId = parentSessionId
+        self.parentSessionID = parentSessionID
     }
 
     /// Creates an updated snapshot with the current time.
@@ -121,7 +121,7 @@ public struct SessionSnapshot: Codable, Sendable, Identifiable {
             createdAt: createdAt,
             updatedAt: Date(),
             metadata: metadata,
-            parentSessionId: parentSessionId
+            parentSessionID: parentSessionID
         )
     }
 
@@ -137,7 +137,7 @@ public struct SessionSnapshot: Codable, Sendable, Identifiable {
             createdAt: createdAt,
             updatedAt: Date(),
             metadata: combined,
-            parentSessionId: parentSessionId
+            parentSessionID: parentSessionID
         )
     }
 }

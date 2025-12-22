@@ -66,10 +66,16 @@ public actor AgentSession: Identifiable {
     public nonisolated let createdAt: Date
 
     /// Parent session ID (if forked).
-    public nonisolated let parentSessionId: String?
+    public nonisolated let parentSessionID: String?
 
     /// Tool call history.
     private var toolCallHistory: [ToolCallRecord] = []
+
+    /// The tool execution pipeline.
+    private let pipeline: ToolExecutionPipeline?
+
+    /// The tool context store for tracking tool calls per turn.
+    private let contextStore: ToolContextStore?
 
     // MARK: - Initialization
 
@@ -83,8 +89,10 @@ public actor AgentSession: Identifiable {
         subagentRegistry: SubagentRegistry,
         toolProvider: ToolProvider,
         tools: [any Tool],
+        pipeline: ToolExecutionPipeline?,
+        contextStore: ToolContextStore?,
         createdAt: Date,
-        parentSessionId: String?
+        parentSessionID: String?
     ) {
         self.id = id
         self.configuration = configuration
@@ -92,8 +100,10 @@ public actor AgentSession: Identifiable {
         self.subagentRegistry = subagentRegistry
         self.toolProvider = toolProvider
         self.tools = tools
+        self.pipeline = pipeline
+        self.contextStore = contextStore
         self.createdAt = createdAt
-        self.parentSessionId = parentSessionId
+        self.parentSessionID = parentSessionID
     }
 
     // MARK: - Factory Methods
@@ -120,7 +130,7 @@ public actor AgentSession: Identifiable {
         )
 
         // Resolve tools
-        let tools = configuration.tools.resolve(using: toolProvider)
+        let resolvedTools = configuration.tools.resolve(using: toolProvider)
 
         // Create subagent registry
         let subagentRegistry = SubagentRegistry(
@@ -136,22 +146,65 @@ public actor AgentSession: Identifiable {
             instructionsText += "\n\n" + subagentDescriptions
         }
 
+        // Generate a single session ID to be shared
+        let sessionID = UUID().uuidString
+
+        // Create pipeline if there are hooks, permission delegate, or custom options
+        let advancedOptions = configuration.pipelineConfiguration
+        let hasPipelineConfig = !advancedOptions.globalHooks.isEmpty
+            || advancedOptions.permissionDelegate != nil
+            || !advancedOptions.toolOptions.isEmpty
+            || advancedOptions.defaultRetry != nil
+
+        let pipeline: ToolExecutionPipeline?
+        let contextStore: ToolContextStore?
+        let toolsForSession: [any Tool]
+
+        if hasPipelineConfig {
+            // Create pipeline
+            pipeline = ToolExecutionPipeline(options: advancedOptions)
+
+            // Create a context store to track tool calls per turn
+            let store = ToolContextStore(
+                sessionID: sessionID,
+                maxPermissionLevel: advancedOptions.maxPermissionLevel
+            )
+            contextStore = store
+
+            // Wrap tools with pipeline, recording each tool call
+            toolsForSession = resolvedTools.wrapped(
+                with: pipeline!,
+                contextProvider: { [store] in
+                    await store.createContext()
+                },
+                onToolExecuted: { [store] toolName in
+                    await store.recordToolCall(toolName)
+                }
+            )
+        } else {
+            pipeline = nil
+            contextStore = nil
+            toolsForSession = resolvedTools
+        }
+
         // Create language model session
         let languageModelSession = LanguageModelSession(
             model: model,
-            tools: tools,
+            tools: toolsForSession,
             instructions: Instructions(instructionsText)
         )
 
         return AgentSession(
-            id: UUID().uuidString,
+            id: sessionID,
             configuration: configuration,
             languageModelSession: languageModelSession,
             subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
-            tools: tools,
+            tools: resolvedTools,
+            pipeline: pipeline,
+            contextStore: contextStore,
             createdAt: Date(),
-            parentSessionId: nil
+            parentSessionID: nil
         )
     }
 
@@ -187,17 +240,50 @@ public actor AgentSession: Identifiable {
         )
 
         // Resolve tools
-        let tools = config.tools.resolve(using: toolProvider)
+        let resolvedTools = config.tools.resolve(using: toolProvider)
 
         // Create subagent registry
         let subagentRegistry = SubagentRegistry(
             definitions: config.subagents
         )
 
+        // Create pipeline if configured
+        let advancedOptions = config.pipelineConfiguration
+        let hasPipelineConfig = !advancedOptions.globalHooks.isEmpty
+            || advancedOptions.permissionDelegate != nil
+            || !advancedOptions.toolOptions.isEmpty
+            || advancedOptions.defaultRetry != nil
+
+        let pipeline: ToolExecutionPipeline?
+        let contextStore: ToolContextStore?
+        let toolsForSession: [any Tool]
+
+        if hasPipelineConfig {
+            pipeline = ToolExecutionPipeline(options: advancedOptions)
+            let store = ToolContextStore(
+                sessionID: snapshot.id,
+                maxPermissionLevel: advancedOptions.maxPermissionLevel
+            )
+            contextStore = store
+            toolsForSession = resolvedTools.wrapped(
+                with: pipeline!,
+                contextProvider: { [store] in
+                    await store.createContext()
+                },
+                onToolExecuted: { [store] toolName in
+                    await store.recordToolCall(toolName)
+                }
+            )
+        } else {
+            pipeline = nil
+            contextStore = nil
+            toolsForSession = resolvedTools
+        }
+
         // Create language model session with existing transcript
         let languageModelSession = LanguageModelSession(
             model: model,
-            tools: tools,
+            tools: toolsForSession,
             transcript: snapshot.transcript
         )
 
@@ -207,9 +293,11 @@ public actor AgentSession: Identifiable {
             languageModelSession: languageModelSession,
             subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
-            tools: tools,
+            tools: resolvedTools,
+            pipeline: pipeline,
+            contextStore: contextStore,
             createdAt: snapshot.createdAt,
-            parentSessionId: snapshot.parentSessionId
+            parentSessionID: snapshot.parentSessionID
         )
     }
 
@@ -255,6 +343,9 @@ public actor AgentSession: Identifiable {
 
         isResponding = true
         defer { isResponding = false }
+
+        // Start a new turn for context tracking
+        await contextStore?.startNewTurn()
 
         let startTime = ContinuousClock.now
         var toolCalls: [ToolCallRecord] = []
@@ -307,6 +398,9 @@ public actor AgentSession: Identifiable {
         isResponding = true
         defer { isResponding = false }
 
+        // Start a new turn for context tracking
+        await contextStore?.startNewTurn()
+
         let startTime = ContinuousClock.now
         var toolCalls: [ToolCallRecord] = []
 
@@ -346,23 +440,34 @@ public actor AgentSession: Identifiable {
     ///   - text: The prompt text.
     ///   - options: Optional generation options.
     /// - Returns: A stream of response snapshots.
+    /// - Throws: `AgentError.sessionBusy` if the session is already responding.
     public func stream(
         _ text: String,
         options: GenerationOptions? = nil
-    ) -> AgentResponseStream<String> {
-        return AgentResponseStream<String>.create { [weak self] continuation in
-            guard let self = self else {
-                continuation.finish()
-                return
-            }
+    ) async throws -> AgentResponseStream<String> {
+        guard !isResponding else {
+            throw AgentError.sessionBusy
+        }
 
+        isResponding = true
+
+        // Start a new turn for context tracking
+        await contextStore?.startNewTurn()
+
+        // Capture necessary state for the stream closure
+        let languageModelSession = self.languageModelSession
+        let generationOptions = options ?? configuration.modelConfiguration.toGenerationOptions()
+        let autoSave = configuration.autoSave
+        let sessionStore = configuration.sessionStore
+
+        return AgentResponseStream<String>.create { [weak self] continuation in
             do {
-                let stream = await self.languageModelSession.streamResponse(
+                let stream = await languageModelSession.streamResponse(
                     to: text,
-                    options: options ?? self.configuration.modelConfiguration.toGenerationOptions()
+                    options: generationOptions
                 )
 
-                let toolCalls: [ToolCallRecord] = []
+                var toolCalls: [ToolCallRecord] = []
 
                 for try await snapshot in stream {
                     let agentSnapshot = AgentResponseStream<String>.Snapshot(
@@ -374,13 +479,53 @@ public actor AgentSession: Identifiable {
                     continuation.yield(agentSnapshot)
                 }
 
-                // Yield final snapshot
+                // Extract tool calls from final transcript after stream completes
+                if let self = self {
+                    let transcriptEntries = await self.getCurrentTranscriptEntries()
+                    toolCalls = Transcript.extractToolCalls(from: transcriptEntries)
+
+                    await self.finishStream(
+                        toolCalls: toolCalls,
+                        autoSave: autoSave,
+                        sessionStore: sessionStore
+                    )
+                }
+
                 continuation.finish()
 
             } catch {
+                // Reset responding state on error
+                if let self = self {
+                    await self.resetRespondingState()
+                }
                 continuation.finish(throwing: error)
             }
         }
+    }
+
+    /// Gets the current transcript entries.
+    private func getCurrentTranscriptEntries() -> [Transcript.Entry] {
+        Array(transcript)
+    }
+
+    /// Finishes a streaming response by updating session state.
+    private func finishStream(
+        toolCalls: [ToolCallRecord],
+        autoSave: Bool,
+        sessionStore: (any SessionStore)?
+    ) async {
+        isResponding = false
+        toolCallHistory.append(contentsOf: toolCalls)
+
+        // Auto-save if configured
+        if autoSave, let store = sessionStore {
+            try? await save(to: store)
+        }
+    }
+
+    /// Resets the responding state on error.
+    private func resetRespondingState() {
+        isResponding = false
     }
 
     // MARK: - Subagent Delegation
@@ -429,7 +574,7 @@ public actor AgentSession: Identifiable {
             id: UUID().uuidString,
             transcript: transcript,
             createdAt: Date(),
-            parentSessionId: id
+            parentSessionID: id
         )
 
         // Resume from snapshot with same configuration
@@ -449,7 +594,7 @@ public actor AgentSession: Identifiable {
             transcript: transcript,
             createdAt: createdAt,
             updatedAt: Date(),
-            parentSessionId: parentSessionId
+            parentSessionID: parentSessionID
         )
 
         do {
@@ -466,7 +611,7 @@ public actor AgentSession: Identifiable {
             transcript: transcript,
             createdAt: createdAt,
             updatedAt: Date(),
-            parentSessionId: parentSessionId
+            parentSessionID: parentSessionID
         )
     }
 
@@ -514,5 +659,167 @@ extension AgentSession {
     ) async throws -> AgentResponse<String> {
         let prompt = try builder()
         return try await self.prompt(prompt.description, options: options)
+    }
+}
+
+// MARK: - File Checkpointing
+
+/// Global storage for checkpoint managers, keyed by session ID.
+private actor CheckpointManagerStore {
+    static let shared = CheckpointManagerStore()
+
+    private var managers: [String: CheckpointManager] = [:]
+
+    func manager(for sessionID: String) -> CheckpointManager {
+        if let existing = managers[sessionID] {
+            return existing
+        }
+        let manager = CheckpointManager()
+        managers[sessionID] = manager
+        return manager
+    }
+
+    func remove(for sessionID: String) {
+        managers.removeValue(forKey: sessionID)
+    }
+}
+
+extension AgentSession {
+
+    /// The checkpoint manager for this session.
+    ///
+    /// Use this to create and manage file checkpoints.
+    public var checkpointManager: CheckpointManager {
+        get async {
+            await CheckpointManagerStore.shared.manager(for: id)
+        }
+    }
+
+    /// Adds a file or directory to the checkpoint tracking list.
+    ///
+    /// Tracked files will be included when creating checkpoints.
+    ///
+    /// - Parameter path: The path to track. Can be a file or directory.
+    /// - Throws: `CheckpointError.pathNotFound` if the path doesn't exist.
+    public func trackFile(_ path: String) async throws {
+        try await checkpointManager.track(path)
+    }
+
+    /// Adds multiple files or directories to the checkpoint tracking list.
+    ///
+    /// - Parameter paths: The paths to track.
+    /// - Throws: `CheckpointError.pathNotFound` if any path doesn't exist.
+    public func trackFiles(_ paths: [String]) async throws {
+        for path in paths {
+            try await checkpointManager.track(path)
+        }
+    }
+
+    /// Removes a path from checkpoint tracking.
+    ///
+    /// - Parameter path: The path to stop tracking.
+    public func untrackFile(_ path: String) async {
+        await checkpointManager.untrack(path)
+    }
+
+    /// Creates a checkpoint of all tracked files.
+    ///
+    /// Use this to save the current state of tracked files before making changes.
+    ///
+    /// - Parameters:
+    ///   - name: A human-readable name for this checkpoint.
+    ///   - metadata: Optional custom metadata to associate with the checkpoint.
+    /// - Returns: Information about the created checkpoint.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let session = try await AgentSession.create(configuration: config)
+    ///
+    /// // Track files
+    /// try await session.trackFile("/path/to/project/src")
+    ///
+    /// // Create checkpoint before changes
+    /// let checkpoint = try await session.checkpoint("before-refactoring")
+    ///
+    /// // ... LLM makes changes ...
+    ///
+    /// // Rewind if needed
+    /// try await session.rewind(to: checkpoint.id)
+    /// ```
+    @discardableResult
+    public func checkpoint(
+        _ name: String,
+        metadata: [String: String] = [:]
+    ) async throws -> CheckpointManager.CheckpointInfo {
+        try await checkpointManager.createCheckpoint(name: name, metadata: metadata)
+    }
+
+    /// Returns all checkpoints for this session.
+    ///
+    /// - Returns: Array of checkpoint info, sorted by creation time.
+    public func listCheckpoints() async -> [CheckpointManager.CheckpointInfo] {
+        await checkpointManager.listCheckpoints()
+    }
+
+    /// Gets a checkpoint by its ID.
+    ///
+    /// - Parameter id: The checkpoint ID.
+    /// - Returns: The checkpoint info, or nil if not found.
+    public func getCheckpoint(_ id: String) async -> CheckpointManager.CheckpointInfo? {
+        await checkpointManager.getCheckpoint(id)
+    }
+
+    /// Gets a checkpoint by its name.
+    ///
+    /// - Parameter name: The checkpoint name.
+    /// - Returns: The most recent checkpoint with that name, or nil if not found.
+    public func getCheckpoint(named name: String) async -> CheckpointManager.CheckpointInfo? {
+        await checkpointManager.getCheckpoint(named: name)
+    }
+
+    /// Restores all tracked files to their state at a checkpoint.
+    ///
+    /// This reverts any changes made to tracked files since the checkpoint was created.
+    ///
+    /// - Parameter checkpointID: The ID of the checkpoint to restore.
+    /// - Returns: Array of paths that were restored.
+    /// - Throws: `CheckpointError.checkpointNotFound` if the checkpoint doesn't exist.
+    @discardableResult
+    public func rewind(to checkpointID: String) async throws -> [String] {
+        try await checkpointManager.rewind(to: checkpointID)
+    }
+
+    /// Restores a specific file to its state at a checkpoint.
+    ///
+    /// - Parameters:
+    ///   - path: The path of the file to restore.
+    ///   - checkpointID: The ID of the checkpoint.
+    /// - Throws: `CheckpointError` if the checkpoint or file is not found.
+    public func rewindFile(_ path: String, to checkpointID: String) async throws {
+        try await checkpointManager.rewindFile(path, to: checkpointID)
+    }
+
+    /// Compares current file states with a checkpoint.
+    ///
+    /// - Parameter checkpointID: The ID of the checkpoint to compare against.
+    /// - Returns: A diff showing which files changed, were added, or were deleted.
+    /// - Throws: `CheckpointError.checkpointNotFound` if the checkpoint doesn't exist.
+    public func diff(from checkpointID: String) async throws -> CheckpointDiff {
+        try await checkpointManager.diff(from: checkpointID)
+    }
+
+    /// Deletes a checkpoint.
+    ///
+    /// - Parameter id: The ID of the checkpoint to delete.
+    /// - Returns: The deleted checkpoint info, or nil if not found.
+    @discardableResult
+    public func deleteCheckpoint(_ id: String) async -> CheckpointManager.CheckpointInfo? {
+        await checkpointManager.deleteCheckpoint(id)
+    }
+
+    /// Deletes all checkpoints for this session.
+    public func clearAllCheckpoints() async {
+        await checkpointManager.clearAllCheckpoints()
     }
 }

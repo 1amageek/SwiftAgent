@@ -75,6 +75,13 @@ public struct AgentConfiguration: Sendable {
     /// Whether to stream responses by default.
     public var streamByDefault: Bool
 
+    // MARK: - Advanced Tool Options
+
+    /// Advanced tool execution options.
+    ///
+    /// Configure hooks, permissions, timeout, and retry behavior for tool execution.
+    public var pipelineConfiguration: ToolPipelineConfiguration
+
     // MARK: - Initialization
 
     /// Creates an agent configuration.
@@ -93,6 +100,7 @@ public struct AgentConfiguration: Sendable {
     ///   - sessionStore: Session store for persistence (default: nil).
     ///   - includeToolResults: Include tool results in response (default: true).
     ///   - streamByDefault: Stream responses by default (default: false).
+    ///   - pipelineConfiguration: Advanced tool execution options (default: .default).
     public init(
         instructions: Instructions,
         tools: ToolConfiguration = .preset(.default),
@@ -106,7 +114,8 @@ public struct AgentConfiguration: Sendable {
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
         includeToolResults: Bool = true,
-        streamByDefault: Bool = false
+        streamByDefault: Bool = false,
+        pipelineConfiguration: ToolPipelineConfiguration = .default
     ) {
         self.instructions = instructions
         self.tools = tools
@@ -121,6 +130,7 @@ public struct AgentConfiguration: Sendable {
         self.sessionStore = sessionStore
         self.includeToolResults = includeToolResults
         self.streamByDefault = streamByDefault
+        self.pipelineConfiguration = pipelineConfiguration
     }
 
     /// Creates an agent configuration with an instructions builder.
@@ -138,6 +148,7 @@ public struct AgentConfiguration: Sendable {
     ///   - sessionStore: Session store for persistence.
     ///   - includeToolResults: Include tool results in response.
     ///   - streamByDefault: Stream responses by default.
+    ///   - pipelineConfiguration: Advanced tool execution options.
     ///   - instructions: Instructions builder.
     public init(
         tools: ToolConfiguration = .preset(.default),
@@ -152,6 +163,7 @@ public struct AgentConfiguration: Sendable {
         sessionStore: (any SessionStore)? = nil,
         includeToolResults: Bool = true,
         streamByDefault: Bool = false,
+        pipelineConfiguration: ToolPipelineConfiguration = .default,
         @InstructionsBuilder instructions: () throws -> Instructions
     ) rethrows {
         self.instructions = try instructions()
@@ -167,6 +179,7 @@ public struct AgentConfiguration: Sendable {
         self.sessionStore = sessionStore
         self.includeToolResults = includeToolResults
         self.streamByDefault = streamByDefault
+        self.pipelineConfiguration = pipelineConfiguration
     }
 }
 
@@ -236,6 +249,27 @@ extension AgentConfiguration {
         var copy = self
         copy.autoSave = true
         copy.sessionStore = store
+        return copy
+    }
+
+    /// Returns a copy with modified advanced tool options.
+    public func with(pipelineConfiguration: ToolPipelineConfiguration) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = pipelineConfiguration
+        return copy
+    }
+
+    /// Returns a copy with an additional global tool hook.
+    public func withToolHook(_ hook: any ToolExecutionHook) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = copy.pipelineConfiguration.withHook(hook)
+        return copy
+    }
+
+    /// Returns a copy with a tool permission delegate.
+    public func withPermissionDelegate(_ delegate: any ToolPermissionDelegate) -> AgentConfiguration {
+        var copy = self
+        copy.pipelineConfiguration = copy.pipelineConfiguration.withPermissionDelegate(delegate)
         return copy
     }
 }
@@ -309,7 +343,8 @@ extension AgentConfiguration {
     /// Creates a configuration for code assistance.
     public static func codeAssistant(
         modelProvider: any ModelProvider,
-        workingDirectory: String = FileManager.default.currentDirectoryPath
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        pipelineConfiguration: ToolPipelineConfiguration = .secure
     ) -> AgentConfiguration {
         AgentConfiguration(
             instructions: Instructions("""
@@ -324,7 +359,8 @@ extension AgentConfiguration {
             tools: .preset(.development),
             modelProvider: modelProvider,
             modelConfiguration: .code,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            pipelineConfiguration: pipelineConfiguration
         )
     }
 
@@ -359,7 +395,7 @@ extension AgentConfiguration: CustomStringConvertible {
         AgentConfiguration(
             tools: \(tools),
             subagents: \(subagents.count),
-            model: \(modelProvider.modelId),
+            model: \(modelProvider.modelID),
             workingDirectory: \(workingDirectory)
         )
         """

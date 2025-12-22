@@ -35,7 +35,7 @@ public protocol ModelProvider: Sendable {
     func provideModel() async throws -> any LanguageModel
 
     /// The identifier of the model.
-    var modelId: String { get }
+    var modelID: String { get }
 
     /// Whether the model is currently available.
     var isAvailable: Bool { get async }
@@ -70,7 +70,7 @@ extension ModelProvider {
 public struct PreloadedModelProvider: ModelProvider {
 
     private let model: any LanguageModel
-    public let modelId: String
+    public let modelID: String
 
     /// Creates a provider with a pre-loaded model.
     ///
@@ -79,7 +79,7 @@ public struct PreloadedModelProvider: ModelProvider {
     ///   - id: An identifier for the model.
     public init(model: any LanguageModel, id: String = "preloaded") {
         self.model = model
-        self.modelId = id
+        self.modelID = id
     }
 
     public func provideModel() async throws -> any LanguageModel {
@@ -108,7 +108,7 @@ public struct PreloadedModelProvider: ModelProvider {
 /// ```
 public actor LazyModelProvider: ModelProvider {
 
-    public nonisolated let modelId: String
+    public nonisolated let modelID: String
     private let loader: @Sendable () async throws -> any LanguageModel
     private var cachedModel: (any LanguageModel)?
     private var isLoading: Bool = false
@@ -123,7 +123,7 @@ public actor LazyModelProvider: ModelProvider {
         id: String,
         loader: @escaping @Sendable () async throws -> any LanguageModel
     ) {
-        self.modelId = id
+        self.modelID = id
         self.loader = loader
     }
 

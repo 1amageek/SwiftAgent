@@ -21,7 +21,7 @@ extension Transcript {
     /// - Returns: Array of tool call records.
     public static func extractToolCalls(from entries: [Transcript.Entry]) -> [ToolCallRecord] {
         var records: [ToolCallRecord] = []
-        var toolOutputs: [String: (output: String, toolCallId: String)] = [:]
+        var toolOutputs: [String: (output: String, toolCallID: String)] = [:]
 
         // First pass: collect all tool outputs
         for entry in entries {
@@ -32,7 +32,7 @@ extension Transcript {
                     }
                     return nil
                 }.joined()
-                toolOutputs[output.id] = (output: outputText, toolCallId: output.id)
+                toolOutputs[output.id] = (output: outputText, toolCallID: output.id)
             }
         }
 
@@ -67,7 +67,7 @@ extension Transcript {
 
     /// Finds the tool output for a specific tool call.
     private static func findToolOutput(
-        for toolCallId: String,
+        for toolCallID: String,
         toolName: String,
         in entries: [Transcript.Entry]
     ) -> String? {
@@ -76,7 +76,7 @@ extension Transcript {
 
         for entry in entries {
             if case .toolCalls(let toolCalls) = entry {
-                if toolCalls.contains(where: { $0.id == toolCallId }) {
+                if toolCalls.contains(where: { $0.id == toolCallID }) {
                     foundToolCall = true
                 }
             }

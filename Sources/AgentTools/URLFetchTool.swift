@@ -1,6 +1,7 @@
 import Foundation
 import OpenFoundationModels
 import SwiftAgent
+import Synchronization
 #if canImport(Darwin)
 import Darwin
 #else
@@ -469,24 +470,21 @@ extension URLFetchTool {
 
 // MARK: - Redirect Controller
 
-private final class RedirectController: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+private final class RedirectController: NSObject, URLSessionTaskDelegate, Sendable {
     let maxRedirects: Int
     let ssrfChecker: URLFetchTool
-    private let lock = NSLock()
-    private var _redirectCount = 0
-    
+    private let _redirectCount = Mutex<Int>(0)
+
     var redirectCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _redirectCount
+        _redirectCount.withLock { $0 }
     }
-    
+
     init(maxRedirects: Int, ssrfChecker: URLFetchTool) {
         self.maxRedirects = maxRedirects
         self.ssrfChecker = ssrfChecker
         super.init()
     }
-    
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -498,12 +496,12 @@ private final class RedirectController: NSObject, URLSessionTaskDelegate, @unche
             completionHandler(nil)
             return
         }
-        
+
         // Check redirect count
-        lock.lock()
-        _redirectCount += 1
-        let currentCount = _redirectCount
-        lock.unlock()
+        let currentCount = _redirectCount.withLock { count in
+            count += 1
+            return count
+        }
         
         if currentCount > maxRedirects {
             completionHandler(nil)

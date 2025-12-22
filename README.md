@@ -27,6 +27,17 @@ graph TB
         SessionContext["SessionContext"]
     end
 
+    subgraph "Agent Session System"
+        AgentSession["AgentSession"]
+        AgentWrapper["@Agent"]
+        WithAgent["withAgent()"]
+        AgentConfig["AgentConfiguration"]
+        SubagentReg["SubagentRegistry"]
+        SubagentDef["SubagentDefinition"]
+        Delegate["Delegate Step"]
+        SessionStore["SessionStore"]
+    end
+
     subgraph "Built-in Steps"
         subgraph "Transform Steps"
             Transform["Transform"]
@@ -82,10 +93,19 @@ graph TB
     Step --> Race
     Step --> Generate
     Step --> GenerateText
+    Step --> Delegate
 
     Session --> SessionContext
     WithSession --> SessionContext
     SessionContext --> LMS
+
+    AgentWrapper --> AgentSession
+    WithAgent --> AgentSession
+    AgentSession --> AgentConfig
+    AgentSession --> SubagentReg
+    SubagentReg --> SubagentDef
+    Delegate --> SubagentReg
+    AgentSession --> SessionStore
 
     Generate --> LMS
     Generate --> Streaming
@@ -122,6 +142,9 @@ graph TB
 - **MCP Integration**: Optional Model Context Protocol support via SwiftAgentMCP
 - **Chain Support**: Chain up to 8 steps with type-safe composition
 - **Step as Tool**: Use Steps directly as Tools with automatic schema generation
+- **Agent Session**: High-level agent management with session forking and persistence
+- **Subagent Delegation**: Delegate tasks to specialized subagents with circular dependency detection
+- **Model Providers**: Flexible model configuration with provider abstraction
 
 ## Core Components
 
@@ -214,6 +237,277 @@ struct InnerStep: Step {
 // One withSession provides session to all nested Steps
 try await withSession(session) {
     try await OuterStep().run("AI")
+}
+```
+
+## Agent Session System
+
+SwiftAgent provides a high-level agent management system inspired by Claude Agent SDK. This system offers session management, subagent delegation, and persistence capabilities.
+
+### AgentSession
+
+`AgentSession` is the main interface for managing AI agent conversations:
+
+```swift
+import SwiftAgent
+import OpenFoundationModels
+
+// Create configuration
+let config = AgentConfiguration(
+    modelProvider: MyModelProvider(),
+    tools: .default,
+    instructions: Instructions {
+        "You are a helpful coding assistant"
+        "Use available tools to help users"
+    }
+)
+
+// Create session
+let session = try await AgentSession.create(configuration: config)
+
+// Send prompts
+let response = try await session.prompt("Hello!")
+print(response.content)
+
+// Stream responses
+let stream = session.stream("Write a function...")
+for try await snapshot in stream {
+    print(snapshot.content)
+}
+```
+
+### @Agent Property Wrapper
+
+Similar to `@Session`, the `@Agent` property wrapper provides access to the current `AgentSession` from the task context:
+
+```swift
+struct MyStep: Step {
+    @Agent var agent: AgentSession
+
+    func run(_ input: String) async throws -> String {
+        let response = try await agent.prompt(input)
+        return response.content
+    }
+}
+
+// Usage
+try await withAgent(session) {
+    try await MyStep().run("Hello")
+}
+```
+
+### Model Providers
+
+Abstract model loading with the `ModelProvider` protocol:
+
+```swift
+struct OpenAIProvider: ModelProvider {
+    let apiKey: String
+
+    func provideModel() async throws -> any LanguageModel {
+        // Return your model implementation
+        OpenAIModel(apiKey: apiKey)
+    }
+}
+
+// Use in configuration
+let config = AgentConfiguration(
+    modelProvider: OpenAIProvider(apiKey: "your-api-key"),
+    tools: .default,
+    instructions: Instructions("You are helpful")
+)
+```
+
+### Subagent Delegation
+
+Delegate tasks to specialized subagents:
+
+```swift
+// Define subagents
+let codeReviewer = SubagentDefinition(
+    name: "code-reviewer",
+    instructions: Instructions {
+        "You are a code review expert"
+        "Focus on best practices and potential bugs"
+    },
+    tools: .only(["file_read", "text_search"])
+)
+
+let testWriter = SubagentDefinition(
+    name: "test-writer",
+    instructions: Instructions("You write comprehensive tests"),
+    tools: .only(["file_read", "file_write"])
+)
+
+// Create configuration with subagents
+let config = AgentConfiguration(
+    modelProvider: myProvider,
+    tools: .default,
+    instructions: Instructions("You are a coding assistant"),
+    subagents: [codeReviewer, testWriter]
+)
+
+let session = try await AgentSession.create(configuration: config)
+
+// Invoke subagent directly
+let review = try await session.invokeSubagent(
+    "code-reviewer",
+    prompt: "Review this code: ..."
+)
+```
+
+### Delegate Step
+
+Use the `Delegate` step to integrate subagent delegation into Step chains:
+
+```swift
+struct CodeReviewPipeline: Step {
+    let modelProvider: any ModelProvider
+
+    var body: some Step<String, String> {
+        // First, review the code
+        Delegate(
+            to: .codeReviewer(),
+            modelProvider: modelProvider
+        ) { code in
+            Prompt("Review this code:\n\n\(code)")
+        }
+    }
+
+    func run(_ input: String) async throws -> String {
+        try await body.run(input)
+    }
+}
+
+// Factory methods for common subagents
+let review = Delegate<String, String>.codeReview(modelProvider: myProvider)
+let tests = Delegate<String, String>.writeTests(modelProvider: myProvider)
+let docs = Delegate<String, String>.writeDocumentation(modelProvider: myProvider)
+```
+
+### SubagentRegistry
+
+Manage multiple subagents with `SubagentRegistry`:
+
+```swift
+// Build registry with result builder
+let registry = SubagentRegistry.build {
+    SubagentDefinition.codeReviewer()
+    SubagentDefinition.testWriter()
+    SubagentDefinition.documentationWriter()
+}
+
+// Or register dynamically
+let registry = SubagentRegistry()
+await registry.register(.codeReviewer())
+await registry.register(.testWriter())
+
+// List available subagents
+let names = await registry.registeredNames
+// ["code-reviewer", "documentation-writer", "test-writer"]
+```
+
+### Session Persistence
+
+Save and resume sessions:
+
+```swift
+// Create with auto-save
+let store = FileSessionStore(directory: URL(fileURLWithPath: "~/.myagent/sessions"))
+
+let config = AgentConfiguration(
+    modelProvider: myProvider,
+    tools: .default,
+    instructions: Instructions("You are helpful"),
+    sessionStore: store,
+    autoSave: true
+)
+
+let session = try await AgentSession.create(configuration: config)
+
+// Manual save
+try await session.save(to: store)
+
+// Resume later
+let resumed = try await AgentSession.resume(
+    id: session.id,
+    from: store,
+    configuration: config
+)
+```
+
+### Session Forking
+
+Create branches from existing sessions:
+
+```swift
+let session = try await AgentSession.create(configuration: config)
+
+// Have a conversation
+_ = try await session.prompt("Let's discuss Swift concurrency")
+_ = try await session.prompt("What about actors?")
+
+// Fork to explore a different direction
+let forked = try await session.fork()
+
+// Original continues one way
+_ = try await session.prompt("Tell me about async/await")
+
+// Fork explores another
+_ = try await forked.prompt("Tell me about structured concurrency")
+```
+
+### Tool Configuration
+
+Configure which tools are available:
+
+```swift
+// All default tools
+let config1 = AgentConfiguration(
+    modelProvider: myProvider,
+    tools: .default,
+    instructions: Instructions("...")
+)
+
+// Only specific tools
+let config2 = AgentConfiguration(
+    modelProvider: myProvider,
+    tools: .only(["file_read", "file_write", "text_search"]),
+    instructions: Instructions("...")
+)
+
+// Exclude certain tools
+let config3 = AgentConfiguration(
+    modelProvider: myProvider,
+    tools: .except(["command_execute", "git_command"]),
+    instructions: Instructions("...")
+)
+```
+
+### AgentResponse
+
+Responses include rich metadata:
+
+```swift
+let response = try await session.prompt("Analyze this code")
+
+// Content
+print(response.content)
+
+// Tool calls made during generation
+for toolCall in response.toolCalls {
+    print("Tool: \(toolCall.toolName)")
+    print("Arguments: \(toolCall.arguments)")
+    print("Output: \(toolCall.output)")
+    print("Success: \(toolCall.success)")
+}
+
+// Duration
+print("Took: \(response.duration)")
+
+// Raw transcript entries
+for entry in response.transcriptEntries {
+    // Process transcript
 }
 ```
 
@@ -435,6 +729,19 @@ Reduce<[Metric], Summary>(initial: Summary()) { summary, metric, index in
     Transform { current in
         current.adding(metric, at: index)
     }
+}
+```
+
+### Delegate
+
+Delegate work to specialized subagents (see [Agent Session System](#agent-session-system) for details):
+
+```swift
+Delegate(
+    to: .codeReviewer(),
+    modelProvider: myProvider
+) { code in
+    Prompt("Review this code:\n\n\(code)")
 }
 ```
 

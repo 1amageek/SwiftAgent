@@ -58,7 +58,7 @@ struct SessionContextTests {
     func withSessionSetsContext() async throws {
         let session = createTestSession()
 
-        let result = try await withSession(session) {
+        let result = await withSession(session) {
             SessionContext.current != nil
         }
 
@@ -69,7 +69,7 @@ struct SessionContextTests {
     func withSessionClearsContextAfter() async throws {
         let session = createTestSession()
 
-        _ = try await withSession(session) {
+        _ = await withSession(session) {
             // Context is set here
             #expect(SessionContext.current != nil)
         }
@@ -82,7 +82,7 @@ struct SessionContextTests {
     func withSessionReturnsResult() async throws {
         let session = createTestSession()
 
-        let result = try await withSession(session) {
+        let result = await withSession(session) {
             42
         }
 

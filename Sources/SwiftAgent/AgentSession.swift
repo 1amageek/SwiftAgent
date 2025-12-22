@@ -529,7 +529,7 @@ public actor AgentSession: Identifiable {
 
         return AgentResponseStream<String>.create { [weak self] continuation in
             do {
-                let stream = await languageModelSession.streamResponse(
+                let stream = languageModelSession.streamResponse(
                     to: text,
                     options: generationOptions
                 )

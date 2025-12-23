@@ -59,10 +59,26 @@ public struct AgentConfiguration: Sendable {
 
     // MARK: - Pipeline Configuration
 
-    /// Advanced tool execution options.
+    /// Tool execution middleware pipeline.
     ///
-    /// Configure hooks, permissions, timeout, and retry behavior for tool execution.
-    public var pipelineConfiguration: ToolPipelineConfiguration
+    /// The new middleware-based pipeline for tool execution. When set, this takes
+    /// precedence over the legacy `pipelineConfiguration`.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let pipeline = ToolPipeline()
+    ///     .use(LoggingMiddleware())
+    ///     .use(PermissionMiddleware { context in
+    ///         context.toolName != "dangerous_tool"
+    ///     })
+    ///     .use(RetryMiddleware(maxAttempts: 3))
+    ///     .use(TimeoutMiddleware(duration: .seconds(30)))
+    ///
+    /// let config = AgentConfiguration(...)
+    ///     .withPipeline(pipeline)
+    /// ```
+    public var toolPipeline: ToolPipeline?
 
     // MARK: - Skills Configuration
 
@@ -71,6 +87,28 @@ public struct AgentConfiguration: Sendable {
     /// Set to `nil` to disable skills, or use `.autoDiscover()` to enable
     /// automatic skill discovery from standard paths.
     public var skills: SkillsConfiguration?
+
+    // MARK: - Context Configuration
+
+    /// Context management configuration for this agent.
+    ///
+    /// Set to `nil` to disable context management, or use `.default` for
+    /// automatic context compaction at 80% threshold.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let config = AgentConfiguration(...)
+    ///     .withContext(.default)
+    ///
+    /// // Or with custom settings
+    /// let config = AgentConfiguration(...)
+    ///     .withContext(ContextConfiguration(
+    ///         compactionThreshold: 0.85,
+    ///         strategy: PriorityCompactionStrategy()
+    ///     ))
+    /// ```
+    public var context: ContextConfiguration?
 
     // MARK: - Initialization
 
@@ -85,8 +123,9 @@ public struct AgentConfiguration: Sendable {
     ///   - workingDirectory: Working directory for file operations.
     ///   - autoSave: Whether to auto-save sessions (default: false).
     ///   - sessionStore: Session store for persistence (default: nil).
-    ///   - pipelineConfiguration: Pipeline configuration for tool execution (default: .default).
+    ///   - toolPipeline: Tool execution middleware pipeline (default: nil).
     ///   - skills: Skills configuration (default: nil, skills disabled).
+    ///   - context: Context management configuration (default: nil, context management disabled).
     public init(
         instructions: Instructions,
         tools: ToolConfiguration = .preset(.default),
@@ -96,8 +135,9 @@ public struct AgentConfiguration: Sendable {
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        pipelineConfiguration: ToolPipelineConfiguration = .default,
-        skills: SkillsConfiguration? = nil
+        toolPipeline: ToolPipeline? = nil,
+        skills: SkillsConfiguration? = nil,
+        context: ContextConfiguration? = nil
     ) {
         self.instructions = instructions
         self.tools = tools
@@ -107,8 +147,9 @@ public struct AgentConfiguration: Sendable {
         self.workingDirectory = workingDirectory
         self.autoSave = autoSave
         self.sessionStore = sessionStore
-        self.pipelineConfiguration = pipelineConfiguration
+        self.toolPipeline = toolPipeline
         self.skills = skills
+        self.context = context
     }
 
     /// Creates an agent configuration with an instructions builder.
@@ -121,8 +162,9 @@ public struct AgentConfiguration: Sendable {
     ///   - workingDirectory: Working directory for file operations.
     ///   - autoSave: Whether to auto-save sessions.
     ///   - sessionStore: Session store for persistence.
-    ///   - pipelineConfiguration: Pipeline configuration for tool execution.
+    ///   - toolPipeline: Tool execution middleware pipeline (default: nil).
     ///   - skills: Skills configuration (default: nil, skills disabled).
+    ///   - context: Context management configuration (default: nil, context management disabled).
     ///   - instructions: Instructions builder.
     public init(
         tools: ToolConfiguration = .preset(.default),
@@ -132,8 +174,9 @@ public struct AgentConfiguration: Sendable {
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        pipelineConfiguration: ToolPipelineConfiguration = .default,
+        toolPipeline: ToolPipeline? = nil,
         skills: SkillsConfiguration? = nil,
+        context: ContextConfiguration? = nil,
         @InstructionsBuilder instructions: () throws -> Instructions
     ) rethrows {
         self.instructions = try instructions()
@@ -144,8 +187,9 @@ public struct AgentConfiguration: Sendable {
         self.workingDirectory = workingDirectory
         self.autoSave = autoSave
         self.sessionStore = sessionStore
-        self.pipelineConfiguration = pipelineConfiguration
+        self.toolPipeline = toolPipeline
         self.skills = skills
+        self.context = context
     }
 }
 
@@ -203,24 +247,33 @@ extension AgentConfiguration {
         return copy
     }
 
-    /// Returns a copy with modified advanced tool options.
-    public func with(pipelineConfiguration: ToolPipelineConfiguration) -> AgentConfiguration {
+    /// Returns a copy with the specified tool middleware pipeline.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let pipeline = ToolPipeline()
+    ///     .use(LoggingMiddleware())
+    ///     .use(RetryMiddleware(maxAttempts: 3))
+    ///
+    /// let config = AgentConfiguration(...)
+    ///     .withPipeline(pipeline)
+    /// ```
+    public func withPipeline(_ pipeline: ToolPipeline) -> AgentConfiguration {
         var copy = self
-        copy.pipelineConfiguration = pipelineConfiguration
+        copy.toolPipeline = pipeline
         return copy
     }
 
-    /// Returns a copy with an additional global tool hook.
-    public func withToolHook(_ hook: any ToolExecutionHook) -> AgentConfiguration {
+    /// Returns a copy with additional middleware added to the pipeline.
+    ///
+    /// If no pipeline exists, creates a new one with the middleware.
+    public func withMiddleware(_ middleware: any ToolMiddleware) -> AgentConfiguration {
         var copy = self
-        copy.pipelineConfiguration = copy.pipelineConfiguration.withHook(hook)
-        return copy
-    }
-
-    /// Returns a copy with a tool permission delegate.
-    public func withPermissionDelegate(_ delegate: any ToolPermissionDelegate) -> AgentConfiguration {
-        var copy = self
-        copy.pipelineConfiguration = copy.pipelineConfiguration.withPermissionDelegate(delegate)
+        if copy.toolPipeline == nil {
+            copy.toolPipeline = ToolPipeline()
+        }
+        copy.toolPipeline?.use(middleware)
         return copy
     }
 
@@ -241,60 +294,21 @@ extension AgentConfiguration {
         return copy
     }
 
-    /// Returns a copy with the specified permission configuration.
+    /// Returns a copy with context management enabled.
     ///
-    /// This applies the permission rules to the pipeline configuration.
-    ///
-    /// - Parameter configuration: The permission configuration.
-    /// - Returns: A copy with the permission configuration applied.
-    public func withPermissions(_ configuration: PermissionConfiguration) -> AgentConfiguration {
+    /// - Parameter configuration: Context configuration (default: .default).
+    /// - Returns: A copy with context management configured.
+    public func withContext(_ configuration: ContextConfiguration = .default) -> AgentConfiguration {
         var copy = self
-        copy.pipelineConfiguration = copy.pipelineConfiguration.withPermissionConfiguration(configuration)
+        copy.context = configuration
         return copy
     }
 
-    /// Returns a copy with the specified hook configuration.
-    ///
-    /// This applies the hook definitions to the pipeline configuration.
-    ///
-    /// - Parameter configuration: The hook configuration.
-    /// - Returns: A copy with the hook configuration applied.
-    public func withHooks(_ configuration: HookConfiguration) -> AgentConfiguration {
+    /// Returns a copy with context management disabled.
+    public func withoutContext() -> AgentConfiguration {
         var copy = self
-        copy.pipelineConfiguration = copy.pipelineConfiguration.withHookConfiguration(configuration)
+        copy.context = nil
         return copy
-    }
-
-    /// Returns a copy configured from agent settings.
-    ///
-    /// - Parameter settings: The agent settings to apply.
-    /// - Returns: A copy with settings applied.
-    public func with(settings: AgentSettings) -> AgentConfiguration {
-        var copy = self
-        copy.pipelineConfiguration = copy.pipelineConfiguration.with(settings: settings)
-        return copy
-    }
-
-    /// Returns a copy configured from a settings file.
-    ///
-    /// - Parameter path: The path to the settings file.
-    /// - Returns: A copy with settings from the file applied.
-    public func withSettings(from path: String) throws -> AgentConfiguration {
-        let settings = try SettingsLoader.load(from: path)
-        return with(settings: settings)
-    }
-
-    /// Returns a copy configured from default settings locations.
-    ///
-    /// Searches in:
-    /// 1. Environment variable path
-    /// 2. Project-level settings
-    /// 3. User-level settings
-    ///
-    /// - Returns: A copy with settings from default locations applied.
-    public func withDefaultSettings() throws -> AgentConfiguration {
-        let settings = try SettingsLoader.loadFromDefaultLocations()
-        return with(settings: settings)
     }
 }
 
@@ -351,12 +365,20 @@ extension AgentConfiguration {
     }
 
     /// Creates a configuration for code assistance.
+    ///
+    /// Uses a secure middleware pipeline with permission checking for dangerous operations.
     public static func codeAssistant(
         modelProvider: any ModelProvider,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
-        pipelineConfiguration: ToolPipelineConfiguration = .secure
+        toolPipeline: ToolPipeline? = nil
     ) -> AgentConfiguration {
-        AgentConfiguration(
+        // Default secure pipeline for code assistant
+        let pipeline = toolPipeline ?? ToolPipeline()
+            .use(LoggingMiddleware())
+            .use(PermissionMiddleware.blockList(["rm", "sudo", "chmod 777"]))
+            .use(TimeoutMiddleware(duration: .seconds(60)))
+
+        return AgentConfiguration(
             instructions: Instructions("""
                 You are a helpful coding assistant. You can:
                 - Read, write, and edit code files
@@ -370,16 +392,23 @@ extension AgentConfiguration {
             modelProvider: modelProvider,
             modelConfiguration: .code,
             workingDirectory: workingDirectory,
-            pipelineConfiguration: pipelineConfiguration
+            toolPipeline: pipeline
         )
     }
 
     /// Creates a configuration for code review.
+    ///
+    /// Uses a read-only tool preset with logging middleware.
     public static func codeReviewer(
         modelProvider: any ModelProvider,
-        workingDirectory: String = FileManager.default.currentDirectoryPath
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        toolPipeline: ToolPipeline? = nil
     ) -> AgentConfiguration {
-        AgentConfiguration(
+        // Default read-only pipeline for code reviewer
+        let pipeline = toolPipeline ?? ToolPipeline()
+            .use(LoggingMiddleware())
+
+        return AgentConfiguration(
             instructions: Instructions("""
                 You are an expert code reviewer. Analyze code for:
                 - Bugs and potential issues
@@ -391,7 +420,8 @@ extension AgentConfiguration {
                 """),
             tools: .preset(.readOnly),
             modelProvider: modelProvider,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            toolPipeline: pipeline
         )
     }
 }

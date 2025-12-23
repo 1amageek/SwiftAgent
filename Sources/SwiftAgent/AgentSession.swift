@@ -54,6 +54,9 @@ public actor AgentSession: Identifiable {
     /// Resolved tools for this session.
     private let tools: [any Tool]
 
+    /// Tools configured for the language model session (may include wrappers).
+    private let sessionTools: [any Tool]
+
     /// Whether the session is currently responding.
     public private(set) var isResponding: Bool = false
 
@@ -71,14 +74,12 @@ public actor AgentSession: Identifiable {
     /// Tool call history.
     private var toolCallHistory: [ToolCallRecord] = []
 
-    /// The tool execution pipeline.
-    private let pipeline: ToolExecutionPipeline?
-
-    /// The tool context store for tracking tool calls per turn.
-    private let contextStore: ToolContextStore?
 
     /// The skill registry for managing agent skills.
     private let skillRegistry: SkillRegistry?
+
+    /// The context manager for token tracking and compaction.
+    private let contextManager: ContextManager?
 
     // MARK: - Initialization
 
@@ -92,9 +93,9 @@ public actor AgentSession: Identifiable {
         subagentRegistry: SubagentRegistry,
         toolProvider: ToolProvider,
         tools: [any Tool],
-        pipeline: ToolExecutionPipeline?,
-        contextStore: ToolContextStore?,
+        sessionTools: [any Tool],
         skillRegistry: SkillRegistry?,
+        contextManager: ContextManager?,
         createdAt: Date,
         parentSessionID: String?
     ) {
@@ -104,9 +105,9 @@ public actor AgentSession: Identifiable {
         self.subagentRegistry = subagentRegistry
         self.toolProvider = toolProvider
         self.tools = tools
-        self.pipeline = pipeline
-        self.contextStore = contextStore
+        self.sessionTools = sessionTools
         self.skillRegistry = skillRegistry
+        self.contextManager = contextManager
         self.createdAt = createdAt
         self.parentSessionID = parentSessionID
     }
@@ -191,41 +192,11 @@ public actor AgentSession: Identifiable {
             allTools.append(SkillTool(registry: registry))
         }
 
-        // Create pipeline if there are hooks, permission delegate, or custom options
-        let advancedOptions = configuration.pipelineConfiguration
-        let hasPipelineConfig = !advancedOptions.globalHooks.isEmpty
-            || advancedOptions.permissionDelegate != nil
-            || !advancedOptions.toolOptions.isEmpty
-            || advancedOptions.defaultRetry != nil
-
-        let pipeline: ToolExecutionPipeline?
-        let contextStore: ToolContextStore?
+        // Wrap tools with middleware pipeline if configured
         let toolsForSession: [any Tool]
-
-        if hasPipelineConfig {
-            // Create pipeline
-            pipeline = ToolExecutionPipeline(options: advancedOptions)
-
-            // Create a context store to track tool calls per turn
-            let store = ToolContextStore(
-                sessionID: sessionID,
-                maxPermissionLevel: advancedOptions.maxPermissionLevel
-            )
-            contextStore = store
-
-            // Wrap tools with pipeline, recording each tool call
-            toolsForSession = allTools.wrapped(
-                with: pipeline!,
-                contextProvider: { [store] in
-                    await store.createContext()
-                },
-                onToolExecuted: { [store] toolName in
-                    await store.recordToolCall(toolName)
-                }
-            )
+        if let toolPipeline = configuration.toolPipeline {
+            toolsForSession = toolPipeline.wrap(allTools)
         } else {
-            pipeline = nil
-            contextStore = nil
             toolsForSession = allTools
         }
 
@@ -236,6 +207,14 @@ public actor AgentSession: Identifiable {
             instructions: Instructions(instructionsText)
         )
 
+        // Create context manager if configured
+        let contextManager: ContextManager?
+        if let contextConfig = configuration.context, contextConfig.enabled {
+            contextManager = ContextManager(configuration: contextConfig)
+        } else {
+            contextManager = nil
+        }
+
         return AgentSession(
             id: sessionID,
             configuration: configuration,
@@ -243,9 +222,9 @@ public actor AgentSession: Identifiable {
             subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
             tools: resolvedTools,
-            pipeline: pipeline,
-            contextStore: contextStore,
+            sessionTools: toolsForSession,
             skillRegistry: skillRegistry,
+            contextManager: contextManager,
             createdAt: Date(),
             parentSessionID: nil
         )
@@ -313,36 +292,11 @@ public actor AgentSession: Identifiable {
             allTools.append(SkillTool(registry: registry))
         }
 
-        // Create pipeline if configured
-        let advancedOptions = config.pipelineConfiguration
-        let hasPipelineConfig = !advancedOptions.globalHooks.isEmpty
-            || advancedOptions.permissionDelegate != nil
-            || !advancedOptions.toolOptions.isEmpty
-            || advancedOptions.defaultRetry != nil
-
-        let pipeline: ToolExecutionPipeline?
-        let contextStore: ToolContextStore?
+        // Wrap tools with middleware pipeline if configured
         let toolsForSession: [any Tool]
-
-        if hasPipelineConfig {
-            pipeline = ToolExecutionPipeline(options: advancedOptions)
-            let store = ToolContextStore(
-                sessionID: snapshot.id,
-                maxPermissionLevel: advancedOptions.maxPermissionLevel
-            )
-            contextStore = store
-            toolsForSession = allTools.wrapped(
-                with: pipeline!,
-                contextProvider: { [store] in
-                    await store.createContext()
-                },
-                onToolExecuted: { [store] toolName in
-                    await store.recordToolCall(toolName)
-                }
-            )
+        if let toolPipeline = config.toolPipeline {
+            toolsForSession = toolPipeline.wrap(allTools)
         } else {
-            pipeline = nil
-            contextStore = nil
             toolsForSession = allTools
         }
 
@@ -353,6 +307,14 @@ public actor AgentSession: Identifiable {
             transcript: snapshot.transcript
         )
 
+        // Create context manager if configured
+        let contextManager: ContextManager?
+        if let contextConfig = config.context, contextConfig.enabled {
+            contextManager = ContextManager(configuration: contextConfig)
+        } else {
+            contextManager = nil
+        }
+
         return AgentSession(
             id: snapshot.id,
             configuration: config,
@@ -360,9 +322,9 @@ public actor AgentSession: Identifiable {
             subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
             tools: resolvedTools,
-            pipeline: pipeline,
-            contextStore: contextStore,
+            sessionTools: toolsForSession,
             skillRegistry: skillRegistry,
+            contextManager: contextManager,
             createdAt: snapshot.createdAt,
             parentSessionID: snapshot.parentSessionID
         )
@@ -411,8 +373,8 @@ public actor AgentSession: Identifiable {
         isResponding = true
         defer { isResponding = false }
 
-        // Start a new turn for context tracking
-        await contextStore?.startNewTurn()
+        // Auto-compact if enabled and threshold exceeded
+        try await performAutoCompactIfNeeded()
 
         let startTime = ContinuousClock.now
         var toolCalls: [ToolCallRecord] = []
@@ -465,8 +427,8 @@ public actor AgentSession: Identifiable {
         isResponding = true
         defer { isResponding = false }
 
-        // Start a new turn for context tracking
-        await contextStore?.startNewTurn()
+        // Auto-compact if enabled and threshold exceeded
+        try await performAutoCompactIfNeeded()
 
         let startTime = ContinuousClock.now
         var toolCalls: [ToolCallRecord] = []
@@ -518,8 +480,8 @@ public actor AgentSession: Identifiable {
 
         isResponding = true
 
-        // Start a new turn for context tracking
-        await contextStore?.startNewTurn()
+        // Auto-compact if enabled and threshold exceeded (before capturing session)
+        try await performAutoCompactIfNeeded()
 
         // Capture necessary state for the stream closure
         let languageModelSession = self.languageModelSession
@@ -930,5 +892,148 @@ extension AgentSession {
     /// Deletes all checkpoints for this session.
     public func clearAllCheckpoints() async {
         await checkpointManager.clearAllCheckpoints()
+    }
+}
+
+// MARK: - Context Management
+
+extension AgentSession {
+
+    /// Whether context management is enabled for this session.
+    public var contextManagementEnabled: Bool {
+        contextManager != nil
+    }
+
+    /// Gets current context usage statistics.
+    ///
+    /// Returns `nil` if context management is disabled.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// if let usage = await session.contextUsage() {
+    ///     print("Using \(usage.usagePercentage)% of context")
+    ///     if usage.isAboveWarningThreshold() {
+    ///         print("Warning: Context is getting full")
+    ///     }
+    /// }
+    /// ```
+    public func contextUsage() async -> ContextUsage? {
+        guard let manager = contextManager else { return nil }
+        return await manager.calculateUsage(for: transcript)
+    }
+
+    /// Checks if context compaction is needed.
+    ///
+    /// - Returns: `true` if usage exceeds the compaction threshold.
+    public func needsCompaction() async -> Bool {
+        guard let manager = contextManager else { return false }
+        return await manager.needsCompaction(for: transcript)
+    }
+
+    /// Checks if context usage is at warning level.
+    ///
+    /// - Returns: `true` if usage exceeds the warning threshold but not compaction threshold.
+    public func isContextAtWarningLevel() async -> Bool {
+        guard let manager = contextManager else { return false }
+        return await manager.isAtWarningLevel(for: transcript)
+    }
+
+    /// Manually triggers context compaction.
+    ///
+    /// This forces compaction regardless of the current usage level.
+    /// If context management is disabled, returns `nil`.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// if let result = try await session.compactContext() {
+    ///     print("Compaction saved \(result.tokensSaved) tokens")
+    ///     print("Removed \(result.entriesRemoved) entries")
+    /// }
+    /// ```
+    ///
+    /// - Returns: The compaction result, or `nil` if context management is disabled.
+    /// - Throws: `CompactionError` if compaction fails.
+    public func compactContext() async throws -> ContextManager.CompactionResult? {
+        guard let manager = contextManager else { return nil }
+
+        let (compactedEntries, result) = try await manager.compactIfNeeded(
+            transcript: transcript,
+            sessionID: id
+        )
+
+        // Apply compacted entries if compaction was performed
+        if result.wasCompacted {
+            try await applyCompactedTranscript(entries: compactedEntries)
+        }
+
+        return result
+    }
+
+    /// Performs auto-compaction if enabled and threshold exceeded.
+    ///
+    /// This is called before each prompt/stream to ensure context stays within limits.
+    private func performAutoCompactIfNeeded() async throws {
+        guard let contextConfig = configuration.context,
+              contextConfig.enabled,
+              contextConfig.autoCompact,
+              let manager = contextManager else {
+            return
+        }
+
+        let (compactedEntries, result) = try await manager.compactIfNeeded(
+            transcript: transcript,
+            sessionID: id
+        )
+
+        if result.wasCompacted {
+            try await applyCompactedTranscript(entries: compactedEntries)
+        }
+    }
+
+    /// Applies compacted entries by recreating the language model session.
+    private func applyCompactedTranscript(entries: [Transcript.Entry]) async throws {
+        // Create a new transcript from compacted entries
+        let compactedTranscript = Transcript(entries: entries)
+
+        // Get the model
+        let model = try await configuration.modelProvider.provideModel()
+
+        // Create new language model session with compacted transcript
+        languageModelSession = LanguageModelSession(
+            model: model,
+            tools: sessionTools,
+            transcript: compactedTranscript
+        )
+    }
+
+    /// Marks an entry as preserved during compaction.
+    ///
+    /// Preserved entries will not be removed or summarized during automatic
+    /// or manual compaction.
+    ///
+    /// - Parameter index: The entry index to preserve.
+    public func preserveEntry(at index: Int) async {
+        await contextManager?.preserveEntry(at: index)
+    }
+
+    /// Removes preservation for an entry.
+    ///
+    /// - Parameter index: The entry index to unpreserve.
+    public func unpreserveEntry(at index: Int) async {
+        await contextManager?.unpreserveEntry(at: index)
+    }
+
+    /// Clears all preserved entries.
+    public func clearPreservedEntries() async {
+        await contextManager?.clearPreservedEntries()
+    }
+
+    /// Gets compaction statistics for this session.
+    ///
+    /// Returns `nil` if context management is disabled.
+    public func contextStatistics() async -> ContextManager.Statistics? {
+        await contextManager?.statistics
     }
 }

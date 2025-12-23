@@ -28,30 +28,15 @@ import SwiftAgent
 public struct GitTool: OpenFoundationModels.Tool {
     public typealias Arguments = GitInput
     public typealias Output = GitOutput
-    
-    public static let name = "git_command"
+
+    public static let name = "git"
     public var name: String { Self.name }
-    
+
     public static let description = """
-    Executes Git commands in a repository.
-    
-    Use this tool to:
-    - Check repository status
-    - View commit history
-    - Show diffs and changes
-    - Perform version control operations
-    
-    Features:
-    - Safe command execution
-    - Destructive operation protection
-    - 60 second timeout
-    - 1MB output limit
-    
-    Limitations:
-    - Only allowed Git subcommands
-    - Destructive operations need allowMutating=true
+    Execute Git commands. Safe read operations by default. \
+    Destructive operations require allow_mutating=true. Max 60s, 1MB output.
     """
-    
+
     public var description: String { Self.description }
     
     public var parameters: GenerationSchema {

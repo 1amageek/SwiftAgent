@@ -34,7 +34,7 @@ public struct ReadTool: OpenFoundationModels.Tool {
     public typealias Arguments = ReadInput
     public typealias Output = ReadOutput
 
-    public static let name = "file_read"
+    public static let name = "read"
     public var name: String { Self.name }
 
     /// Default number of lines to read if no limit specified
@@ -44,24 +44,8 @@ public struct ReadTool: OpenFoundationModels.Tool {
     public static let maxLineLength = 2000
 
     public static let description = """
-    Reads a file from the local filesystem.
-
-    Usage:
-    - The path parameter can be absolute, relative, or use ~ for home directory
-    - By default, reads up to 2000 lines starting from the beginning
-    - Use offset and limit parameters for pagination (handy for long files)
-    - Lines longer than 2000 characters will be truncated
-    - Results include line numbers (e.g., "1→content")
-
-    Use this tool to:
-    - Read entire text files
-    - Read specific portions of large files using offset/limit
-    - View file contents with line numbers for reference
-
-    Limitations:
-    - Maximum file size: 1MB
-    - Text files only (binary files will be rejected)
-    - UTF-8 encoding only
+    Read file contents with line numbers. Supports absolute, relative, or ~/ paths. \
+    Use offset/limit for large files. Max 1MB, UTF-8 only.
     """
 
     public var description: String { Self.description }
@@ -80,9 +64,9 @@ public struct ReadTool: OpenFoundationModels.Tool {
 
     public func call(arguments: ReadInput) async throws -> ReadOutput {
         // Normalize and validate path
-        let normalizedPath = await fsActor.normalizePath(arguments.path)
+        let normalizedPath = await fsActor.normalizePath(arguments.file_path)
         guard await fsActor.isPathSafe(normalizedPath) else {
-            throw FileSystemError.pathNotSafe(path: arguments.path)
+            throw FileSystemError.pathNotSafe(path: arguments.file_path)
         }
 
         // Check if file exists
@@ -166,13 +150,13 @@ public struct ReadTool: OpenFoundationModels.Tool {
 /// Input structure for the read operation.
 @Generable
 public struct ReadInput: Sendable {
-    @Guide(description: "The absolute path to the file to read")
-    public let path: String
+    @Guide(description: "File path (absolute, relative, or ~/)")
+    public let file_path: String
 
-    @Guide(description: "The line number to start reading from (0-based). Defaults to 0 for beginning of file.")
+    @Guide(description: "Line offset to start from (0-based, default: 0)")
     public let offset: Int
 
-    @Guide(description: "The number of lines to read. Defaults to 0 which means read up to 2000 lines.")
+    @Guide(description: "Number of lines to read (default: 2000)")
     public let limit: Int
 }
 

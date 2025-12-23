@@ -34,27 +34,12 @@ public struct EditTool: OpenFoundationModels.Tool {
     public typealias Arguments = EditInput
     public typealias Output = EditOutput
 
-    public static let name = "file_edit"
+    public static let name = "edit"
     public var name: String { Self.name }
 
     public static let description = """
-    Performs exact string replacements in files.
-
-    Usage:
-    - Provide old_string with exact text to replace (including indentation)
-    - The edit will FAIL if old_string is not unique in the file
-    - Either provide more surrounding context to make it unique, or use replace_all=true
-    - Use replace_all for renaming variables/functions across the file
-
-    Important:
-    - Preserve exact indentation (tabs/spaces) when matching code
-    - old_string and new_string must be different
-    - ALWAYS prefer editing existing files over creating new ones
-
-    Limitations:
-    - File must exist
-    - Maximum file size: 1MB
-    - Text files only (UTF-8)
+    Replace exact string in file. Fails if old_string not unique (use replace_all=true for multiple). \
+    Preserve exact indentation. Max 1MB, UTF-8 only.
     """
 
     public var description: String { Self.description }
@@ -73,18 +58,18 @@ public struct EditTool: OpenFoundationModels.Tool {
 
     public func call(arguments: EditInput) async throws -> EditOutput {
         // Validate inputs
-        guard !arguments.oldString.isEmpty else {
+        guard !arguments.old_string.isEmpty else {
             throw FileSystemError.operationFailed(reason: "old_string cannot be empty")
         }
 
-        guard arguments.oldString != arguments.newString else {
+        guard arguments.old_string != arguments.new_string else {
             throw FileSystemError.operationFailed(reason: "old_string and new_string must be different")
         }
 
         // Normalize and validate path
-        let normalizedPath = await fsActor.normalizePath(arguments.path)
+        let normalizedPath = await fsActor.normalizePath(arguments.file_path)
         guard await fsActor.isPathSafe(normalizedPath) else {
-            throw FileSystemError.pathNotSafe(path: arguments.path)
+            throw FileSystemError.pathNotSafe(path: arguments.file_path)
         }
 
         // Check if file exists
@@ -103,7 +88,7 @@ public struct EditTool: OpenFoundationModels.Tool {
         let originalContent = try await fsActor.readFile(atPath: normalizedPath)
 
         // Count occurrences of old_string
-        let occurrenceCount = originalContent.components(separatedBy: arguments.oldString).count - 1
+        let occurrenceCount = originalContent.components(separatedBy: arguments.old_string).count - 1
 
         // Check if old_string exists in file
         guard occurrenceCount > 0 else {
@@ -117,7 +102,7 @@ public struct EditTool: OpenFoundationModels.Tool {
         }
 
         // If not replace_all and multiple occurrences, fail with helpful message
-        if !arguments.replaceAll && occurrenceCount > 1 {
+        if !arguments.replace_all && occurrenceCount > 1 {
             return EditOutput(
                 success: false,
                 replacements: 0,
@@ -131,19 +116,19 @@ public struct EditTool: OpenFoundationModels.Tool {
         let newContent: String
         let replacementCount: Int
 
-        if arguments.replaceAll {
+        if arguments.replace_all {
             // Replace all occurrences
             newContent = originalContent.replacingOccurrences(
-                of: arguments.oldString,
-                with: arguments.newString
+                of: arguments.old_string,
+                with: arguments.new_string
             )
             replacementCount = occurrenceCount
         } else {
             // Replace first (and only) occurrence
-            if let range = originalContent.range(of: arguments.oldString) {
+            if let range = originalContent.range(of: arguments.old_string) {
                 newContent = originalContent.replacingCharacters(
                     in: range,
-                    with: arguments.newString
+                    with: arguments.new_string
                 )
                 replacementCount = 1
             } else {
@@ -157,8 +142,8 @@ public struct EditTool: OpenFoundationModels.Tool {
 
         // Generate preview of changes
         let preview = generatePreview(
-            oldString: arguments.oldString,
-            newString: arguments.newString,
+            oldString: arguments.old_string,
+            newString: arguments.new_string,
             replacements: replacementCount
         )
 
@@ -191,17 +176,17 @@ public struct EditTool: OpenFoundationModels.Tool {
 /// Input structure for the edit operation.
 @Generable
 public struct EditInput: Sendable {
-    @Guide(description: "The absolute path to the file to modify")
-    public let path: String
+    @Guide(description: "File path to modify")
+    public let file_path: String
 
-    @Guide(description: "The exact text to replace (must match exactly, including whitespace)")
-    public let oldString: String
+    @Guide(description: "Exact text to find and replace")
+    public let old_string: String
 
-    @Guide(description: "The text to replace it with (must be different from old_string)")
-    public let newString: String
+    @Guide(description: "Replacement text")
+    public let new_string: String
 
-    @Guide(description: "Replace all occurrences of old_string. Default is false. Set to true when renaming variables or making bulk changes.")
-    public let replaceAll: Bool
+    @Guide(description: "Replace all occurrences (default: false)")
+    public let replace_all: Bool
 }
 
 /// Output structure for the edit operation.

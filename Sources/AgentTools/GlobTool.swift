@@ -29,29 +29,15 @@ import SwiftAgent
 public struct GlobTool: OpenFoundationModels.Tool {
     public typealias Arguments = GlobInput
     public typealias Output = GlobOutput
-    
-    public static let name = "file_pattern"
+
+    public static let name = "glob"
     public var name: String { Self.name }
-    
+
     public static let description = """
-    Searches for files using glob patterns.
-    
-    Use this tool to:
-    - Find files by extension (*.swift)
-    - Search recursively (**/*.md)
-    - List directory contents
-    
-    Pattern syntax:
-    - * matches any characters (except /)
-    - ** matches recursively
-    - ? matches single character
-    
-    Examples:
-    - "*.swift" - Swift files in current dir
-    - "**/*.md" - All markdown files recursively
-    - "src/**/*.ts" - TypeScript files under src/
+    Find files by glob pattern. Use * for any chars, ** for recursive, ? for single char. \
+    Example: "**/*.swift" finds all Swift files.
     """
-    
+
     public var description: String { Self.description }
     
     public var parameters: GenerationSchema {
@@ -68,23 +54,24 @@ public struct GlobTool: OpenFoundationModels.Tool {
     
     public func call(arguments: GlobInput) async throws -> GlobOutput {
         // Normalize and validate base path
-        let normalizedBasePath = await fsActor.normalizePath(arguments.basePath)
+        let basePath = arguments.path.isEmpty ? workingDirectory : arguments.path
+        let normalizedBasePath = await fsActor.normalizePath(basePath)
         guard await fsActor.isPathSafe(normalizedBasePath) else {
-            throw FileSystemError.pathNotSafe(path: arguments.basePath)
+            throw FileSystemError.pathNotSafe(path: basePath)
         }
-        
+
         // Check if base path exists and is a directory
         var isDirectory: ObjCBool = false
         guard await fsActor.fileExists(atPath: normalizedBasePath, isDirectory: &isDirectory) else {
             throw FileSystemError.fileNotFound(path: normalizedBasePath)
         }
-        
+
         guard isDirectory.boolValue else {
             throw FileSystemError.notADirectory(path: normalizedBasePath)
         }
-        
+
         // Parse file type filter
-        let fileType = try parseFileType(arguments.fileType)
+        let fileType = try parseFileType(arguments.file_type)
         
         // Search for matching files
         let matches = try await findMatches(
@@ -254,14 +241,14 @@ public struct GlobTool: OpenFoundationModels.Tool {
 /// Input structure for the glob operation.
 @Generable
 public struct GlobInput: Sendable {
-    /// The glob pattern to match files against.
+    @Guide(description: "Glob pattern (e.g., \"**/*.swift\")")
     public let pattern: String
-    
-    /// The base directory to search from.
-    public let basePath: String
-    
-    /// File type filter: "file", "dir", or "any".
-    public let fileType: String
+
+    @Guide(description: "Base directory (default: current dir)")
+    public let path: String
+
+    @Guide(description: "Filter: file, dir, or any (default: file)")
+    public let file_type: String
 }
 
 /// Output structure for the glob operation.

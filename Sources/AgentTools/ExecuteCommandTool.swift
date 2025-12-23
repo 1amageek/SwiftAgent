@@ -37,7 +37,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
 
-    public static let name = "command_execute"
+    public static let name = "bash"
     public var name: String { Self.name }
 
     /// Default timeout in seconds
@@ -50,32 +50,8 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     public static let maxOutputSize = 1024 * 1024
 
     public static let description = """
-    Executes commands directly without shell interpretation.
-
-    Usage:
-    - Provide the executable name (e.g., "ls", "git", "swift")
-    - Arguments should be a JSON array: ["arg1", "arg2"]
-    - Optionally set timeout in milliseconds (max 600000ms / 10 minutes)
-    - Optionally specify working directory
-
-    Features:
-    - Direct process execution (no shell)
-    - Whitelist-based security
-    - Configurable timeout (default: 2 minutes, max: 10 minutes)
-    - Custom working directory support
-    - 1MB output limit (truncated if exceeded)
-
-    Allowed commands:
-    - File ops: ls, cat, head, tail, wc, sort, uniq, find, which, file, stat, du, df
-    - Text: grep, sed, awk
-    - System: pwd, whoami, date, uname, ps, uptime
-    - Dev tools: git, swift, python3, node, npm, make, cmake, gcc, clang
-    - Network: ping, nslookup, dig
-
-    Limitations:
-    - No shell features (pipes, redirects, &&, ||)
-    - No interactive commands
-    - curl/wget excluded (use URLFetchTool instead)
+    Execute shell command. Allowed: ls, cat, git, swift, python3, node, npm, make, etc. \
+    No pipes/redirects. Max 10min timeout, 1MB output.
     """
 
     public var description: String { Self.description }
@@ -163,12 +139,18 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
     
     public func call(arguments: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
         // Validate command
-        guard !arguments.executable.isEmpty else {
+        guard !arguments.command.isEmpty else {
             throw FileSystemError.operationFailed(reason: "Command cannot be empty")
         }
 
-        // Extract base command name
-        let commandName = URL(fileURLWithPath: arguments.executable).lastPathComponent
+        // Parse command string into executable and arguments
+        let parts = parseCommand(arguments.command)
+        guard !parts.isEmpty else {
+            throw FileSystemError.operationFailed(reason: "Invalid command format")
+        }
+
+        let commandName = parts[0]
+        let args = Array(parts.dropFirst())
 
         // Check if command is allowed
         guard let executablePath = allowedCommands[commandName] else {
@@ -194,36 +176,10 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
             }
         }
 
-        // Also check user-provided path if it's absolute
-        if finalExecutablePath == nil && arguments.executable.hasPrefix("/") &&
-           FileManager.default.fileExists(atPath: arguments.executable) {
-            finalExecutablePath = arguments.executable
-        }
-
         guard let execPath = finalExecutablePath else {
             throw FileSystemError.operationFailed(
                 reason: "Executable not found: \(commandName). Checked paths: \(possiblePaths.joined(separator: ", "))"
             )
-        }
-
-        // Parse arguments from JSON array
-        let args: [String]
-        if arguments.argsJson.isEmpty || arguments.argsJson == "[]" {
-            args = []
-        } else {
-            guard let jsonData = arguments.argsJson.data(using: .utf8) else {
-                throw FileSystemError.operationFailed(
-                    reason: "Invalid UTF-8 in argsJson"
-                )
-            }
-
-            do {
-                args = try JSONDecoder().decode([String].self, from: jsonData)
-            } catch {
-                throw FileSystemError.operationFailed(
-                    reason: "Invalid JSON array in argsJson. Expected format: [\"arg1\", \"arg2\"]. Error: \(error.localizedDescription)"
-                )
-            }
         }
 
         // Calculate timeout (convert from milliseconds to seconds, with bounds)
@@ -231,7 +187,7 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
         let timeoutSeconds = min(Double(timeoutMs) / 1000.0, Self.maxTimeout)
 
         // Determine working directory
-        let execWorkingDir = arguments.workingDirectory.isEmpty ? workingDirectory : arguments.workingDirectory
+        let execWorkingDir = arguments.working_dir.isEmpty ? workingDirectory : arguments.working_dir
 
         // Execute command
         return try await executeCommand(
@@ -239,8 +195,44 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
             arguments: args,
             workingDirectory: execWorkingDir,
             timeout: timeoutSeconds,
-            description: arguments.description
+            description: arguments.command
         )
+    }
+
+    /// Parse command string into parts, handling quoted strings
+    private func parseCommand(_ command: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var inQuote = false
+        var quoteChar: Character = "\""
+
+        for char in command {
+            if inQuote {
+                if char == quoteChar {
+                    inQuote = false
+                } else {
+                    current.append(char)
+                }
+            } else {
+                if char == "\"" || char == "'" {
+                    inQuote = true
+                    quoteChar = char
+                } else if char.isWhitespace {
+                    if !current.isEmpty {
+                        parts.append(current)
+                        current = ""
+                    }
+                } else {
+                    current.append(char)
+                }
+            }
+        }
+
+        if !current.isEmpty {
+            parts.append(current)
+        }
+
+        return parts
     }
 }
 
@@ -249,20 +241,14 @@ public struct ExecuteCommandTool: OpenFoundationModels.Tool {
 /// The input structure for command execution.
 @Generable
 public struct ExecuteCommandInput: Sendable {
-    @Guide(description: "The command executable name (e.g., 'ls', 'git', 'swift')")
-    public let executable: String
+    @Guide(description: "Shell command to execute (e.g., \"ls -la\", \"git status\")")
+    public let command: String
 
-    @Guide(description: "JSON array of arguments for the command (e.g., [\"-la\", \"/path\"])")
-    public let argsJson: String
-
-    @Guide(description: "Optional timeout in milliseconds (max 600000ms / 10 minutes). Defaults to 120000ms (2 minutes).")
+    @Guide(description: "Timeout in milliseconds (default: 120000, max: 600000)")
     public let timeout: Int
 
-    @Guide(description: "Optional working directory for command execution. Defaults to current directory.")
-    public let workingDirectory: String
-
-    @Guide(description: "Clear, concise description of what this command does in 5-10 words")
-    public let description: String
+    @Guide(description: "Working directory (default: current dir)")
+    public let working_dir: String
 }
 
 /// Output structure for command execution operations.

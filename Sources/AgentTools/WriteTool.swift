@@ -27,28 +27,15 @@ import SwiftAgent
 public struct WriteTool: OpenFoundationModels.Tool {
     public typealias Arguments = WriteInput
     public typealias Output = WriteOutput
-    
-    public static let name = "file_write"
+
+    public static let name = "write"
     public var name: String { Self.name }
-    
+
     public static let description = """
-    Writes content to a file.
-    
-    Use this tool to:
-    - Create new text files
-    - Overwrite existing files
-    - Save generated content
-    
-    Features:
-    - Automatic parent directory creation
-    - Atomic write operations
-    - UTF-8 text encoding
-    
-    Limitations:
-    - Maximum content size: 1MB
-    - Text files only
+    Write content to a file. Creates parent directories automatically. \
+    Overwrites existing files. Max 1MB, UTF-8 only.
     """
-    
+
     public var description: String { Self.description }
     
     public var parameters: GenerationSchema {
@@ -65,9 +52,9 @@ public struct WriteTool: OpenFoundationModels.Tool {
     
     public func call(arguments: WriteInput) async throws -> WriteOutput {
         // Normalize and validate path
-        let normalizedPath = await fsActor.normalizePath(arguments.path)
+        let normalizedPath = await fsActor.normalizePath(arguments.file_path)
         guard await fsActor.isPathSafe(normalizedPath) else {
-            throw FileSystemError.pathNotSafe(path: arguments.path)
+            throw FileSystemError.pathNotSafe(path: arguments.file_path)
         }
         
         // Check if file exists (for informational purposes)
@@ -101,10 +88,10 @@ public struct WriteTool: OpenFoundationModels.Tool {
 /// Input structure for the write operation.
 @Generable
 public struct WriteInput: Sendable {
-    /// The file path to write to.
-    public let path: String
-    
-    /// The content to write to the file.
+    @Guide(description: "File path to write to")
+    public let file_path: String
+
+    @Guide(description: "Content to write")
     public let content: String
 }
 

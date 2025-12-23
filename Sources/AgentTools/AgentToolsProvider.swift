@@ -56,34 +56,34 @@ public struct AgentToolsProvider: ToolProvider {
 
     public func tool(named name: String) -> (any Tool)? {
         switch name {
-        case ReadTool.name:
+        case "read":
             return ReadTool(workingDirectory: workingDirectory)
 
-        case WriteTool.name:
+        case "write":
             return WriteTool(workingDirectory: workingDirectory)
 
-        case EditTool.name:
+        case "edit":
             return EditTool(workingDirectory: workingDirectory)
 
-        case MultiEditTool.name:
+        case "multi_edit":
             return MultiEditTool(workingDirectory: workingDirectory)
 
-        case GrepTool.name:
+        case "grep":
             return GrepTool(workingDirectory: workingDirectory)
 
-        case GlobTool.name:
+        case "glob":
             return GlobTool(workingDirectory: workingDirectory)
 
-        case ExecuteCommandTool.name:
-            return ExecuteCommandTool()
+        case "bash":
+            return ExecuteCommandTool(workingDirectory: workingDirectory)
 
-        case GitTool.name:
+        case "git":
             return GitTool()
 
-        case URLFetchTool.name:
+        case "url_fetch":
             return URLFetchTool()
 
-        case WebSearchTool.name:
+        case "web_search":
             if let provider = searchProvider {
                 return WebSearchTool(provider: provider)
             }
@@ -104,16 +104,16 @@ public struct AgentToolsProvider: ToolProvider {
 
     /// All tool names available in AgentTools.
     public static let allToolNames: [String] = [
-        ReadTool.name,
-        WriteTool.name,
-        EditTool.name,
-        MultiEditTool.name,
-        GrepTool.name,
-        GlobTool.name,
-        ExecuteCommandTool.name,
-        GitTool.name,
-        URLFetchTool.name,
-        WebSearchTool.name
+        "read",       // ReadTool
+        "write",      // WriteTool
+        "edit",       // EditTool
+        "multi_edit", // MultiEditTool
+        "grep",       // GrepTool
+        "glob",       // GlobTool
+        "bash",       // ExecuteCommandTool
+        "git",        // GitTool
+        "url_fetch",  // URLFetchTool
+        "web_search"  // WebSearchTool
     ]
 }
 

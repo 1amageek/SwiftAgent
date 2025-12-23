@@ -40,22 +40,8 @@ public struct WebSearchTool: OpenFoundationModels.Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Performs web searches and returns formatted results.
-
-    Usage:
-    - Provide a search query to find relevant web pages
-    - Use allowedDomains to restrict results to specific sites
-    - Use blockedDomains to exclude specific sites
-    - Results include markdown hyperlinks for easy navigation
-
-    Features:
-    - Domain filtering (allow/block specific websites)
-    - Formatted results with titles, URLs, and snippets
-    - Markdown link formatting
-
-    Important:
-    - After answering questions using search results, include a "Sources:" section
-    - List all relevant URLs as markdown hyperlinks: [Title](URL)
+    Search the web. Returns formatted results with titles, URLs, snippets. \
+    Supports domain filtering. Include Sources section after using results.
     """
 
     public var description: String { Self.description }

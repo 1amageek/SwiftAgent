@@ -36,7 +36,7 @@ public struct GrepTool: OpenFoundationModels.Tool {
     public typealias Arguments = GrepInput
     public typealias Output = GrepOutput
 
-    public static let name = "text_search"
+    public static let name = "grep"
     public var name: String { Self.name }
 
     /// Supported output modes
@@ -47,24 +47,8 @@ public struct GrepTool: OpenFoundationModels.Tool {
     }
 
     public static let description = """
-    A powerful search tool built on regex pattern matching.
-
-    Usage:
-    - Supports full regex syntax (e.g., "log.*Error", "function\\s+\\w+")
-    - Filter files with glob parameter (e.g., "*.swift", "**/*.tsx")
-    - Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
-    - Use headLimit to limit results
-
-    Options:
-    - ignoreCase: Case insensitive search (like -i)
-    - contextBefore/After: Lines to show around matches (like -B/-A/-C)
-    - multiline: Enable cross-line pattern matching
-    - headLimit: Limit output entries
-
-    Examples:
-    - Pattern: "TODO:" finds all TODO comments
-    - Pattern: "func\\s+\\w+" finds function definitions
-    - Pattern: "error|warning" finds errors or warnings (case insensitive with ignoreCase=true)
+    Search for regex pattern in files. Returns matching lines with file paths and line numbers. \
+    Use include to filter by file pattern (e.g., "*.swift").
     """
 
     public var description: String { Self.description }
@@ -83,43 +67,28 @@ public struct GrepTool: OpenFoundationModels.Tool {
 
     public func call(arguments: GrepInput) async throws -> GrepOutput {
         // Normalize and validate base path
-        let normalizedBasePath = await fsActor.normalizePath(arguments.basePath)
+        let basePath = arguments.path.isEmpty ? workingDirectory : arguments.path
+        let normalizedBasePath = await fsActor.normalizePath(basePath)
         guard await fsActor.isPathSafe(normalizedBasePath) else {
-            throw FileSystemError.pathNotSafe(path: arguments.basePath)
+            throw FileSystemError.pathNotSafe(path: basePath)
         }
 
-        // Parse output mode
-        let outputMode: OutputMode
-        switch arguments.outputMode.lowercased() {
-        case "content":
-            outputMode = .content
-        case "count":
-            outputMode = .count
-        case "files_with_matches", "":
-            outputMode = .filesWithMatches
-        default:
-            throw FileSystemError.operationFailed(
-                reason: "outputMode must be 'content', 'files_with_matches', or 'count', got: '\(arguments.outputMode)'"
-            )
-        }
+        // Default to content output mode for simplified API
+        let outputMode: OutputMode = .content
 
-        let contextBefore = max(0, arguments.contextBefore)
-        let contextAfter = max(0, arguments.contextAfter)
+        let contextLines = max(0, arguments.context)
 
         // Create regex pattern
         var regexOptions: NSRegularExpression.Options = []
-        if arguments.ignoreCase {
+        if arguments.ignore_case {
             regexOptions.insert(.caseInsensitive)
-        }
-        if arguments.multiline {
-            regexOptions.insert(.dotMatchesLineSeparators)
         }
 
         let regex = try NSRegularExpression(pattern: arguments.pattern, options: regexOptions)
 
-        // Find files to search using glob pattern
+        // Find files to search using include pattern
         let filesToSearch = try await findFilesToSearch(
-            filePattern: arguments.glob,
+            filePattern: arguments.include,
             basePath: normalizedBasePath
         )
 
@@ -128,8 +97,6 @@ public struct GrepTool: OpenFoundationModels.Tool {
         var filesSearched = 0
         var filesWithMatches: [String] = []
         var matchCountsByFile: [String: Int] = [:]
-        let headLimit = arguments.headLimit > 0 ? arguments.headLimit : Int.max
-        let offset = max(0, arguments.offset)
 
         for filePath in filesToSearch {
             // Skip if not a text file
@@ -140,25 +107,14 @@ public struct GrepTool: OpenFoundationModels.Tool {
             filesSearched += 1
 
             // Search file content
-            let matches: [GrepMatch]
-            if arguments.multiline {
-                matches = searchFileMultiline(
-                    content: fileContent,
-                    regex: regex,
-                    filePath: filePath,
-                    contextBefore: contextBefore,
-                    contextAfter: contextAfter
-                )
-            } else {
-                matches = searchFile(
-                    content: fileContent,
-                    regex: regex,
-                    filePath: filePath,
-                    contextBefore: contextBefore,
-                    contextAfter: contextAfter,
-                    showLineNumbers: arguments.showLineNumbers
-                )
-            }
+            let matches = searchFile(
+                content: fileContent,
+                regex: regex,
+                filePath: filePath,
+                contextBefore: contextLines,
+                contextAfter: contextLines,
+                showLineNumbers: true
+            )
 
             if !matches.isEmpty {
                 filesWithMatches.append(filePath)
@@ -167,38 +123,16 @@ public struct GrepTool: OpenFoundationModels.Tool {
             }
         }
 
-        // Apply offset and head_limit based on output mode
-        let finalMatches: [GrepMatch]
-        let finalFilesWithMatches: [String]
-        let finalMatchCounts: [String: Int]
-
-        switch outputMode {
-        case .content:
-            let sliced = Array(allMatches.dropFirst(offset).prefix(headLimit))
-            finalMatches = sliced
-            finalFilesWithMatches = filesWithMatches
-            finalMatchCounts = matchCountsByFile
-        case .filesWithMatches:
-            let sliced = Array(filesWithMatches.dropFirst(offset).prefix(headLimit))
-            finalFilesWithMatches = sliced
-            finalMatches = []
-            finalMatchCounts = [:]
-        case .count:
-            let sliced = Array(matchCountsByFile.keys.sorted().dropFirst(offset).prefix(headLimit))
-            finalMatchCounts = Dictionary(uniqueKeysWithValues: sliced.map { ($0, matchCountsByFile[$0]!) })
-            finalFilesWithMatches = []
-            finalMatches = []
-        }
-
+        // Return all matches in content mode
         return GrepOutput(
-            matches: finalMatches,
+            matches: allMatches,
             filesSearched: filesSearched,
             totalMatches: allMatches.count,
             pattern: arguments.pattern,
             basePath: normalizedBasePath,
             outputMode: outputMode.rawValue,
-            filesWithMatches: finalFilesWithMatches,
-            matchCounts: finalMatchCounts
+            filesWithMatches: filesWithMatches,
+            matchCounts: matchCountsByFile
         )
     }
 
@@ -223,8 +157,8 @@ public struct GrepTool: OpenFoundationModels.Tool {
         // Create GeneratedContent for GlobInput
         let globInputContent = GeneratedContent(properties: [
             "pattern": pattern,
-            "basePath": basePath,
-            "fileType": "file"
+            "path": basePath,
+            "file_type": "file"
         ])
         let globInput = try GlobInput(globInputContent)
 
@@ -327,38 +261,20 @@ public struct GrepTool: OpenFoundationModels.Tool {
 /// Input structure for the grep operation.
 @Generable
 public struct GrepInput: Sendable {
-    @Guide(description: "The regular expression pattern to search for in file contents")
+    @Guide(description: "Regex pattern to search")
     public let pattern: String
 
-    @Guide(description: "Glob pattern to filter files (e.g., \"*.swift\", \"**/*.tsx\"). Defaults to all files if empty.")
-    public let glob: String
+    @Guide(description: "File pattern filter (e.g., \"*.swift\")")
+    public let include: String
 
-    @Guide(description: "File or directory path to search in. Defaults to current working directory.")
-    public let basePath: String
+    @Guide(description: "Directory to search (default: current dir)")
+    public let path: String
 
-    @Guide(description: "Case insensitive search (like rg -i)")
-    public let ignoreCase: Bool
+    @Guide(description: "Case insensitive search")
+    public let ignore_case: Bool
 
-    @Guide(description: "Number of lines to show before each match (like rg -B)")
-    public let contextBefore: Int
-
-    @Guide(description: "Number of lines to show after each match (like rg -A)")
-    public let contextAfter: Int
-
-    @Guide(description: "Output mode: 'content' shows matching lines, 'files_with_matches' shows only file paths (default), 'count' shows match counts")
-    public let outputMode: String
-
-    @Guide(description: "Limit output to first N entries. 0 means unlimited.")
-    public let headLimit: Int
-
-    @Guide(description: "Skip first N entries before applying headLimit. Defaults to 0.")
-    public let offset: Int
-
-    @Guide(description: "Enable multiline mode where . matches newlines and patterns can span lines")
-    public let multiline: Bool
-
-    @Guide(description: "Show line numbers in output. Defaults to true.")
-    public let showLineNumbers: Bool
+    @Guide(description: "Context lines around matches")
+    public let context: Int
 }
 
 /// A single grep match result.

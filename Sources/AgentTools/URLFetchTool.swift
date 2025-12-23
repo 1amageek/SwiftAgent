@@ -38,29 +38,12 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     public typealias Arguments = FetchInput
     public typealias Output = URLFetchOutput
 
-    public static let name = "web_fetch"
+    public static let name = "url_fetch"
     public var name: String { Self.name }
 
     public static let description = """
-    Fetches content from a specified URL and processes it.
-
-    Usage:
-    - Provide a URL (must be fully-formed and valid)
-    - HTTP URLs will be automatically upgraded to HTTPS
-    - HTML content is converted to Markdown for easier reading
-    - Include a prompt to describe what information you want to extract
-
-    Features:
-    - SSRF protection (blocks private IPs, cloud metadata endpoints)
-    - HTML to Markdown conversion
-    - Includes a self-cleaning 15-minute cache
-    - Max response size: 5MB
-    - Timeout: 30 seconds
-
-    Limitations:
-    - Only HTTP and HTTPS URLs supported
-    - Read-only (GET requests only)
-    - Blocks localhost and private IP ranges
+    Fetch URL content. Converts HTML to Markdown. SSRF protection enabled. \
+    Max 5MB, 30s timeout. HTTP auto-upgraded to HTTPS.
     """
 
     public var description: String { Self.description }

@@ -28,33 +28,15 @@ import SwiftAgent
 public struct MultiEditTool: OpenFoundationModels.Tool {
     public typealias Arguments = MultiEditInput
     public typealias Output = MultiEditOutput
-    
-    public static let name = "file_multi_edit"
+
+    public static let name = "multi_edit"
     public var name: String { Self.name }
-    
+
     public static let description = """
-    Applies multiple edit operations to a file in a single transaction.
-    
-    Use this tool to:
-    - Perform multiple related changes at once
-    - Refactor code with multiple replacements
-    - Ensure atomic updates (all succeed or none)
-    
-    Features:
-    - Batch find/replace operations
-    - Transactional processing
-    - Order-preserving execution
-    
-    Format for edits:
-    - JSON array: [{"old":"text1","new":"replacement1"},{"old":"text2","new":"replacement2"}]
-    - Each edit must have "old" and "new" fields
-    
-    Limitations:
-    - File must exist
-    - All edits must be valid JSON
-    - Empty "old" string not allowed
+    Apply multiple edits to a file atomically. All succeed or none applied. \
+    Format: [{"old":"text","new":"replacement"},...]. Max 1MB, UTF-8 only.
     """
-    
+
     public var description: String { Self.description }
     
     public var parameters: GenerationSchema {

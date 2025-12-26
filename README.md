@@ -97,8 +97,8 @@ graph TB
     subgraph "Distributed Agents (SwiftAgentSymbio)"
         Community["Community"]
         SymbioActorSystem["SymbioActorSystem"]
-        CommunityAgent["CommunityAgent"]
-        SignalReceivable["SignalReceivable"]
+        Communicable["Communicable"]
+        Replicable["Replicable"]
         Member["Member"]
         PeerConnector["PeerConnector"]
     end
@@ -149,8 +149,8 @@ graph TB
 
     Community --> SymbioActorSystem
     Community --> Member
-    CommunityAgent --> Community
-    CommunityAgent --> SignalReceivable
+    Communicable --> Community
+    Replicable --> Communicable
     SymbioActorSystem --> PeerConnector
 ```
 
@@ -889,7 +889,7 @@ SwiftAgentSymbio provides distributed agent communication and discovery using Sw
 ```mermaid
 graph TB
     subgraph "Layer 4: Agent"
-        Agent["distributed actor<br/>CommunityAgent + SignalReceivable"]
+        Agent["distributed actor<br/>Communicable"]
     end
 
     subgraph "Layer 3: Community"
@@ -948,9 +948,10 @@ graph TB
 |---------|-------------|
 | **Community** | Manages agents and their communication |
 | **Member** | Represents an agent in the community |
+| **Communicable** | Protocol for agents that can communicate (community + perceptions + receive) |
+| **Replicable** | Protocol for agents that can replicate themselves |
 | **Perception** | Signal types an agent can receive (accepts) |
 | **Capability** | Services an agent provides (provides) - remote only |
-| **SignalReceivable** | Protocol for receiving signals |
 
 ### Design Principles
 
@@ -975,7 +976,7 @@ struct WorkSignal: Sendable, Codable {
 }
 
 // Define an agent
-distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Terminatable {
+distributed actor WorkerAgent: Communicable, Terminatable {
     typealias ActorSystem = SymbioActorSystem
 
     let community: Community
@@ -1067,7 +1068,7 @@ Terminatable.terminate()
 
 ```
 localAgentIDs.contains(id)?
-    → cast to SignalReceivable
+    → cast to Communicable
     → agent.receive(data, perception)
 ```
 
@@ -1089,22 +1090,22 @@ PeerConnector.invoke(capability, peerID, data)
 ### Protocols
 
 ```swift
-// Agent that participates in a community
-public protocol CommunityAgent: DistributedActor
+// Agent that can communicate within a community
+public protocol Communicable: DistributedActor
     where ActorSystem == SymbioActorSystem {
     var community: Community { get }
     nonisolated var perceptions: [any Perception] { get }
-}
-
-// Agent that can receive signals
-public protocol SignalReceivable: DistributedActor
-    where ActorSystem == SymbioActorSystem {
     distributed func receive(_ data: Data, perception: String) async throws -> Data?
 }
 
 // Agent that can be gracefully terminated
 public protocol Terminatable: Actor {
     nonisolated func terminate() async
+}
+
+// Agent that can replicate itself
+public protocol Replicable: Actor {
+    func replicate() async throws -> Member
 }
 ```
 
@@ -1164,7 +1165,7 @@ sequenceDiagram
 #### Implementing Replicable Agent
 
 ```swift
-distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
+distributed actor WorkerAgent: Communicable, Replicable {
     let community: Community
 
     nonisolated var perceptions: [any Perception] {
@@ -1172,7 +1173,7 @@ distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
     }
 
     // Required by Replicable protocol
-    distributed func replicate() async throws -> Member {
+    func replicate() async throws -> Member {
         try await community.spawn {
             WorkerAgent(community: self.community, actorSystem: self.actorSystem)
         }
@@ -1187,7 +1188,7 @@ distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
 #### Using ReplicateTool with LLM
 
 ```swift
-distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
+distributed actor WorkerAgent: Communicable, Replicable {
     let community: Community
 
     // Expose tool for LLM to spawn SubAgents
@@ -1195,7 +1196,7 @@ distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
         ReplicateTool(agent: self)
     }
 
-    distributed func replicate() async throws -> Member {
+    func replicate() async throws -> Member {
         try await community.spawn {
             WorkerAgent(community: self.community, actorSystem: self.actorSystem)
         }
@@ -1239,9 +1240,9 @@ The LLM autonomously decides when to spawn SubAgents:
 #### Protocols
 
 ```swift
-// Agent that can replicate itself
-public protocol Replicable: CommunityAgent, SignalReceivable {
-    distributed func replicate() async throws -> Member
+// Agent that can replicate itself (independent of Communicable)
+public protocol Replicable: Actor {
+    func replicate() async throws -> Member
 }
 
 // Tool for LLM to spawn SubAgents

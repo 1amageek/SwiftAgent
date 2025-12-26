@@ -26,7 +26,7 @@ let package = Package(
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.0.0"),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
-        .package(path: "../swift-discovery")
+        .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main")
     ],
     targets: [
         .target(

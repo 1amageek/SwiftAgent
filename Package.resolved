@@ -1,5 +1,5 @@
 {
-  "originHash" : "e1f18b090cd74fec8a61812c48293e8728745093872dcf9eb669946420cd1705",
+  "originHash" : "e0a121f09938fd734dbeeeaacbcdecdb33921c06200b895c6b90cc1607c9838e",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -53,6 +53,15 @@
       "state" : {
         "revision" : "8c0c0a8b49e080e54e5e328cc552821ff07cd341",
         "version" : "1.2.1"
+      }
+    },
+    {
+      "identity" : "swift-discovery",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1amageek/swift-discovery.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "7e59acda0ee5b67c0e79f17d69eb55ec19c86395"
       }
     },
     {

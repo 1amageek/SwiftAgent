@@ -10,7 +10,7 @@ import Foundation
 /// Configuration for an agent session.
 ///
 /// `AgentConfiguration` defines all the settings for an agent, including
-/// instructions, tools, subagents, and model configuration. This is similar
+/// instructions, tools, and model configuration. This is similar
 /// to the options object in Claude Agent SDK.
 ///
 /// ## Usage
@@ -36,9 +36,6 @@ public struct AgentConfiguration: Sendable {
 
     /// Tool configuration for the agent.
     public var tools: ToolConfiguration
-
-    /// Subagent definitions available to this agent.
-    public var subagents: [SubagentDefinition]
 
     /// Model provider for the agent.
     public var modelProvider: any ModelProvider
@@ -117,7 +114,6 @@ public struct AgentConfiguration: Sendable {
     /// - Parameters:
     ///   - instructions: Instructions defining agent behavior.
     ///   - tools: Tool configuration (default: preset(.default)).
-    ///   - subagents: Subagent definitions (default: empty).
     ///   - modelProvider: Model provider for the agent.
     ///   - modelConfiguration: Model configuration options.
     ///   - workingDirectory: Working directory for file operations.
@@ -129,7 +125,6 @@ public struct AgentConfiguration: Sendable {
     public init(
         instructions: Instructions,
         tools: ToolConfiguration = .preset(.default),
-        subagents: [SubagentDefinition] = [],
         modelProvider: any ModelProvider,
         modelConfiguration: ModelConfiguration = .default,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
@@ -141,7 +136,6 @@ public struct AgentConfiguration: Sendable {
     ) {
         self.instructions = instructions
         self.tools = tools
-        self.subagents = subagents
         self.modelProvider = modelProvider
         self.modelConfiguration = modelConfiguration
         self.workingDirectory = workingDirectory
@@ -156,7 +150,6 @@ public struct AgentConfiguration: Sendable {
     ///
     /// - Parameters:
     ///   - tools: Tool configuration.
-    ///   - subagents: Subagent definitions.
     ///   - modelProvider: Model provider for the agent.
     ///   - modelConfiguration: Model configuration options.
     ///   - workingDirectory: Working directory for file operations.
@@ -168,7 +161,6 @@ public struct AgentConfiguration: Sendable {
     ///   - instructions: Instructions builder.
     public init(
         tools: ToolConfiguration = .preset(.default),
-        subagents: [SubagentDefinition] = [],
         modelProvider: any ModelProvider,
         modelConfiguration: ModelConfiguration = .default,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
@@ -181,7 +173,6 @@ public struct AgentConfiguration: Sendable {
     ) rethrows {
         self.instructions = try instructions()
         self.tools = tools
-        self.subagents = subagents
         self.modelProvider = modelProvider
         self.modelConfiguration = modelConfiguration
         self.workingDirectory = workingDirectory
@@ -208,20 +199,6 @@ extension AgentConfiguration {
     public func with(tools: ToolConfiguration) -> AgentConfiguration {
         var copy = self
         copy.tools = tools
-        return copy
-    }
-
-    /// Returns a copy with additional subagents.
-    public func with(subagents: [SubagentDefinition]) -> AgentConfiguration {
-        var copy = self
-        copy.subagents = subagents
-        return copy
-    }
-
-    /// Returns a copy with an added subagent.
-    public func adding(subagent: SubagentDefinition) -> AgentConfiguration {
-        var copy = self
-        copy.subagents.append(subagent)
         return copy
     }
 
@@ -320,15 +297,6 @@ extension AgentConfiguration {
     ///
     /// - Throws: `AgentError.invalidConfiguration` if validation fails.
     public func validate() throws {
-        // Validate subagent names are unique
-        let names = subagents.map { $0.name }
-        let uniqueNames = Set(names)
-        if names.count != uniqueNames.count {
-            throw AgentError.invalidConfiguration(
-                reason: "Subagent names must be unique"
-            )
-        }
-
         // Validate model configuration
         if let temp = modelConfiguration.temperature {
             if temp < 0 || temp > 2 {
@@ -434,7 +402,6 @@ extension AgentConfiguration: CustomStringConvertible {
         """
         AgentConfiguration(
             tools: \(tools),
-            subagents: \(subagents.count),
             model: \(modelProvider.modelID),
             workingDirectory: \(workingDirectory)
         )

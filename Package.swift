@@ -11,6 +11,9 @@ let package = Package(
             name: "SwiftAgent",
             targets: ["SwiftAgent"]),
         .library(
+            name: "SwiftAgentSymbio",
+            targets: ["SwiftAgentSymbio"]),
+        .library(
             name: "SwiftAgentMCP",
             targets: ["SwiftAgentMCP"]),
         .library(
@@ -21,7 +24,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.0.0"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2")
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
+        .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
+        .package(path: "../swift-discovery")
     ],
     targets: [
         .target(
@@ -29,7 +34,16 @@ let package = Package(
             dependencies: [
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
-                .product(name: "Instrumentation", package: "swift-distributed-tracing")
+                .product(name: "Instrumentation", package: "swift-distributed-tracing"),
+                .product(name: "ActorRuntime", package: "swift-actor-runtime")
+            ]
+        ),
+        .target(
+            name: "SwiftAgentSymbio",
+            dependencies: [
+                "SwiftAgent",
+                .product(name: "Discovery", package: "swift-discovery"),
+                .product(name: "ActorRuntime", package: "swift-actor-runtime")
             ]
         ),
         .target(
@@ -60,6 +74,13 @@ let package = Package(
                 "SwiftAgent",
                 "AgentTools",
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ]
+        ),
+        .testTarget(
+            name: "SwiftAgentSymbioTests",
+            dependencies: [
+                "SwiftAgent",
+                "SwiftAgentSymbio"
             ]
         ),
     ]

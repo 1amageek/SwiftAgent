@@ -94,6 +94,15 @@ graph TB
         SkillsConfig["SkillsConfiguration"]
     end
 
+    subgraph "Distributed Agents (SwiftAgentSymbio)"
+        Community["Community"]
+        SymbioActorSystem["SymbioActorSystem"]
+        CommunityAgent["CommunityAgent"]
+        SignalReceivable["SignalReceivable"]
+        Member["Member"]
+        PeerConnector["PeerConnector"]
+    end
+
     Step --> Transform
     Step --> Map
     Step --> Loop
@@ -137,6 +146,12 @@ graph TB
     SkillTool --> SkillRegistry
     AgentConfig --> SkillsConfig
     SkillsConfig --> SkillRegistry
+
+    Community --> SymbioActorSystem
+    Community --> Member
+    CommunityAgent --> Community
+    CommunityAgent --> SignalReceivable
+    SymbioActorSystem --> PeerConnector
 ```
 
 ## Features
@@ -161,6 +176,7 @@ graph TB
 - **Subagent Delegation**: Delegate tasks to specialized subagents with circular dependency detection
 - **Model Providers**: Flexible model configuration with provider abstraction
 - **Agent Skills**: Portable skill packages with auto-discovery and progressive disclosure
+- **Distributed Agents**: SwiftAgentSymbio for multi-agent communication using Swift Distributed Actors
 
 ## Core Components
 
@@ -863,6 +879,385 @@ let (description, messages) = try await mcpClient.getPrompt(
     arguments: ["language": "swift"]
 )
 ```
+
+## SwiftAgentSymbio
+
+SwiftAgentSymbio provides distributed agent communication and discovery using Swift Distributed Actors. It enables agents to find each other, exchange signals, and work together across process and network boundaries.
+
+### Architecture
+
+```mermaid
+graph TB
+    subgraph "Layer 4: Agent"
+        Agent["distributed actor<br/>CommunityAgent + SignalReceivable"]
+    end
+
+    subgraph "Layer 3: Community"
+        Community["Community actor"]
+        MemberCache["memberCache"]
+        LocalAgentRefs["localAgentRefs"]
+        RegisteredMethods["registeredMethods"]
+    end
+
+    subgraph "Layer 2: Actor System"
+        SymbioActorSystem["SymbioActorSystem"]
+        ActorRegistry["ActorRegistry<br/>(swift-actor-runtime)"]
+        MethodActors["methodActors"]
+        PeerConnector["PeerConnector"]
+    end
+
+    subgraph "Layer 1: Discovery"
+        Discovery["swift-discovery"]
+    end
+
+    subgraph "Layer 0: Transport"
+        mDNS["mDNS/TCP"]
+        BLE["BLE"]
+        HTTP["HTTP/WebSocket"]
+    end
+
+    Agent --> Community
+    Community --> MemberCache
+    Community --> LocalAgentRefs
+    Community --> RegisteredMethods
+    Community --> SymbioActorSystem
+    SymbioActorSystem --> ActorRegistry
+    SymbioActorSystem --> MethodActors
+    SymbioActorSystem --> PeerConnector
+    PeerConnector --> Discovery
+    Discovery --> mDNS
+    Discovery --> BLE
+    Discovery --> HTTP
+```
+
+### Installation
+
+```swift
+.target(
+    name: "MyApp",
+    dependencies: [
+        .product(name: "SwiftAgent", package: "SwiftAgent"),
+        .product(name: "SwiftAgentSymbio", package: "SwiftAgent")
+    ]
+)
+```
+
+### Core Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Community** | Manages agents and their communication |
+| **Member** | Represents an agent in the community |
+| **Perception** | Signal types an agent can receive (accepts) |
+| **Capability** | Services an agent provides (provides) - remote only |
+| **SignalReceivable** | Protocol for receiving signals |
+
+### Design Principles
+
+- **perceptions (accepts)**: Signal types an agent can receive. Works for both local and remote agents.
+- **capabilities (provides)**: Remote service advertisement. Local agents have `provides: []`.
+- **Location transparency**: Agents don't know if targets are local or remote.
+- **changes stream**: Single consumer only (AsyncStream limitation).
+
+### Defining an Agent
+
+```swift
+import SwiftAgentSymbio
+
+// Define a perception
+struct WorkPerception: Perception {
+    let identifier = "work"
+    typealias Signal = WorkSignal
+}
+
+struct WorkSignal: Sendable, Codable {
+    let task: String
+}
+
+// Define an agent
+distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Terminatable {
+    typealias ActorSystem = SymbioActorSystem
+
+    let community: Community
+
+    nonisolated var perceptions: [any Perception] {
+        [WorkPerception()]
+    }
+
+    init(community: Community, actorSystem: SymbioActorSystem) {
+        self.community = community
+        self.actorSystem = actorSystem
+    }
+
+    distributed func receive(_ data: Data, perception: String) async throws -> Data? {
+        let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
+        print("Received work: \(signal.task)")
+        return nil
+    }
+
+    nonisolated func terminate() async {
+        print("Worker shutting down")
+    }
+}
+```
+
+### Using Community
+
+```swift
+// Create actor system and community
+let actorSystem = SymbioActorSystem()
+let community = Community(actorSystem: actorSystem)
+
+// Spawn an agent
+let worker = try await community.spawn {
+    WorkerAgent(community: community, actorSystem: actorSystem)
+}
+
+// Find agents that can receive "work" signals
+let workers = await community.whoCanReceive("work")
+
+// Send a signal
+try await community.send(
+    WorkSignal(task: "process data"),
+    to: worker,
+    perception: "work"
+)
+
+// Monitor community changes (single consumer only)
+Task {
+    for await change in await community.changes {
+        switch change {
+        case .joined(let member):
+            print("Agent joined: \(member.id)")
+        case .left(let member):
+            print("Agent left: \(member.id)")
+        default:
+            break
+        }
+    }
+}
+
+// Terminate an agent
+try await community.terminate(worker)
+```
+
+### Internal Data Flows
+
+#### spawn() Flow
+
+```
+factory() → actorReady() → ActorRegistry.register()
+    → localAgentRefs[id] = agent
+    → registerMethod("agent.perception.work")
+    → memberCache[id] = Member
+    → yield(.joined)
+```
+
+#### terminate() Flow
+
+```
+Terminatable.terminate()
+    → unregisterMethod()
+    → resignID() → ActorRegistry.unregister()
+    → remove from localAgentRefs, memberCache
+    → yield(.left)
+```
+
+#### send() Local Flow
+
+```
+localAgentIDs.contains(id)?
+    → cast to SignalReceivable
+    → agent.receive(data, perception)
+```
+
+#### send() Remote Flow
+
+```
+PeerConnector.invoke(capability, peerID, data)
+    → Transport → Remote Peer
+```
+
+### Operation Support
+
+| Operation | Local | Remote |
+|-----------|:-----:|:------:|
+| spawn/terminate | ✅ | ❌ |
+| discover/send | ✅ | ✅ |
+| invoke (capability) | ❌ | ✅ |
+
+### Protocols
+
+```swift
+// Agent that participates in a community
+public protocol CommunityAgent: DistributedActor
+    where ActorSystem == SymbioActorSystem {
+    var community: Community { get }
+    nonisolated var perceptions: [any Perception] { get }
+}
+
+// Agent that can receive signals
+public protocol SignalReceivable: DistributedActor
+    where ActorSystem == SymbioActorSystem {
+    distributed func receive(_ data: Data, perception: String) async throws -> Data?
+}
+
+// Agent that can be gracefully terminated
+public protocol Terminatable: Actor {
+    nonisolated func terminate() async
+}
+```
+
+### Internal Structures
+
+#### Community Storage
+
+```swift
+actor Community {
+    var memberCache: [String: Member]              // All members (local + remote)
+    var localAgentIDs: Set<String>                 // Local agent IDs
+    var localAgentRefs: [String: any DistributedActor]  // Strong references
+    var registeredMethods: [String: [String]]      // agentID → method names
+}
+```
+
+#### SymbioActorSystem Storage
+
+```swift
+final class SymbioActorSystem: DistributedActorSystem {
+    let actorRegistry: ActorRuntime.ActorRegistry  // swift-actor-runtime
+    let methodActors: Mutex<[String: Address]>     // method → ActorID
+    var peerConnector: PeerConnector?              // Remote communication
+}
+```
+
+### SubAgent Spawning via Tools
+
+LLM can dynamically spawn SubAgents when it determines tasks require parallelization. SubAgents are automatically detected by Community and become available as dynamic tools.
+
+#### Flow
+
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant ReplicateTool
+    participant Agent as Agent (Replicable)
+    participant Community
+    participant SubAgent
+
+    LLM->>LLM: Analyze task complexity
+    Note over LLM: Many TODOs or<br/>parallelizable work
+    LLM->>ReplicateTool: call(reason: "parallel processing")
+    ReplicateTool->>Agent: replicate()
+    Agent->>Community: spawn { Self(...) }
+    Community->>SubAgent: Create instance
+    Community->>Community: Register in memberCache
+    Community->>Community: Register signal handlers
+    Community-->>ReplicateTool: Return Member
+    ReplicateTool-->>LLM: SubAgent ID + accepts
+    LLM->>Community: whoCanReceive("work")
+    Community-->>LLM: [Original, SubAgent]
+    LLM->>Community: send(tasks, to: subAgent)
+    Community->>SubAgent: receive(data, perception)
+```
+
+#### Implementing Replicable Agent
+
+```swift
+distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
+    let community: Community
+
+    nonisolated var perceptions: [any Perception] {
+        [WorkPerception()]
+    }
+
+    // Required by Replicable protocol
+    distributed func replicate() async throws -> Member {
+        try await community.spawn {
+            WorkerAgent(community: self.community, actorSystem: self.actorSystem)
+        }
+    }
+
+    distributed func receive(_ data: Data, perception: String) async throws -> Data? {
+        // Handle work...
+    }
+}
+```
+
+#### Using ReplicateTool with LLM
+
+```swift
+distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Replicable {
+    let community: Community
+
+    // Expose tool for LLM to spawn SubAgents
+    var replicateTool: ReplicateTool {
+        ReplicateTool(agent: self)
+    }
+
+    distributed func replicate() async throws -> Member {
+        try await community.spawn {
+            WorkerAgent(community: self.community, actorSystem: self.actorSystem)
+        }
+    }
+}
+
+// Add to LanguageModelSession
+let session = LanguageModelSession(
+    model: model,
+    tools: [agent.replicateTool, otherTools...]
+) {
+    Instructions {
+        "You can spawn helper agents when tasks are complex."
+        "Use replicate_agent when you have many TODOs or parallelizable work."
+        "After spawning, use community signals to distribute work."
+    }
+}
+```
+
+#### LLM Decision Flow
+
+The LLM autonomously decides when to spawn SubAgents:
+
+```
+1. LLM receives complex task
+2. LLM analyzes:
+   - Number of independent TODOs
+   - Potential for parallel execution
+   - Task complexity
+3. If parallelization beneficial:
+   - Call replicate_agent tool
+   - Receive new SubAgent ID
+4. Query community for available workers:
+   - whoCanReceive("work") → [agents...]
+5. Distribute work across agents:
+   - send(task1, to: agent1)
+   - send(task2, to: agent2)
+6. Collect results
+```
+
+#### Protocols
+
+```swift
+// Agent that can replicate itself
+public protocol Replicable: CommunityAgent, SignalReceivable {
+    distributed func replicate() async throws -> Member
+}
+
+// Tool for LLM to spawn SubAgents
+public struct ReplicateTool: Tool {
+    public init(agent: any Replicable)
+
+    // LLM calls this to spawn a SubAgent
+    public func call(arguments: ReplicateArguments) async throws -> ReplicateOutput
+}
+```
+
+### Dependencies
+
+SwiftAgentSymbio depends on:
+- `swift-actor-runtime`: ActorRegistry, InvocationEncoder/Decoder, ResultHandler
+- `swift-discovery`: PeerConnector, Transport, CapabilityID
 
 ## Agent Skills
 

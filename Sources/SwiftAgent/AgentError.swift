@@ -10,7 +10,7 @@ import Foundation
 /// Errors that can occur during agent operations.
 ///
 /// `AgentError` provides comprehensive error handling for all agent-related operations,
-/// including session management, tool execution, and subagent delegation.
+/// including session management and tool execution.
 public enum AgentError: Error, LocalizedError, Sendable {
 
     // MARK: - Session Errors
@@ -37,17 +37,6 @@ public enum AgentError: Error, LocalizedError, Sendable {
 
     /// Tool configuration is invalid.
     case invalidToolConfiguration(reason: String)
-
-    // MARK: - Subagent Errors
-
-    /// The requested subagent was not found.
-    case subagentNotFound(name: String)
-
-    /// Subagent execution failed.
-    case subagentExecutionFailed(name: String, underlyingError: Error)
-
-    /// Circular subagent delegation detected.
-    case circularDelegation(chain: [String])
 
     // MARK: - Model Errors
 
@@ -94,12 +83,6 @@ public enum AgentError: Error, LocalizedError, Sendable {
             return "Tool '\(name)' execution failed: \(error.localizedDescription)"
         case .invalidToolConfiguration(let reason):
             return "Invalid tool configuration: \(reason)"
-        case .subagentNotFound(let name):
-            return "Subagent not found: '\(name)'"
-        case .subagentExecutionFailed(let name, let error):
-            return "Subagent '\(name)' execution failed: \(error.localizedDescription)"
-        case .circularDelegation(let chain):
-            return "Circular delegation detected: \(chain.joined(separator: " -> "))"
         case .modelLoadFailed(let error):
             return "Failed to load model: \(error.localizedDescription)"
         case .modelUnavailable(let reason):
@@ -133,12 +116,6 @@ public enum AgentError: Error, LocalizedError, Sendable {
             return "Check the tool arguments and implementation."
         case .invalidToolConfiguration:
             return "Review the tool configuration settings."
-        case .subagentNotFound:
-            return "Register the subagent in AgentConfiguration.subagents."
-        case .subagentExecutionFailed:
-            return "Check the subagent configuration and instructions."
-        case .circularDelegation:
-            return "Review subagent delegation logic to prevent circular calls."
         case .modelLoadFailed:
             return "Ensure the model is downloaded and accessible."
         case .modelUnavailable:

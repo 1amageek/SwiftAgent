@@ -113,34 +113,6 @@ public func withSessionAndAgent<T: Sendable>(
     }
 }
 
-// MARK: - SubagentRegistry Context
-
-/// Task-local storage for SubagentRegistry.
-public enum SubagentContext {
-    @TaskLocal public static var current: SubagentRegistry?
-}
-
-/// A property wrapper that provides access to the current SubagentRegistry from the task context.
-@propertyWrapper
-public struct Subagents: Sendable {
-    public init() {}
-
-    public var wrappedValue: SubagentRegistry {
-        guard let registry = SubagentContext.current else {
-            fatalError("No SubagentRegistry available in current context. Use withSubagents { } to provide one.")
-        }
-        return registry
-    }
-}
-
-/// Runs an async operation with a SubagentRegistry in context.
-public func withSubagents<T: Sendable>(
-    _ registry: SubagentRegistry,
-    operation: () async throws -> T
-) async rethrows -> T {
-    try await SubagentContext.$current.withValue(registry, operation: operation)
-}
-
 // MARK: - ToolProvider Context
 
 /// Task-local storage for ToolProvider.

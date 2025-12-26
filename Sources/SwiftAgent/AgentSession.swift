@@ -45,9 +45,6 @@ public actor AgentSession: Identifiable {
     /// The underlying language model session.
     private var languageModelSession: LanguageModelSession
 
-    /// The subagent registry.
-    private let subagentRegistry: SubagentRegistry
-
     /// The tool provider.
     private let toolProvider: ToolProvider
 
@@ -90,7 +87,6 @@ public actor AgentSession: Identifiable {
         id: String,
         configuration: AgentConfiguration,
         languageModelSession: LanguageModelSession,
-        subagentRegistry: SubagentRegistry,
         toolProvider: ToolProvider,
         tools: [any Tool],
         sessionTools: [any Tool],
@@ -102,7 +98,6 @@ public actor AgentSession: Identifiable {
         self.id = id
         self.configuration = configuration
         self.languageModelSession = languageModelSession
-        self.subagentRegistry = subagentRegistry
         self.toolProvider = toolProvider
         self.tools = tools
         self.sessionTools = sessionTools
@@ -138,11 +133,6 @@ public actor AgentSession: Identifiable {
         // Resolve tools
         let resolvedTools = configuration.tools.resolve(using: toolProvider)
 
-        // Create subagent registry
-        let subagentRegistry = SubagentRegistry(
-            definitions: configuration.subagents
-        )
-
         // Initialize skill registry if configured
         let skillRegistry: SkillRegistry?
         if let skillsConfig = configuration.skills {
@@ -166,14 +156,8 @@ public actor AgentSession: Identifiable {
             skillRegistry = nil
         }
 
-        // Build instructions with subagent info
+        // Build instructions
         var instructionsText = configuration.instructions.description
-
-        // Add subagent descriptions if any
-        let subagentDescriptions = await subagentRegistry.generateSubagentDescriptions()
-        if !subagentDescriptions.isEmpty {
-            instructionsText += "\n\n" + subagentDescriptions
-        }
 
         // Add available skills prompt if any
         if let registry = skillRegistry {
@@ -219,7 +203,6 @@ public actor AgentSession: Identifiable {
             id: sessionID,
             configuration: configuration,
             languageModelSession: languageModelSession,
-            subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
             tools: resolvedTools,
             sessionTools: toolsForSession,
@@ -263,11 +246,6 @@ public actor AgentSession: Identifiable {
 
         // Resolve tools
         let resolvedTools = config.tools.resolve(using: toolProvider)
-
-        // Create subagent registry
-        let subagentRegistry = SubagentRegistry(
-            definitions: config.subagents
-        )
 
         // Initialize skill registry if configured
         let skillRegistry: SkillRegistry?
@@ -319,7 +297,6 @@ public actor AgentSession: Identifiable {
             id: snapshot.id,
             configuration: config,
             languageModelSession: languageModelSession,
-            subagentRegistry: subagentRegistry,
             toolProvider: toolProvider,
             tools: resolvedTools,
             sessionTools: toolsForSession,
@@ -555,38 +532,6 @@ public actor AgentSession: Identifiable {
     /// Resets the responding state on error.
     private func resetRespondingState() {
         isResponding = false
-    }
-
-    // MARK: - Subagent Delegation
-
-    /// Invokes a subagent with a prompt.
-    ///
-    /// - Parameters:
-    ///   - name: The name of the subagent.
-    ///   - prompt: The prompt for the subagent.
-    /// - Returns: The subagent's response.
-    /// - Throws: `AgentError.subagentNotFound` if the subagent doesn't exist.
-    public func invokeSubagent(
-        _ name: String,
-        prompt: String
-    ) async throws -> AgentResponse<String> {
-        let context = SubagentInvocationContext(
-            parentModelProvider: configuration.modelProvider,
-            parentTools: tools,
-            toolProvider: toolProvider,
-            workingDirectory: configuration.workingDirectory
-        )
-
-        return try await subagentRegistry.invoke(
-            name,
-            prompt: prompt,
-            context: context
-        )
-    }
-
-    /// Lists available subagents.
-    public func listSubagents() async -> [SubagentDefinition] {
-        await subagentRegistry.allDefinitions
     }
 
     // MARK: - Skills

@@ -1,447 +1,356 @@
 # SwiftAgent
 
-## 概要
-SwiftAgentはOpenFoundationModelsを基盤とした、型安全で宣言的なAIエージェントフレームワーク。
+OpenFoundationModelsを基盤とした型安全で宣言的なAIエージェントフレームワーク。
 
-## アーキテクチャ
+## コア概念
 
-### コア概念
-- **Step**: 基本的な処理単位。`Input -> Output` の非同期変換を行う
-- **LanguageModelSession**: OpenFoundationModelsのLLMセッション
-- **Session**: TaskLocalベースのセッション伝播機構
-
-```swift
-public protocol Step<Input, Output> {
-    associatedtype Input: Sendable
-    associatedtype Output: Sendable
-    func run(_ input: Input) async throws -> Output
-}
-```
-
-### Step の種類
-
-#### プリミティブ Steps
-| Step | 説明 |
+| 概念 | 説明 |
 |------|------|
-| `Transform` | クロージャによる単純な変換 |
-| `Generate<In, Out>` | LLMで構造化出力を生成（Out: Generable） |
-| `GenerateText<In>` | LLMでテキスト出力を生成 |
-| `EmptyStep` | パススルー（入力をそのまま出力） |
-| `Join` | `[String] -> String` 結合 |
+| **Step** | `Input -> Output` の非同期変換単位 |
+| **Session** | TaskLocalベースのセッション伝播（`@Session`, `withSession`） |
+| **Generate** | LLMによる構造化出力生成 |
 
-#### 合成 Steps
-| Step | 説明 |
-|------|------|
-| `Chain2-8` | 直列実行（StepBuilderで自動生成） |
-| `Parallel` | 並列実行 |
-| `Race` | 競合実行（最初の結果を返す） |
-| `Loop` | 繰り返し実行 |
-| `Map` | コレクション変換 |
-| `Reduce` | コレクション集約 |
+## Step 一覧
 
-#### 修飾 Steps
-| Step | 説明 |
-|------|------|
-| `Monitor` | 入出力/エラー/完了を監視 |
-| `TracingStep` | 分散トレーシング |
-| `AnyStep` | 型消去ラッパー |
+| 種別 | Steps |
+|------|-------|
+| プリミティブ | `Transform`, `Generate`, `GenerateText`, `EmptyStep`, `Join` |
+| 合成 | `Chain2-8`, `Parallel`, `Race`, `Loop`, `Map`, `Reduce` |
+| 修飾 | `Monitor`, `TracingStep`, `AnyStep` |
 
-## Session 管理
-
-SwiftUIの`@Environment`に似た仕組みで、`LanguageModelSession`をStep階層に暗黙的に伝播させる。
-
-### コンポーネント
+## 基本パターン
 
 ```swift
-// 1. TaskLocalでセッションを保持
-public enum SessionContext {
-    @TaskLocal public static var current: LanguageModelSession?
-}
-
-// 2. @Sessionプロパティラッパーでアクセス
-@propertyWrapper
-public struct Session {
-    public var wrappedValue: LanguageModelSession {
-        SessionContext.current!
-    }
-}
-
-// 3. withSessionでコンテキストを設定
-public func withSession<T>(_ session: LanguageModelSession, operation: () async throws -> T) async rethrows -> T
-
-// 4. Step拡張でセッション付き実行
-extension Step {
-    public func run(_ input: Input, session: LanguageModelSession) async throws -> Output
-}
-```
-
-### 使用例
-
-```swift
-// @Sessionでセッションにアクセス
-struct TranslateStep: Step {
+// Session伝播（TaskLocal経由で自動伝播）
+struct MyStep: Step {
     @Session var session: LanguageModelSession
-
     func run(_ input: String) async throws -> String {
-        let response = try await session.respond {
-            Prompt("Translate to Japanese: \(input)")
-        }
-        return response.content
+        try await session.respond { Prompt(input) }.content
     }
 }
+try await withSession(session) { try await MyStep().run("Hello") }
 
-// 実行時にwithSessionでコンテキスト設定
-let session = LanguageModelSession(model: model) {
-    Instructions("You are a translator")
-}
-
-let result = try await withSession(session) {
-    try await TranslateStep().run("Hello")
-}
-
-// または簡便なメソッド
-let result = try await TranslateStep().run("Hello", session: session)
-```
-
-### ネストしたStep
-
-```swift
-struct OuterStep: Step {
+// StepBuilder による合成
+struct Pipeline: Step {
     @Session var session: LanguageModelSession
-
-    func run(_ input: String) async throws -> String {
-        // InnerStepも同じsessionを自動的に使用
-        let processed = try await InnerStep().run(input)
-        return processed
-    }
-}
-
-struct InnerStep: Step {
-    @Session var session: LanguageModelSession
-
-    func run(_ input: String) async throws -> String {
-        // 親のコンテキストからsessionを取得
-        let response = try await session.respond { Prompt(input) }
-        return response.content
-    }
-}
-
-// 一度のwithSessionで両方のStepがsessionにアクセス可能
-try await withSession(session) {
-    try await OuterStep().run("Hello")
-}
-```
-
-## 基本的な使い方
-
-```swift
-import SwiftAgent
-import OpenFoundationModels
-
-// LanguageModelSession を作成
-let session = LanguageModelSession(model: model) {
-    Instructions("You are a helpful assistant.")
-}
-
-// Step を作成して実行
-let step = GenerateText<String>(session: session) { input in
-    Prompt("Translate to Japanese: \(input)")
-}
-
-let result = try await step.run("Hello, world!")
-```
-
-### StepBuilder による合成
-
-```swift
-struct TranslationPipeline: Step {
-    typealias Input = String
-    typealias Output = String
-
-    @Session var session: LanguageModelSession
-
-    @StepBuilder
-    var body: some Step<String, String> {
+    @StepBuilder var body: some Step<String, String> {
         Transform { $0.trimmingCharacters(in: .whitespaces) }
-        GenerateText(session: session) { input in
-            Prompt("Translate to Japanese: \(input)")
-        }
-        Transform { "Translation: \($0)" }
+        GenerateText(session: session) { Prompt($0) }
     }
-
-    func run(_ input: String) async throws -> String {
-        try await body.run(input)
-    }
+    func run(_ input: String) async throws -> String { try await body.run(input) }
 }
 
-// 使用
-let result = try await withSession(session) {
-    try await TranslationPipeline().run("Hello")
+// 構造化出力
+@Generable struct Output: Sendable {
+    @Guide(description: "説明") let field: String
 }
-```
+let step = Generate<String, Output>(session: session) { Prompt($0) }
 
-### 構造化出力
-
-```swift
-@Generable
-struct BlogPost: Sendable {
-    @Guide(description: "The title of the blog post")
-    let title: String
-
-    @Guide(description: "The main content")
-    let content: String
-}
-
-let step = Generate<String, BlogPost>(session: session) { topic in
-    Prompt("Write a blog post about: \(topic)")
-}
-
-let post = try await step.run("Swift Concurrency")
-```
-
-## Tool 定義
-
-OpenFoundationModels.Tool を直接使用：
-
-```swift
-@Generable
-public struct SearchInput: Sendable {
-    @Guide(description: "Search query")
-    public let query: String
-}
-
-public struct SearchOutput: Sendable, PromptRepresentable {
-    public let results: [String]
-
-    public var promptRepresentation: Prompt {
-        Prompt(results.joined(separator: "\n"))
-    }
-}
-
-public struct SearchTool: Tool {
-    public typealias Arguments = SearchInput
-
-    public let name = "search"
-    public let description = "Search for information"
-
-    public func call(arguments: SearchInput) async throws -> SearchOutput {
-        SearchOutput(results: ["Result 1", "Result 2"])
-    }
+// Tool定義（Arguments は @Generable、Output は不要）
+struct MyTool: Tool {
+    typealias Arguments = MyInput  // @Generable 必須
+    let name = "my_tool"
+    let description = "説明"
+    func call(arguments: MyInput) async throws -> MyOutput { ... }
 }
 ```
 
-### @Generable の注意事項
+## @Generable の制限
 
-**Arguments（LLMが生成）**: @Generable を使用
-```swift
-@Generable
-struct ToolInput: Sendable {
-    @Guide(description: "説明") let param: String
-}
-```
+- Dictionary 型は未サポート
+- enum は未サポート（`@Guide(enumeration:)` を使用）
+- 全プロパティに `@Guide` が必須
 
-**Output（コードが生成）**: @Generable を使用しない
-```swift
-struct ToolOutput: Sendable, PromptRepresentable {
-    let result: String
-    var promptRepresentation: Prompt { Prompt(result) }
-}
-```
-
-### @Generable の制限
-- Dictionary 型は直接サポートされない
-- enum は直接サポートされない（@Guide の enumeration を使用）
-- すべてのプロパティに @Guide を付ける必要がある
-
-## Skills
-
-Agent Skills は、エージェントの機能を拡張するためのポータブルなスキルパッケージ。SKILL.md ファイルとオプションのリソースディレクトリで構成される。
-
-### スキルディレクトリ構造
-
-```
-~/.agent/skills/
-└── pdf-processing/
-    ├── SKILL.md          # 必須: メタデータ + 指示
-    ├── scripts/          # オプション: 実行可能スクリプト
-    ├── references/       # オプション: 参照ドキュメント
-    └── assets/           # オプション: 画像等のアセット
-```
-
-### SKILL.md フォーマット
-
-```markdown
----
-name: pdf-processing
-description: Extract text and tables from PDF files.
-license: MIT
-compatibility: Requires poppler
-metadata:
-  author: example-org
-  version: "1.0"
-allowed-tools: Bash(pdftotext:*) Read
----
-
-# PDF Processing Skill
-
-Instructions for the agent...
-```
-
-### 主要コンポーネント
-
-| コンポーネント | 説明 |
-|--------------|------|
-| `Skill` | スキルのメタデータと指示を保持 |
-| `SkillMetadata` | YAMLフロントマターのデータモデル |
-| `SkillRegistry` | スキルの登録・アクティベーション管理（Actor） |
-| `SkillLoader` | SKILL.mdファイルのパーサー |
-| `SkillDiscovery` | 標準パスからのスキル自動検出 |
-| `SkillTool` | LLMがスキルをアクティベートするためのツール |
-| `SkillsConfiguration` | スキル設定の統合構造体 |
-
-### 検出パス
-
-1. `~/.agent/skills/` - ユーザーレベル
-2. `./.agent/skills/` - プロジェクトレベル
-3. `$AGENT_SKILLS_PATH` - 環境変数
-
-### 使用例
-
-```swift
-// 自動検出を有効化
-let config = AgentConfiguration(
-    instructions: Instructions("You are a helpful assistant."),
-    modelProvider: myProvider,
-    skills: .autoDiscover()
-)
-
-// カスタムレジストリを使用
-let registry = SkillRegistry()
-let skill = try SkillLoader.loadMetadata(from: "~/.agent/skills/pdf-processing")
-await registry.register(skill)
-
-let config = AgentConfiguration(
-    instructions: Instructions("..."),
-    modelProvider: myProvider,
-    skills: .custom(registry: registry)
-)
-
-// AgentSession でスキルを使用
-let session = try await AgentSession.create(configuration: config)
-let skills = await session.listSkills()  // 利用可能なスキル一覧
-```
-
-### Progressive Disclosure モデル
-
-1. **Discovery**: メタデータのみ読み込み（name, description）
-2. **Activation**: LLMが `activate_skill` ツールで完全な指示を取得
-3. **Execution**: スキルの指示に従ってタスクを実行
-
-### プロンプト注入
-
-AgentSession 作成時に `<available_skills>` XML がシステムプロンプトに注入される:
-
-```xml
-<available_skills>
-<skill name="pdf-processing" location="~/.agent/skills/pdf-processing">
-Extract text and tables from PDF files.
-</skill>
-</available_skills>
-```
-
-## SwiftAgentMCP
-
-MCP (Model Context Protocol) をSwiftAgentと統合するオプショナルモジュール。
-
-### 概要
-
-```swift
-import SwiftAgentMCP
-
-// 1. MCP サーバー設定
-let config = MCPServerConfig(
-    name: "filesystem",
-    transport: .stdio(
-        command: "/usr/local/bin/npx",
-        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-    )
-)
-
-// 2. 接続
-let mcpClient = try await MCPClient.connect(config: config)
-defer { Task { await mcpClient.disconnect() } }
-
-// 3. Tools取得 (OpenFoundationModels.Tool互換)
-let mcpTools = try await mcpClient.tools()
-
-// 4. LanguageModelSessionで使用
-let session = LanguageModelSession(model: model, tools: mcpTools) {
-    Instructions("You are a helpful assistant")
-}
-```
-
-### 主要コンポーネント
-
-| コンポーネント | 説明 |
-|--------------|------|
-| `MCPClient` | MCPサーバーへの接続を管理するActor |
-| `MCPDynamicTool` | MCP.ToolをOpenFoundationModels.Toolに変換 |
-| `MCPServerConfig` | サーバー接続設定 |
-| `MCPTransportConfig` | トランスポート設定（stdio/HTTP） |
-
-## ファイル構成
-
-### Core
-| ファイル | 責務 |
-|----------|------|
-| `Agent.swift` | Step プロトコル、Chain2-8、StepBuilder |
-| `Session.swift` | @Session、withSession、SessionContext |
-| `Generate.swift` | Generate、GenerateText |
-| `AgentConfiguration.swift` | エージェント設定 |
-| `AgentSession.swift` | エージェントセッション管理 |
-
-### Steps
-| ファイル | 責務 |
-|----------|------|
-| `Loop.swift` | 繰り返し制御 |
-| `Parallel.swift` | 並列実行 |
-| `Race.swift` | 競合実行 |
-| `Map.swift` | コレクション変換 |
-| `Reduce.swift` | コレクション集約 |
-| `Transform.swift` | 単純変換 |
-| `Join.swift` | 文字列結合 |
-| `AnyStep.swift` | 型消去 |
-| `Monitor.swift` | 監視 |
-| `Tracing.swift` | 分散トレーシング |
-| `StepModifier.swift` | モディファイアパターン |
-| `Tool+Step.swift` | Step を Tool として使用 |
+## モジュール
 
 ### Skills
-| ファイル | 責務 |
-|----------|------|
-| `Skills/Skill.swift` | スキルデータモデル |
-| `Skills/SkillMetadata.swift` | YAMLフロントマターモデル |
-| `Skills/SkillError.swift` | スキルエラー定義 |
-| `Skills/SkillLoader.swift` | SKILL.mdパーサー |
-| `Skills/SkillRegistry.swift` | スキル登録・管理Actor |
-| `Skills/SkillDiscovery.swift` | スキル自動検出 |
-| `Skills/SkillTool.swift` | スキルアクティベーションツール |
-| `Skills/SkillsConfiguration.swift` | スキル設定構造体 |
+エージェント機能を拡張するポータブルなスキルパッケージ。詳細: [docs/SKILLS_DESIGN.md](docs/SKILLS_DESIGN.md)
+
+```swift
+let config = AgentConfiguration(
+    instructions: Instructions("..."),
+    modelProvider: provider,
+    skills: .autoDiscover()
+)
+```
+
+### SwiftAgentMCP
+MCP (Model Context Protocol) 統合モジュール。
+
+```swift
+let mcpClient = try await MCPClient.connect(config: config)
+let mcpTools = try await mcpClient.tools()
+let session = LanguageModelSession(model: model, tools: mcpTools) { Instructions("...") }
+```
+
+### SwiftAgentSymbio
+エージェント間通信と発見の分散システムモジュール。Swift Distributed Actors を使用。
+
+#### レイヤー構成
+
+```
+Layer 4: Agent (Communicable = CommunityAgent + SignalReceivable)
+    ↓
+Layer 3: Community (メンバー管理、spawn/terminate/send)
+    ↓
+Layer 2: SymbioActorSystem + PeerConnector (Distributed Actor基盤)
+    ↓
+Layer 1: swift-discovery (トランスポート抽象化)
+    ↓
+Layer 0: Transport (mDNS/TCP, BLE, HTTP/WebSocket)
+```
+
+#### 操作の可否
+
+| 操作 | ローカル | リモート |
+|------|:--------:|:--------:|
+| spawn/terminate | ✅ | ❌ |
+| discover/send | ✅ | ✅ |
+| invoke (capability) | ❌ | ✅ |
+
+#### 設計原則
+
+- **perceptions (accepts)**: エージェントが受信できる信号の種類。ローカル/リモート両対応
+- **capabilities (provides)**: リモートサービス広告用。ローカルエージェントは `provides: []`
+- **changes**: 単一コンシューマー制限（AsyncStream の仕様）
+
+#### プロトコル
+
+```swift
+// 通信可能なエージェント（コミュニティ参加 + 信号受信）
+public protocol Communicable: DistributedActor
+    where ActorSystem == SymbioActorSystem {
+    var community: Community { get }
+    nonisolated var perceptions: [any Perception] { get }
+    distributed func receive(_ data: Data, perception: String) async throws -> Data?
+}
+
+// 終了可能なエージェント
+public protocol Terminatable: Actor {
+    nonisolated func terminate() async
+}
+
+// 自己複製可能なエージェント（SubAgent生成用）
+public protocol Replicable: Actor {
+    func replicate() async throws -> Member
+}
+```
+
+#### 内部データフロー
+
+**spawn() フロー:**
+```
+factory() → actorReady() → ActorRegistry登録 → localAgentRefs保存
+    → registerMethod() → memberCache追加 → .joined イベント
+```
+
+**terminate() フロー:**
+```
+Terminatable.terminate() → unregisterMethod() → resignID()
+    → ストレージ削除 → .left イベント
+```
+
+**send() ローカルフロー:**
+```
+localAgentIDs確認 → SignalReceivable キャスト → receive() 直接呼び出し
+```
+
+**send() リモートフロー:**
+```
+PeerConnector.invoke() → Transport → リモートピア
+```
+
+**リモート受信フロー:**
+```
+PeerConnector → handleDiscoveryInvocation() → actorID(for:)
+    → ActorRegistry.find() → SignalReceivable.receive()
+```
+
+#### Community 内部構造
+
+```swift
+actor Community {
+    // ストレージ
+    var memberCache: [String: Member]              // 全メンバー（ローカル+リモート）
+    var localAgentIDs: Set<String>                 // ローカルエージェントID
+    var localAgentRefs: [String: any DistributedActor]  // エージェント参照（強参照）
+    var registeredMethods: [String: [String]]      // エージェントID → メソッド名リスト
+
+    // ID形式: agent.id.hexString (Address の16進文字列表現)
+}
+```
+
+#### 使用例
+
+```swift
+// エージェント定義
+distributed actor WorkerAgent: Communicable, Terminatable {
+    typealias ActorSystem = SymbioActorSystem
+
+    let community: Community
+
+    nonisolated var perceptions: [any Perception] {
+        [WorkPerception()]
+    }
+
+    init(community: Community, actorSystem: SymbioActorSystem) {
+        self.community = community
+        self.actorSystem = actorSystem
+    }
+
+    distributed func receive(_ data: Data, perception: String) async throws -> Data? {
+        let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
+        // 処理...
+        return nil
+    }
+
+    nonisolated func terminate() async {
+        // クリーンアップ...
+    }
+}
+
+// Community 使用
+let actorSystem = SymbioActorSystem()
+let community = Community(actorSystem: actorSystem)
+
+// ローカルエージェント起動
+let worker = try await community.spawn {
+    WorkerAgent(community: community, actorSystem: actorSystem)
+}
+
+// プロセスエージェント起動（別プロセスで実行）
+let processWorker = try await community.spawnProcess(
+    executable: "/usr/local/bin/worker-agent",
+    arguments: ["--mode", "batch"],
+    timeout: .seconds(10)
+)
+
+// 信号送信
+try await community.send(WorkSignal(task: "process"), to: worker, perception: "work")
+
+// 検索
+let workers = await community.whoCanReceive("work")
+
+// 変更監視（単一コンシューマーのみ）
+for await change in await community.changes {
+    switch change {
+    case .joined(let member): print("Joined: \(member.id)")
+    case .left(let member): print("Left: \(member.id)")
+    default: break
+    }
+}
+
+// 終了（ローカル・プロセス両方対応）
+try await community.terminate(worker)
+try await community.terminate(processWorker)
+```
+
+#### SubAgent Spawning（LLMによる動的エージェント生成）
+
+LLMがタスクの複雑さを判断し、`ReplicateTool`を通じてSubAgentを動的に生成する仕組み。
+
+**フロー:**
+```
+LLM → ReplicateTool.call() → Replicable.replicate() → Community.spawn()
+    → memberCache追加 → .joined イベント → 動的にToolとして利用可能
+```
+
+**ReplicateTool:**
+```swift
+public struct ReplicateTool: OpenFoundationModels.Tool {
+    public static let name = "replicate_agent"
+
+    private let agent: any Replicable
+
+    public init(agent: any Replicable) {
+        self.agent = agent
+    }
+
+    public func call(arguments: ReplicateArguments) async throws -> ReplicateOutput {
+        let member = try await agent.replicate()
+        return ReplicateOutput(success: true, agentID: member.id, accepts: Array(member.accepts), ...)
+    }
+}
+
+@Generable
+public struct ReplicateArguments: Sendable {
+    @Guide(description: "Reason for spawning a SubAgent")
+    public let reason: String
+}
+```
+
+**Replicable エージェントの実装:**
+```swift
+distributed actor WorkerAgent: Communicable, Replicable {
+    let community: Community
+
+    func replicate() async throws -> Member {
+        try await community.spawn {
+            WorkerAgent(community: self.community, actorSystem: self.actorSystem)
+        }
+    }
+}
+
+// LLMセッションでReplicateToolを使用
+let session = LanguageModelSession(model: model, tools: [ReplicateTool(agent: workerAgent)]) {
+    Instructions {
+        "You can spawn helper agents when tasks are complex."
+        "Use replicate_agent when you have many TODOs or parallelizable work."
+    }
+}
+```
+
+**LLMの判断基準:**
+- タスクに多数のTODOがある場合
+- 作業が並列化可能な場合
+- 専門的なサブタスク用のヘルパーが必要な場合
+
+#### 主要コンポーネント
+
+| コンポーネント | 責務 |
+|---------------|------|
+| `Community` | メンバー管理、spawn/spawnProcess/terminate、send、変更通知 |
+| `SymbioActorSystem` | DistributedActorSystem実装、ActorRegistry統合 |
+| `Member` | コミュニティメンバーの情報（id, accepts, provides, isAvailable, metadata） |
+| `CommunityChange` | joined, left, updated, becameAvailable, becameUnavailable |
+| `Communicable` | 通信可能なエージェント（community, perceptions, receive） |
+| `Replicable` | 自己複製可能なエージェント（Actor継承、独立） |
+| `ReplicateTool` | LLMがSubAgentを生成するためのツール |
+| `AgentHandshakeInfo` | プロセス間ハンドシェイク情報（id, name, accepts, provides） |
+| `ProcessHandshakeError` | プロセスハンドシェイクのエラー型 |
+
+#### SymbioActorSystem 内部構造
+
+```swift
+final class SymbioActorSystem: DistributedActorSystem {
+    let actorRegistry: ActorRuntime.ActorRegistry  // アクター登録（swift-actor-runtime）
+    let methodActors: Mutex<[String: Address]>     // メソッド名 → ActorID マッピング
+    var peerConnector: PeerConnector?              // リモート通信用
+
+    // DistributedActorSystem 必須メソッド
+    func actorReady(_:)    // ActorRegistry に登録
+    func resignID(_:)      // ActorRegistry から削除
+    func remoteCall(...)   // ローカル実行 or エラー（リモートは Community 経由）
+}
+```
+
+#### 依存ライブラリ
+
+- `swift-actor-runtime`: ActorRegistry、InvocationEncoder/Decoder、ResultHandler
+- `swift-discovery`: PeerConnector、Transport、CapabilityID
 
 ## 依存関係
 
 ```
-OpenFoundationModels
-    ↑
-SwiftAgent (Step, Generate, Session, Control Flow)
-    ↑
-AgentTools (FileSystemTool, ExecuteCommandTool, etc.)
-
-MCP (swift-sdk)
-    ↑
-SwiftAgentMCP (MCPClient, MCPDynamicTool)
-    ↑
-SwiftAgent
+                    OpenFoundationModels
+                           ↓
+                       SwiftAgent
+                      ↙    ↓    ↘
+        SwiftAgentMCP   AgentTools   SwiftAgentSymbio
+              ↓                            ↓
+         MCP (swift-sdk)         swift-actor-runtime
+                                          ↓
+                                   swift-discovery
 ```
 
 ## 参考リンク

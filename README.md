@@ -150,7 +150,7 @@ graph TB
     Community --> SymbioActorSystem
     Community --> Member
     Communicable --> Community
-    Replicable --> Communicable
+    Communicable -.-> Replicable
     SymbioActorSystem --> PeerConnector
 ```
 
@@ -1243,7 +1243,7 @@ The LLM autonomously decides when to spawn SubAgents:
 
 ```swift
 // Agent that can replicate itself (independent of Communicable)
-public protocol Replicable: Actor {
+public protocol Replicable: Sendable {
     func replicate() async throws -> Member
 }
 

@@ -6,7 +6,6 @@ import Foundation
 import SwiftAgent
 import DiscoveryCore
 import Distributed
-import Darwin.C
 
 // MARK: - Member
 
@@ -92,15 +91,6 @@ public enum CommunityChange: Sendable {
     case becameUnavailable(Member)
 }
 
-// MARK: - SpawnedProcessEntry
-
-/// Entry for a spawned process agent
-private struct SpawnedProcessEntry: @unchecked Sendable {
-    let process: Process
-    let socketPath: String
-    let spawnedAt: Date
-}
-
 // MARK: - Community
 
 /// The community of agents
@@ -149,9 +139,6 @@ public actor Community {
 
     /// Registered method names per agent (for cleanup on terminate)
     private var registeredMethods: [String: [String]] = [:]
-
-    /// Spawned process entries
-    private var spawnedProcesses: [String: SpawnedProcessEntry] = [:]
 
     /// Change continuation for broadcasting changes
     private var changeContinuation: AsyncStream<CommunityChange>.Continuation?
@@ -236,22 +223,9 @@ public actor Community {
             }
         }
 
-        // Terminate all spawned processes
-        for (agentID, entry) in spawnedProcesses {
-            if entry.process.isRunning {
-                entry.process.terminate()
-            }
-            try? FileManager.default.removeItem(atPath: entry.socketPath)
-
-            if let member = memberCache[agentID] {
-                changeContinuation?.yield(.left(member))
-            }
-        }
-
         localAgentIDs.removeAll()
         localAgentRefs.removeAll()
         registeredMethods.removeAll()
-        spawnedProcesses.removeAll()
         memberCache.removeAll()
 
         try await connector.stop()
@@ -305,9 +279,9 @@ public actor Community {
 
     /// Send a signal to a member
     ///
-    /// Uses SymbioActorSystem for transparent local/remote routing.
-    /// For local agents, the call is executed directly.
-    /// For remote agents, the call goes through PeerConnector.
+    /// Routes signals based on member location:
+    /// - Local agents: Direct call via distributed actor
+    /// - Remote agents: Via PeerConnector (Discovery)
     ///
     /// - Parameters:
     ///   - signal: The signal to send
@@ -331,14 +305,13 @@ public actor Community {
         // Serialize the signal
         let data = try JSONEncoder().encode(signal)
 
-        // Check if this is a local agent with Communicable
+        // Path 1: Local agent - direct call
         if localAgentIDs.contains(member.id),
            let agent = localAgentRefs[member.id] as? any Communicable {
-            // Direct local call via distributed actor
             return try await agent.receive(data, perception: perception)
         }
 
-        // Remote path: Go through PeerConnector
+        // Path 2: Remote agent - via PeerConnector
         let peerID = PeerID(member.id)
 
         let capabilityString = "\(AgentCapabilityNamespace.perception).\(perception)"
@@ -466,11 +439,10 @@ public actor Community {
         return member
     }
 
-    /// Terminate a local agent or spawned process
+    /// Terminate a local agent
     ///
     /// Stops the agent and removes it from the community.
-    /// This works for local agents (spawned with `spawn()`) and
-    /// process agents (spawned with `spawnProcess()`).
+    /// Only local agents (spawned with `spawn()`) can be terminated.
     /// Remote agents cannot be terminated.
     ///
     /// - Parameter member: The member to terminate
@@ -479,17 +451,12 @@ public actor Community {
         let agentID = member.id
         let location = member.metadata["location"]
 
-        // Handle based on location
-        switch location {
-        case "local":
-            try await terminateLocalAgent(agentID)
-
-        case "process":
-            try terminateProcessAgent(agentID)
-
-        default:
+        // Only local agents can be terminated
+        guard location == "local" else {
             throw CommunityError.cannotTerminateRemote(agentID)
         }
+
+        try await terminateLocalAgent(agentID)
 
         // Remove from member cache
         memberCache.removeValue(forKey: agentID)
@@ -526,213 +493,6 @@ public actor Community {
         // Remove from storage
         localAgentIDs.remove(agentID)
         localAgentRefs.removeValue(forKey: agentID)
-    }
-
-    /// Terminate a spawned process agent
-    private func terminateProcessAgent(_ agentID: String) throws {
-        guard let entry = spawnedProcesses[agentID] else {
-            throw CommunityError.memberNotFound(agentID)
-        }
-
-        // Terminate the process if still running
-        if entry.process.isRunning {
-            entry.process.terminate()
-        }
-
-        // Clean up socket file
-        try? FileManager.default.removeItem(atPath: entry.socketPath)
-
-        // Remove from storage
-        spawnedProcesses.removeValue(forKey: agentID)
-    }
-
-    // MARK: - Process Spawn
-
-    /// Spawn an agent as a separate process
-    ///
-    /// Launches an executable as a child process and establishes communication
-    /// via Unix socket. The child process must implement the handshake protocol.
-    ///
-    /// - Parameters:
-    ///   - executable: Path to the executable
-    ///   - arguments: Command-line arguments to pass
-    ///   - environment: Additional environment variables
-    ///   - timeout: Maximum time to wait for handshake (default: 10 seconds)
-    /// - Returns: Member representing the spawned process agent
-    ///
-    /// Usage:
-    /// ```swift
-    /// let worker = try await community.spawnProcess(
-    ///     executable: "/usr/local/bin/worker-agent",
-    ///     arguments: ["--mode", "batch"]
-    /// )
-    /// ```
-    @discardableResult
-    public func spawnProcess(
-        executable: String,
-        arguments: [String] = [],
-        environment: [String: String] = [:],
-        timeout: Duration = .seconds(10)
-    ) async throws -> Member {
-        // 1. Create socket path for IPC
-        let socketPath = "/tmp/agent-\(UUID().uuidString).sock"
-
-        // 2. Configure and launch the process
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments + ["--agent-socket", socketPath]
-
-        // Merge environment
-        var env = ProcessInfo.processInfo.environment
-        for (key, value) in environment {
-            env[key] = value
-        }
-        process.environment = env
-
-        do {
-            try process.run()
-        } catch {
-            throw CommunityError.processSpawnFailed(error.localizedDescription)
-        }
-
-        // 3. Wait for socket to appear (indicates child is ready)
-        let deadline = ContinuousClock.now + timeout
-        while !FileManager.default.fileExists(atPath: socketPath) {
-            if ContinuousClock.now >= deadline {
-                process.terminate()
-                throw CommunityError.processSpawnTimeout(socketPath)
-            }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-
-        // 4. Perform handshake to get agent info
-        let agentInfo: AgentHandshakeInfo
-        do {
-            agentInfo = try await performHandshake(socketPath: socketPath, timeout: timeout)
-        } catch {
-            process.terminate()
-            try? FileManager.default.removeItem(atPath: socketPath)
-            throw CommunityError.processHandshakeFailed(error.localizedDescription)
-        }
-
-        // 5. Create Member for this process agent
-        let member = Member(
-            id: agentInfo.id,
-            name: agentInfo.name,
-            accepts: Set(agentInfo.accepts),
-            provides: Set(agentInfo.provides),
-            isAvailable: true,
-            metadata: [
-                "location": "process",
-                "pid": "\(process.processIdentifier)",
-                "socketPath": socketPath
-            ].merging(agentInfo.metadata) { current, _ in current }
-        )
-
-        // 6. Store process entry
-        let entry = SpawnedProcessEntry(
-            process: process,
-            socketPath: socketPath,
-            spawnedAt: Date()
-        )
-        spawnedProcesses[agentInfo.id] = entry
-
-        // 7. Add to member cache
-        memberCache[agentInfo.id] = member
-
-        // 8. Broadcast .joined event
-        changeContinuation?.yield(.joined(member))
-
-        return member
-    }
-
-    /// Perform handshake with a spawned process
-    private func performHandshake(
-        socketPath: String,
-        timeout: Duration
-    ) async throws -> AgentHandshakeInfo {
-        // Open Unix socket connection
-        let socket = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard socket >= 0 else {
-            throw ProcessHandshakeError.connectionFailed("Failed to create socket")
-        }
-
-        defer {
-            close(socket)
-        }
-
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-
-        // Copy socket path to sun_path
-        let pathBytes = socketPath.utf8CString
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            ptr.withMemoryRebound(to: CChar.self, capacity: Int(104)) { dest in
-                for (index, byte) in pathBytes.enumerated() where index < 103 {
-                    dest[index] = byte
-                }
-            }
-        }
-
-        // Connect to socket
-        let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let result = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                Darwin.connect(socket, sockaddrPtr, addrLen)
-            }
-        }
-
-        guard result == 0 else {
-            throw ProcessHandshakeError.connectionFailed("Failed to connect: \(errno)")
-        }
-
-        // Send handshake request
-        let request = HandshakeRequest(parentID: selfID)
-        let requestData = try JSONEncoder().encode(request)
-        let requestBytes = [UInt8](requestData)
-
-        // Send length prefix (4 bytes, big endian)
-        var length = UInt32(requestBytes.count).bigEndian
-        _ = withUnsafePointer(to: &length) { ptr in
-            Darwin.send(socket, ptr, 4, 0)
-        }
-        _ = requestBytes.withUnsafeBufferPointer { ptr in
-            Darwin.send(socket, ptr.baseAddress, ptr.count, 0)
-        }
-
-        // Read response length
-        var responseLength: UInt32 = 0
-        _ = withUnsafeMutablePointer(to: &responseLength) { ptr in
-            Darwin.recv(socket, ptr, 4, 0)
-        }
-        responseLength = UInt32(bigEndian: responseLength)
-
-        guard responseLength > 0 && responseLength < 1_000_000 else {
-            throw ProcessHandshakeError.invalidResponse
-        }
-
-        // Read response data
-        var responseBytes = [UInt8](repeating: 0, count: Int(responseLength))
-        var totalRead = 0
-        while totalRead < Int(responseLength) {
-            let bytesRead = responseBytes.withUnsafeMutableBufferPointer { ptr in
-                Darwin.recv(socket, ptr.baseAddress! + totalRead, Int(responseLength) - totalRead, 0)
-            }
-            if bytesRead <= 0 {
-                throw ProcessHandshakeError.connectionFailed("Connection closed")
-            }
-            totalRead += bytesRead
-        }
-
-        // Decode response
-        let responseData = Data(responseBytes)
-        let response = try JSONDecoder().decode(HandshakeResponse.self, from: responseData)
-
-        guard response.success, let agentInfo = response.agentInfo else {
-            throw ProcessHandshakeError.handshakeFailed(response.errorMessage ?? "Unknown error")
-        }
-
-        return agentInfo
     }
 
     // MARK: - Changes
@@ -864,9 +624,6 @@ public enum CommunityError: Error, LocalizedError {
     case invocationFailed(String)
     case cannotTerminateRemote(String)
     case memberNotFound(String)
-    case processSpawnFailed(String)
-    case processSpawnTimeout(String)
-    case processHandshakeFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -884,12 +641,6 @@ public enum CommunityError: Error, LocalizedError {
             return "Cannot terminate remote member '\(id)'. Only local agents can be terminated."
         case .memberNotFound(let id):
             return "Member '\(id)' not found in local agents"
-        case .processSpawnFailed(let message):
-            return "Failed to spawn process: \(message)"
-        case .processSpawnTimeout(let path):
-            return "Process spawn timed out waiting for socket at '\(path)'"
-        case .processHandshakeFailed(let message):
-            return "Process handshake failed: \(message)"
         }
     }
 }

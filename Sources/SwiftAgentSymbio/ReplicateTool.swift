@@ -16,7 +16,7 @@ import SwiftAgent
 /// ## Usage
 ///
 /// ```swift
-/// distributed actor WorkerAgent: Replicable {
+/// distributed actor WorkerAgent: Communicable, Replicable {
 ///     let community: Community
 ///     let replicateTool: ReplicateTool
 ///
@@ -26,7 +26,7 @@ import SwiftAgent
 ///         self.replicateTool = ReplicateTool(agent: self)
 ///     }
 ///
-///     distributed func replicate() async throws -> Member {
+///     func replicate() async throws -> Member {
 ///         try await community.spawn {
 ///             WorkerAgent(community: self.community, actorSystem: self.actorSystem)
 ///         }

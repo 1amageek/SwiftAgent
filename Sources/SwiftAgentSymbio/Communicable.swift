@@ -82,6 +82,9 @@ public protocol Terminatable: Actor {
 /// The LLM can use `ReplicateTool` to spawn SubAgents when it determines
 /// that a task has many TODOs or can be parallelized.
 ///
+/// Note: This protocol uses `Sendable` constraint for flexibility, allowing
+/// both `Actor` and `DistributedActor` types to conform.
+///
 /// Usage:
 /// ```swift
 /// distributed actor WorkerAgent: Communicable, Replicable {
@@ -100,7 +103,7 @@ public protocol Terminatable: Actor {
 ///     }
 /// }
 /// ```
-public protocol Replicable: Actor {
+public protocol Replicable: Sendable {
     /// Create a copy of this agent
     /// - Returns: Member representing the newly spawned agent
     func replicate() async throws -> Member

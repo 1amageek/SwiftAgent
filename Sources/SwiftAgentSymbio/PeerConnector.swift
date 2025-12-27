@@ -68,9 +68,6 @@ public actor PeerConnector {
     /// Local peer representation
     private let localPeer: LocalPeer
 
-    /// Mapping from agent ID string to PeerID
-    private var agentToPeerMapping: [String: PeerID] = [:]
-
     /// Invocation handler for incoming requests
     private var invocationHandler: IncomingInvocationHandler?
 

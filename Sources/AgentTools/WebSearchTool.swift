@@ -40,8 +40,10 @@ public struct WebSearchTool: OpenFoundationModels.Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Search the web. Returns formatted results with titles, URLs, snippets. \
-    Supports domain filtering. Include Sources section after using results.
+    Search the web to find relevant URLs when you don't know the exact page. \
+    Use for discovering information, finding solutions, or researching topics. \
+    Returns list of results with titles, URLs, and snippets. \
+    After finding URLs, use url_fetch to read full content.
     """
 
     public var description: String { Self.description }

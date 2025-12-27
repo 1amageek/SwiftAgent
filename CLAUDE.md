@@ -104,8 +104,9 @@ Layer 0: Transport (mDNS/TCP, BLE, HTTP/WebSocket)
 
 | 操作 | ローカル | リモート |
 |------|:--------:|:--------:|
-| spawn/terminate | ✅ | ❌ |
-| discover/send | ✅ | ✅ |
+| spawn | ✅ | ❌ |
+| terminate | ✅ | ❌ |
+| send | ✅ | ✅ |
 | invoke (capability) | ❌ | ✅ |
 
 #### 設計原則
@@ -131,7 +132,7 @@ public protocol Terminatable: Actor {
 }
 
 // 自己複製可能なエージェント（SubAgent生成用）
-public protocol Replicable: Actor {
+public protocol Replicable: Sendable {
     func replicate() async throws -> Member
 }
 ```
@@ -152,7 +153,7 @@ Terminatable.terminate() → unregisterMethod() → resignID()
 
 **send() ローカルフロー:**
 ```
-localAgentIDs確認 → SignalReceivable キャスト → receive() 直接呼び出し
+localAgentIDs確認 → Communicable キャスト → receive() 直接呼び出し
 ```
 
 **send() リモートフロー:**
@@ -218,13 +219,6 @@ let worker = try await community.spawn {
     WorkerAgent(community: community, actorSystem: actorSystem)
 }
 
-// プロセスエージェント起動（別プロセスで実行）
-let processWorker = try await community.spawnProcess(
-    executable: "/usr/local/bin/worker-agent",
-    arguments: ["--mode", "batch"],
-    timeout: .seconds(10)
-)
-
 // 信号送信
 try await community.send(WorkSignal(task: "process"), to: worker, perception: "work")
 
@@ -240,9 +234,8 @@ for await change in await community.changes {
     }
 }
 
-// 終了（ローカル・プロセス両方対応）
+// 終了
 try await community.terminate(worker)
-try await community.terminate(processWorker)
 ```
 
 #### SubAgent Spawning（LLMによる動的エージェント生成）
@@ -309,15 +302,13 @@ let session = LanguageModelSession(model: model, tools: [ReplicateTool(agent: wo
 
 | コンポーネント | 責務 |
 |---------------|------|
-| `Community` | メンバー管理、spawn/spawnProcess/terminate、send、変更通知 |
+| `Community` | メンバー管理、spawn/terminate、send、変更通知 |
 | `SymbioActorSystem` | DistributedActorSystem実装、ActorRegistry統合 |
 | `Member` | コミュニティメンバーの情報（id, accepts, provides, isAvailable, metadata） |
 | `CommunityChange` | joined, left, updated, becameAvailable, becameUnavailable |
 | `Communicable` | 通信可能なエージェント（community, perceptions, receive） |
-| `Replicable` | 自己複製可能なエージェント（Actor継承、独立） |
+| `Replicable` | 自己複製可能なエージェント（Sendable継承、柔軟な型サポート） |
 | `ReplicateTool` | LLMがSubAgentを生成するためのツール |
-| `AgentHandshakeInfo` | プロセス間ハンドシェイク情報（id, name, accepts, provides） |
-| `ProcessHandshakeError` | プロセスハンドシェイクのエラー型 |
 
 #### SymbioActorSystem 内部構造
 

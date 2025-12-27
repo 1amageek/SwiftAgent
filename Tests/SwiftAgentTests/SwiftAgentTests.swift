@@ -100,28 +100,28 @@ struct AgentsTests {
     @Test("ReadTool Creation")
     func readToolCreation() async throws {
         let tool = ReadTool(workingDirectory: "/tmp")
-        #expect(tool.name == "file_read")
+        #expect(tool.name == "read")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("GitTool Creation")
     func gitToolCreation() async throws {
         let tool = GitTool()
-        #expect(tool.name == "git_command")
+        #expect(tool.name == "git")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("URLFetchTool Creation")
     func urlFetchToolCreation() async throws {
         let tool = URLFetchTool()
-        #expect(tool.name == "web_fetch")
+        #expect(tool.name == "url_fetch")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("ExecuteCommandTool Creation")
     func executeCommandToolCreation() async throws {
         let tool = ExecuteCommandTool()
-        #expect(tool.name == "command_execute")
+        #expect(tool.name == "bash")
         #expect(!tool.description.isEmpty)
     }
 

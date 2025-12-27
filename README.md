@@ -1083,8 +1083,10 @@ PeerConnector.invoke(capability, peerID, data)
 
 | Operation | Local | Remote |
 |-----------|:-----:|:------:|
-| spawn/terminate | ✅ | ❌ |
-| discover/send | ✅ | ✅ |
+| spawn | ✅ | ❌ |
+| terminate | ✅ | ❌ |
+| send | ✅ | ✅ |
+| discover | ✅ | ✅ |
 | invoke (capability) | ❌ | ✅ |
 
 ### Protocols
@@ -1104,7 +1106,7 @@ public protocol Terminatable: Actor {
 }
 
 // Agent that can replicate itself
-public protocol Replicable: Actor {
+public protocol Replicable: Sendable {
     func replicate() async throws -> Member
 }
 ```
@@ -1116,8 +1118,8 @@ public protocol Replicable: Actor {
 ```swift
 actor Community {
     var memberCache: [String: Member]              // All members (local + remote)
-    var localAgentIDs: Set<String>                 // Local agent IDs
-    var localAgentRefs: [String: any DistributedActor]  // Strong references
+    var localAgentIDs: Set<String>                 // Local distributed actor agent IDs
+    var localAgentRefs: [String: any DistributedActor]  // Strong references to local agents
     var registeredMethods: [String: [String]]      // agentID → method names
 }
 ```

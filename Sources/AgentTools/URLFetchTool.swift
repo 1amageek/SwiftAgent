@@ -42,8 +42,10 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Fetch URL content. Converts HTML to Markdown. SSRF protection enabled. \
-    Max 5MB, 30s timeout. HTTP auto-upgraded to HTTPS.
+    Fetch and read content from a specific URL you already know. \
+    Use when you have an exact URL to retrieve (e.g., documentation page, API reference, article). \
+    Converts HTML to Markdown. Max 5MB, 30s timeout. \
+    Do NOT use for searching - use web_search instead.
     """
 
     public var description: String { Self.description }

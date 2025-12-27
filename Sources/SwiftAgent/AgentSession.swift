@@ -170,9 +170,9 @@ public actor AgentSession: Identifiable {
         // Generate a single session ID to be shared
         let sessionID = UUID().uuidString
 
-        // Add SkillTool if skills are enabled
+        // Add SkillTool if skills are enabled AND tools are not disabled
         var allTools: [any Tool] = resolvedTools
-        if let registry = skillRegistry {
+        if let registry = skillRegistry, !configuration.tools.isDisabled {
             allTools.append(SkillTool(registry: registry))
         }
 
@@ -184,11 +184,18 @@ public actor AgentSession: Identifiable {
             toolsForSession = allTools
         }
 
-        // Create language model session
+        // Create language model session with manually constructed Transcript
+        // Using transcript initializer avoids generateToolInstructions() which adds Markdown
+        let instructions = Transcript.Instructions(
+            segments: [.text(Transcript.TextSegment(content: instructionsText))],
+            toolDefinitions: toolsForSession.map { Transcript.ToolDefinition(tool: $0) }
+        )
+        let transcript = Transcript(entries: [.instructions(instructions)])
+
         let languageModelSession = LanguageModelSession(
             model: model,
             tools: toolsForSession,
-            instructions: Instructions(instructionsText)
+            transcript: transcript
         )
 
         // Create context manager if configured
@@ -264,9 +271,9 @@ public actor AgentSession: Identifiable {
             skillRegistry = nil
         }
 
-        // Add SkillTool if skills are enabled
+        // Add SkillTool if skills are enabled AND tools are not disabled
         var allTools: [any Tool] = resolvedTools
-        if let registry = skillRegistry {
+        if let registry = skillRegistry, !config.tools.isDisabled {
             allTools.append(SkillTool(registry: registry))
         }
 

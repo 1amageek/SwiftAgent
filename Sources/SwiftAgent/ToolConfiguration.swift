@@ -137,6 +137,14 @@ extension ToolConfiguration {
 
 extension ToolConfiguration {
 
+    /// Returns `true` if tools are disabled.
+    public var isDisabled: Bool {
+        if case .disabled = self {
+            return true
+        }
+        return false
+    }
+
     /// Resolves the configuration to an array of tools.
     ///
     /// - Parameter toolProvider: A provider that can create tools by name.

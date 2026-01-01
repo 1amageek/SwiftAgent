@@ -87,10 +87,32 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     public typealias Input = In
     public typealias Output = Out
 
-    private let session: LanguageModelSession
+    private enum SessionSource: @unchecked Sendable {
+        case direct(LanguageModelSession)
+        case relay(Relay<LanguageModelSession>)
+        case context
+    }
+
+    private let sessionSource: SessionSource
     private let options: GenerationOptions
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Out>) async -> Void)?
+
+    private var session: LanguageModelSession {
+        switch sessionSource {
+        case .direct(let session):
+            return session
+        case .relay(let relay):
+            return relay.wrappedValue
+        case .context:
+            guard let session = SessionContext.current else {
+                fatalError("No LanguageModelSession available in current context. Use withSession { } to provide one.")
+            }
+            return session
+        }
+    }
+
+    // MARK: - Direct Session Initializers
 
     /// Creates a new Generate step with streaming support
     /// - Parameters:
@@ -104,7 +126,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = prompt
         self.streamHandler = onStream
@@ -120,7 +142,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = prompt
         self.streamHandler = nil
@@ -136,7 +158,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         options: GenerationOptions = GenerationOptions(),
         transform: @escaping (In) -> String
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
@@ -151,7 +173,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions()
     ) where In: PromptRepresentable {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
@@ -168,10 +190,120 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         options: GenerationOptions = GenerationOptions(),
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) where In: PromptRepresentable {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
+    }
+
+    // MARK: - Relay Session Initializers
+
+    /// Creates a new Generate step with a shared session via Relay
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = nil
+    }
+
+    /// Creates a new Generate step with a shared session via Relay and streaming
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    ///   - onStream: A closure that handles each ResponseStream.Snapshot
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt,
+        onStream: @escaping (GenerateSnapshot<Out>) async -> Void
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = onStream
+    }
+
+    /// Creates a new Generate step with Relay (backward compatibility)
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - transform: A closure to transform the input to a string prompt
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        transform: @escaping (In) -> String
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = { input in Prompt(transform(input)) }
+        self.streamHandler = nil
+    }
+
+    /// Creates a new Generate step with a shared session via Relay
+    /// When Input conforms to PromptRepresentable, no prompt builder is needed
+    /// - Parameter session: A Relay to a shared LanguageModelSession
+    /// - Parameter options: Generation options for controlling output
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions()
+    ) where In: PromptRepresentable {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = { input in input.promptRepresentation }
+        self.streamHandler = nil
+    }
+
+    // MARK: - Context-based Initializers
+
+    /// Creates a new Generate step that uses the session from TaskLocal context
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    public init(
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt
+    ) {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = nil
+    }
+
+    /// Creates a new Generate step that uses the session from TaskLocal context with streaming
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    ///   - onStream: A closure that handles each ResponseStream.Snapshot
+    public init(
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt,
+        onStream: @escaping (GenerateSnapshot<Out>) async -> Void
+    ) {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = onStream
+    }
+
+    /// Creates a new Generate step that uses the session from TaskLocal context
+    /// When Input conforms to PromptRepresentable
+    /// - Parameter options: Generation options for controlling output
+    public init(
+        options: GenerationOptions = GenerationOptions()
+    ) where In: PromptRepresentable {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = { input in input.promptRepresentation }
+        self.streamHandler = nil
     }
 
     @discardableResult
@@ -330,10 +462,32 @@ public struct GenerateText<In: Sendable>: Step {
     public typealias Input = In
     public typealias Output = String
 
-    private let session: LanguageModelSession
+    private enum SessionSource: @unchecked Sendable {
+        case direct(LanguageModelSession)
+        case relay(Relay<LanguageModelSession>)
+        case context
+    }
+
+    private let sessionSource: SessionSource
     private let options: GenerationOptions
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Output>) async -> Void)?
+
+    private var session: LanguageModelSession {
+        switch sessionSource {
+        case .direct(let session):
+            return session
+        case .relay(let relay):
+            return relay.wrappedValue
+        case .context:
+            guard let session = SessionContext.current else {
+                fatalError("No LanguageModelSession available in current context. Use withSession { } to provide one.")
+            }
+            return session
+        }
+    }
+
+    // MARK: - Direct Session Initializers
 
     /// Creates a new GenerateText step with streaming support
     /// - Parameters:
@@ -347,7 +501,7 @@ public struct GenerateText<In: Sendable>: Step {
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = prompt
         self.streamHandler = onStream
@@ -363,7 +517,7 @@ public struct GenerateText<In: Sendable>: Step {
         options: GenerationOptions = GenerationOptions(),
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = prompt
         self.streamHandler = nil
@@ -379,7 +533,7 @@ public struct GenerateText<In: Sendable>: Step {
         options: GenerationOptions = GenerationOptions(),
         transform: @escaping (In) -> String
     ) {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
@@ -394,7 +548,7 @@ public struct GenerateText<In: Sendable>: Step {
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions()
     ) where In: PromptRepresentable {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
@@ -411,10 +565,120 @@ public struct GenerateText<In: Sendable>: Step {
         options: GenerationOptions = GenerationOptions(),
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) where In: PromptRepresentable {
-        self.session = session
+        self.sessionSource = .direct(session)
         self.options = options
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
+    }
+
+    // MARK: - Relay Session Initializers
+
+    /// Creates a new GenerateText step with a shared session via Relay
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = nil
+    }
+
+    /// Creates a new GenerateText step with a shared session via Relay and streaming
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    ///   - onStream: A closure that handles each ResponseStream.Snapshot
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt,
+        onStream: @escaping (GenerateSnapshot<Output>) async -> Void
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = onStream
+    }
+
+    /// Creates a new GenerateText step with Relay (backward compatibility)
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - transform: A closure to transform the input to a string prompt
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions(),
+        transform: @escaping (In) -> String
+    ) {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = { input in Prompt(transform(input)) }
+        self.streamHandler = nil
+    }
+
+    /// Creates a new GenerateText step with a shared session via Relay
+    /// When Input conforms to PromptRepresentable, no prompt builder is needed
+    /// - Parameter session: A Relay to a shared LanguageModelSession
+    /// - Parameter options: Generation options for controlling output
+    public init(
+        session: Relay<LanguageModelSession>,
+        options: GenerationOptions = GenerationOptions()
+    ) where In: PromptRepresentable {
+        self.sessionSource = .relay(session)
+        self.options = options
+        self.promptBuilder = { input in input.promptRepresentation }
+        self.streamHandler = nil
+    }
+
+    // MARK: - Context-based Initializers
+
+    /// Creates a new GenerateText step that uses the session from TaskLocal context
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    public init(
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt
+    ) {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = nil
+    }
+
+    /// Creates a new GenerateText step that uses the session from TaskLocal context with streaming
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - prompt: A closure that builds a Prompt using PromptBuilder
+    ///   - onStream: A closure that handles each ResponseStream.Snapshot
+    public init(
+        options: GenerationOptions = GenerationOptions(),
+        @PromptBuilder prompt: @escaping (In) -> Prompt,
+        onStream: @escaping (GenerateSnapshot<Output>) async -> Void
+    ) {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = prompt
+        self.streamHandler = onStream
+    }
+
+    /// Creates a new GenerateText step that uses the session from TaskLocal context
+    /// When Input conforms to PromptRepresentable
+    /// - Parameter options: Generation options for controlling output
+    public init(
+        options: GenerationOptions = GenerationOptions()
+    ) where In: PromptRepresentable {
+        self.sessionSource = .context
+        self.options = options
+        self.promptBuilder = { input in input.promptRepresentation }
+        self.streamHandler = nil
     }
     
     @discardableResult

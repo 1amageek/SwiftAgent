@@ -21,7 +21,8 @@
       "Bash(remark:*)",
       "WebFetch(domain:www.swift.org)",
       "WebSearch",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(git log:*)"
     ],
     "deny": []
   }

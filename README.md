@@ -27,6 +27,14 @@ graph TB
         SessionContext["SessionContext"]
     end
 
+    subgraph "State Management"
+        Memory["@Memory"]
+        Relay["Relay"]
+        Context["@Context"]
+        ContextKey["ContextKey"]
+        WithContext["withContext()"]
+    end
+
     subgraph "Agent Session System"
         AgentSession["AgentSession"]
         AgentWrapper["@Agent"]
@@ -116,6 +124,10 @@ graph TB
     WithSession --> SessionContext
     SessionContext --> LMS
 
+    Memory --> Relay
+    Context --> ContextKey
+    WithContext --> ContextKey
+
     AgentWrapper --> AgentSession
     WithAgent --> AgentSession
     AgentSession --> AgentConfig
@@ -164,6 +176,8 @@ graph TB
 - **Async/Await Support**: Built for modern Swift concurrency
 - **Protocol-Based**: Flexible and extensible architecture
 - **@Session**: TaskLocal-based session management with property wrapper
+- **@Memory/Relay**: State sharing between Steps with reference semantics
+- **@Context**: Generic TaskLocal-based context propagation for any type
 - **Builder APIs**: Dynamic Instructions and Prompt construction with result builders
 - **Streaming**: Real-time streaming support for both text and structured output generation
 - **GenerationOptions**: Fine-grained control over sampling, temperature, and token limits
@@ -270,6 +284,172 @@ struct InnerStep: Step {
 try await withSession(session) {
     try await OuterStep().run("AI")
 }
+```
+
+## State Management
+
+SwiftAgent provides two complementary mechanisms for state management: **Memory/Relay** for explicit state sharing between Steps, and **Context** for TaskLocal-based propagation.
+
+### Memory and Relay
+
+`@Memory` stores a value with reference semantics, allowing state to persist across Step invocations. The `$` prefix provides a `Relay` that can be passed to child Steps.
+
+```swift
+struct SearchOrchestratorStep: Step {
+    @Memory var visitedURLs: Set<URL> = []
+    @Memory var resultCount: Int = 0
+
+    func run(_ input: SearchQuery) async throws -> SearchResult {
+        // Pass Relay to child Steps for shared access
+        for url in input.urls {
+            try await CrawlStep(
+                visited: $visitedURLs,
+                counter: $resultCount
+            ).run(url)
+        }
+        return SearchResult(count: resultCount)
+    }
+}
+
+struct CrawlStep: Step {
+    let visited: Relay<Set<URL>>
+    let counter: Relay<Int>
+
+    func run(_ input: URL) async throws -> Void {
+        // Check and update shared state
+        if visited.contains(input) {
+            return  // Already visited
+        }
+        visited.insert(input)
+        counter.increment()
+        // Crawl logic...
+    }
+}
+```
+
+### Relay Convenience Methods
+
+Relay provides convenience methods for common operations:
+
+```swift
+// Set operations
+@Memory var urls: Set<URL> = []
+$urls.insert(url)           // Insert element
+$urls.remove(url)           // Remove element
+$urls.contains(url)         // Check containment
+$urls.formUnion(newURLs)    // Union with sequence
+
+// Array operations
+@Memory var items: [String] = []
+$items.append("item")              // Append single
+$items.append(contentsOf: more)    // Append multiple
+$items.removeAll()                 // Clear
+
+// Int operations
+@Memory var count: Int = 0
+$count.increment()    // count += 1
+$count.decrement()    // count -= 1
+$count.add(5)         // count += 5
+
+// Transformations
+let doubled = $count.map({ $0 * 2 }, reverse: { $0 / 2 })
+let readOnly = $count.readOnly { $0 * 2 }
+
+// Constant (immutable) Relay
+let constant = Relay<Int>.constant(42)
+```
+
+### Context - Generic TaskLocal Propagation
+
+For cases where you need to propagate values through the async call tree without explicit parameter passing, use `Context`:
+
+```swift
+// 1. Define a ContextKey
+final class URLTracker: @unchecked Sendable {
+    private var visited: Set<URL> = []
+    func markVisited(_ url: URL) { visited.insert(url) }
+    func hasVisited(_ url: URL) -> Bool { visited.contains(url) }
+}
+
+enum TrackerContext: ContextKey {
+    @TaskLocal static var current: URLTracker?
+
+    static func withValue<T: Sendable>(
+        _ value: URLTracker,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        try await $current.withValue(value, operation: operation)
+    }
+}
+
+// 2. Access via @Context property wrapper
+struct CrawlerStep: Step {
+    @Context(TrackerContext.self) var tracker: URLTracker
+
+    func run(_ input: URL) async throws -> CrawlResult {
+        if tracker.hasVisited(input) {
+            return .alreadyVisited
+        }
+        tracker.markVisited(input)
+        // Crawl logic...
+    }
+}
+
+// 3. Provide context with withContext
+let tracker = URLTracker()
+let result = try await withContext(TrackerContext.self, value: tracker) {
+    try await CrawlerStep().run(startURL)
+}
+```
+
+### Optional Context
+
+Use `@OptionalContext` when the context value may not be available:
+
+```swift
+struct FlexibleStep: Step {
+    @OptionalContext(TrackerContext.self) var tracker: URLTracker?
+
+    func run(_ input: URL) async throws -> Result {
+        if let tracker {
+            tracker.markVisited(input)
+        }
+        // Continue without tracker if not available
+    }
+}
+```
+
+### Multiple Contexts
+
+Steps can access multiple context types:
+
+```swift
+struct MultiContextStep: Step {
+    @Context(TrackerContext.self) var tracker: URLTracker
+    @Context(ConfigContext.self) var config: AppConfig
+
+    func run(_ input: String) async throws -> Result {
+        // Access both contexts
+    }
+}
+
+try await withContext(TrackerContext.self, value: tracker) {
+    try await withContext(ConfigContext.self, value: config) {
+        try await MultiContextStep().run("input")
+    }
+}
+```
+
+### Step Extension
+
+Run Steps with context using the convenience method:
+
+```swift
+let result = try await myStep.run(
+    input,
+    context: TrackerContext.self,
+    value: tracker
+)
 ```
 
 ## Agent Session System

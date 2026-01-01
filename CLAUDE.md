@@ -8,6 +8,8 @@ OpenFoundationModelsを基盤とした型安全で宣言的なAIエージェン�
 |------|------|
 | **Step** | `Input -> Output` の非同期変換単位 |
 | **Session** | TaskLocalベースのセッション伝播（`@Session`, `withSession`） |
+| **Memory/Relay** | Step間の状態共有（`@Memory` で保持、`$` で `Relay` を取得） |
+| **Context** | 汎用TaskLocal伝播（`ContextKey`, `@Context`, `withContext`） |
 | **Generate** | LLMによる構造化出力生成 |
 
 ## Step 一覧
@@ -29,6 +31,40 @@ struct MyStep: Step {
     }
 }
 try await withSession(session) { try await MyStep().run("Hello") }
+
+// Memory/Relay による状態共有
+struct OrchestratorStep: Step {
+    @Memory var visitedURLs: Set<URL> = []  // 状態を保持
+
+    func run(_ input: Query) async throws -> Result {
+        // $visitedURLs で Relay を取得し、子Stepに渡す
+        try await CrawlStep(visited: $visitedURLs).run(input.startURL)
+    }
+}
+
+struct CrawlStep: Step {
+    let visited: Relay<Set<URL>>  // 親からRelayを受け取る
+
+    func run(_ input: URL) async throws -> CrawlResult {
+        if visited.contains(input) { return .alreadyVisited }
+        visited.insert(input)
+        // クロール処理...
+    }
+}
+
+// Context による汎用TaskLocal伝播
+enum TrackerContext: ContextKey {
+    @TaskLocal static var current: URLTracker?
+    static func withValue<T: Sendable>(_ value: URLTracker, operation: () async throws -> T) async rethrows -> T {
+        try await $current.withValue(value, operation: operation)
+    }
+}
+
+struct MyStep: Step {
+    @Context(TrackerContext.self) var tracker: URLTracker
+    func run(_ input: URL) async throws -> Bool { !tracker.hasVisited(input) }
+}
+try await withContext(TrackerContext.self, value: tracker) { try await MyStep().run(url) }
 
 // StepBuilder による合成
 struct Pipeline: Step {
@@ -53,6 +89,89 @@ struct MyTool: Tool {
     let description = "説明"
     func call(arguments: MyInput) async throws -> MyOutput { ... }
 }
+```
+
+## Memory / Relay
+
+Step間で状態を共有するためのプロパティラッパー。
+
+| 型 | 用途 |
+|---|------|
+| `@Memory<Value>` | 値を参照型ストレージに保持。`$` で `Relay` を取得 |
+| `Relay<Value>` | getter/setter クロージャによる間接アクセス |
+
+```swift
+// 基本的な使い方
+@Memory var counter: Int = 0
+counter += 1              // 値の変更
+let relay = $counter      // Relay を取得
+relay.wrappedValue = 10   // Relay 経由で変更
+
+// コレクション拡張
+@Memory var urls: Set<URL> = []
+$urls.insert(url)         // Relay.insert
+$urls.contains(url)       // Relay.contains
+$urls.formUnion(newURLs)  // Relay.formUnion
+
+@Memory var items: [String] = []
+$items.append("item")     // Relay.append
+
+// Int 拡張
+@Memory var count: Int = 0
+$count.increment()        // count += 1
+$count.decrement()        // count -= 1
+$count.add(5)             // count += 5
+
+// Relay 変換
+let doubled = $counter.map({ $0 * 2 }, reverse: { $0 / 2 })
+let readOnly = $counter.readOnly { $0 * 2 }
+
+// 定数 Relay
+let constant = Relay<Int>.constant(42)  // 書き込み無視
+```
+
+## Context
+
+任意の型をTaskLocal経由で伝播する汎用システム。
+
+```swift
+// 1. ContextKey を定義
+enum ConfigContext: ContextKey {
+    @TaskLocal static var current: AppConfig?
+
+    static func withValue<T: Sendable>(
+        _ value: AppConfig,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        try await $current.withValue(value, operation: operation)
+    }
+}
+
+// 2. @Context で値にアクセス
+struct ConfiguredStep: Step {
+    @Context(ConfigContext.self) var config: AppConfig
+
+    func run(_ input: String) async throws -> String {
+        // config を使用...
+    }
+}
+
+// 3. withContext で値を提供
+try await withContext(ConfigContext.self, value: appConfig) {
+    try await ConfiguredStep().run("input")
+}
+
+// @OptionalContext - 値がなくてもエラーにならない
+struct OptionalStep: Step {
+    @OptionalContext(ConfigContext.self) var config: AppConfig?
+
+    func run(_ input: String) async throws -> String {
+        if let config { /* ... */ }
+    }
+}
+
+// Step拡張
+try await myStep.run(input, context: ConfigContext.self, value: config)
 ```
 
 ## @Generable の制限

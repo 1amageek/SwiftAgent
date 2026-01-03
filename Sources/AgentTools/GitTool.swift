@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for executing Git commands in a repository.
@@ -25,7 +24,7 @@ import SwiftAgent
 /// - Destructive operations require explicit permission
 /// - Maximum 60 second execution time
 /// - Maximum 1MB output size
-public struct GitTool: OpenFoundationModels.Tool {
+public struct GitTool: Tool {
     public typealias Arguments = GitInput
     public typealias Output = GitOutput
 

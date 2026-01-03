@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for applying multiple edit operations to a file in a single transaction.
@@ -25,7 +24,7 @@ import SwiftAgent
 /// - UTF-8 encoding only
 /// - Text files only
 /// - JSON array format required
-public struct MultiEditTool: OpenFoundationModels.Tool {
+public struct MultiEditTool: Tool {
     public typealias Arguments = MultiEditInput
     public typealias Output = MultiEditOutput
 

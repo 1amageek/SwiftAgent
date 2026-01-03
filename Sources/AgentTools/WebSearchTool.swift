@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for performing web searches and returning results.
@@ -32,7 +31,7 @@ import SwiftAgent
 /// ## Limitations
 /// - Results depend on the configured search provider
 /// - Some providers may have rate limits or require API keys
-public struct WebSearchTool: OpenFoundationModels.Tool {
+public struct WebSearchTool: Tool {
     public typealias Arguments = WebSearchInput
     public typealias Output = WebSearchOutput
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// A protocol for storing and retrieving agent sessions.
 ///

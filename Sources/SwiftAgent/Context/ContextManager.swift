@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// Manages context window usage and automatic compaction.
 ///
@@ -167,13 +166,13 @@ public actor ContextManager {
         case .instructions(let instructions):
             // Instructions include system prompt and tool definitions
             // Add overhead for formatting
-            return instructions.description.count + 500
+            return String(describing: instructions).count + 500
 
         case .prompt(let prompt):
-            return prompt.description.count
+            return String(describing: prompt).count
 
         case .response(let response):
-            return response.description.count
+            return String(describing: response).count
 
         case .toolCalls(let toolCalls):
             return toolCalls.reduce(0) { total, call in
@@ -181,7 +180,10 @@ public actor ContextManager {
             }
 
         case .toolOutput(let output):
-            return output.description.count
+            return String(describing: output).count
+
+        @unknown default:
+            return 100 // Fallback estimate for unknown entry types
         }
     }
 

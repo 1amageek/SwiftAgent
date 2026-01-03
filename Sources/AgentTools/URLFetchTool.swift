@@ -1,5 +1,4 @@
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 import Synchronization
 #if canImport(Darwin)
@@ -34,7 +33,7 @@ import Glibc
 /// - Maximum response size: 5MB
 /// - Maximum execution time: 30 seconds
 /// - Read-only (GET requests only)
-public struct URLFetchTool: OpenFoundationModels.Tool {
+public struct URLFetchTool: Tool {
     public typealias Arguments = FetchInput
     public typealias Output = URLFetchOutput
 
@@ -149,7 +148,6 @@ public struct URLFetchTool: OpenFoundationModels.Tool {
         configuration.timeoutIntervalForRequest = timeoutSeconds
         configuration.timeoutIntervalForResource = timeoutSeconds
         configuration.httpMaximumConnectionsPerHost = 1
-        configuration.httpShouldUsePipelining = false
         configuration.waitsForConnectivity = false
 
         // Create custom delegate for redirect handling
@@ -734,3 +732,4 @@ private final class RedirectController: NSObject, URLSessionTaskDelegate, Sendab
         }
     }
 }
+

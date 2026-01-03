@@ -6,7 +6,8 @@
 //
 
 import Foundation
-import OpenFoundationModels
+
+#if !USE_FOUNDATION_MODELS
 
 // MARK: - Agent Context
 
@@ -140,3 +141,5 @@ public func withToolProvider<T: Sendable>(
 ) async rethrows -> T {
     try await ToolProviderContext.$current.withValue(provider, operation: operation)
 }
+
+#endif

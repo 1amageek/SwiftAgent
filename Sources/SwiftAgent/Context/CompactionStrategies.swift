@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 // MARK: - TruncationCompactionStrategy
 
@@ -228,6 +227,8 @@ public struct PriorityCompactionStrategy: CompactionStrategy {
             typeName = "toolCalls"
         case .toolOutput:
             typeName = "toolOutput"
+        @unknown default:
+            typeName = "unknown"
         }
 
         var priority = Double(typePriorities[typeName] ?? 10)

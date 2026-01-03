@@ -6,12 +6,18 @@
 //
 
 import Foundation
-import OpenFoundationModels
+
+// MARK: - Model Provider (OpenFoundationModels only)
+
+#if !USE_FOUNDATION_MODELS
 
 /// A protocol for providing language models.
 ///
 /// `ModelProvider` abstracts the creation and configuration of language models,
 /// allowing for different backends (MLX, OpenAI, etc.) to be used interchangeably.
+///
+/// - Note: This is only available when using OpenFoundationModels.
+///   Apple's FoundationModels uses SystemLanguageModel directly.
 ///
 /// ## Usage
 ///
@@ -196,6 +202,8 @@ public enum ModelProviderFactory {
         LazyModelProvider(id: id, loader: loader)
     }
 }
+
+#endif
 
 // MARK: - Model Configuration
 

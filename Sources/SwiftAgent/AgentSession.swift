@@ -6,7 +6,8 @@
 //
 
 import Foundation
-import OpenFoundationModels
+
+#if !USE_FOUNDATION_MODELS
 
 /// An agent session that manages conversations and tool execution.
 ///
@@ -157,7 +158,7 @@ public actor AgentSession: Identifiable {
         }
 
         // Build instructions
-        var instructionsText = configuration.instructions.description
+        var instructionsText = String(describing: configuration.instructions)
 
         // Add available skills prompt if any
         if let registry = skillRegistry {
@@ -681,7 +682,7 @@ extension AgentSession {
         @PromptBuilder builder: () throws -> Prompt
     ) async throws -> AgentResponse<String> {
         let prompt = try builder()
-        return try await self.prompt(prompt.description, options: options)
+        return try await self.prompt(String(describing: prompt), options: options)
     }
 }
 
@@ -989,3 +990,5 @@ extension AgentSession {
         await contextManager?.statistics
     }
 }
+
+#endif

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 // MARK: - Step as Tool Direct Conformance
 

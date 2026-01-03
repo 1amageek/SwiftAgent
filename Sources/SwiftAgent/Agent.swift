@@ -6,7 +6,12 @@
 //
 
 import Foundation
+
+#if USE_FOUNDATION_MODELS
+@_exported import FoundationModels
+#else
 @_exported import OpenFoundationModels
+#endif
 
 /// A protocol representing a single step in a process.
 ///

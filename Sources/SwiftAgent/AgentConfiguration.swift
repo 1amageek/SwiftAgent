@@ -7,6 +7,8 @@
 
 import Foundation
 
+#if !USE_FOUNDATION_MODELS
+
 /// Configuration for an agent session.
 ///
 /// `AgentConfiguration` defines all the settings for an agent, including
@@ -408,3 +410,5 @@ extension AgentConfiguration: CustomStringConvertible {
         """
     }
 }
+
+#endif

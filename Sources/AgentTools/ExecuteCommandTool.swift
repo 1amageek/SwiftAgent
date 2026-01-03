@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for executing shell commands in a controlled environment.
@@ -33,7 +32,7 @@ import SwiftAgent
 /// - Maximum 10 minute execution time
 /// - Maximum 1MB output size
 /// - No interactive commands
-public struct ExecuteCommandTool: OpenFoundationModels.Tool {
+public struct ExecuteCommandTool: Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// Configuration for tools available to an agent.
 ///

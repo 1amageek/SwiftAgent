@@ -8,6 +8,8 @@
 import Testing
 import Foundation
 @testable import SwiftAgent
+
+#if !USE_FOUNDATION_MODELS
 import OpenFoundationModels
 
 // MARK: - ToolConfiguration Tests
@@ -641,3 +643,5 @@ struct ToolConfigurationDescriptionTests {
         #expect(config.description == "allowlist([allowed])")
     }
 }
+
+#endif

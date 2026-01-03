@@ -2,7 +2,6 @@
 // Tool for LLM to spawn SubAgents when tasks require parallelization
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 // MARK: - ReplicateTool
@@ -41,7 +40,7 @@ import SwiftAgent
 ///     }
 /// }
 /// ```
-public struct ReplicateTool: OpenFoundationModels.Tool, @unchecked Sendable {
+public struct ReplicateTool: Tool, @unchecked Sendable {
     public typealias Arguments = ReplicateArguments
     public typealias Output = ReplicateOutput
 

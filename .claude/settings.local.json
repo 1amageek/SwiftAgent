@@ -22,7 +22,9 @@
       "WebFetch(domain:www.swift.org)",
       "WebSearch",
       "Bash(tree:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(USE_FOUNDATION_MODELS=1 swift build:*)",
+      "Bash(USE_FOUNDATION_MODELS=1 swift test:*)"
     ],
     "deny": []
   }

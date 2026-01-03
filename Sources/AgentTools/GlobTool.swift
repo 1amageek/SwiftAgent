@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for searching files using glob patterns.
@@ -26,7 +25,7 @@ import SwiftAgent
 /// - `?` matches single character
 /// - `*.swift` matches all Swift files
 /// - `**/*.md` matches all Markdown files recursively
-public struct GlobTool: OpenFoundationModels.Tool {
+public struct GlobTool: Tool {
     public typealias Arguments = GlobInput
     public typealias Output = GlobOutput
 

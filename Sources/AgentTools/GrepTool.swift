@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A powerful search tool for finding patterns in file contents.
@@ -32,7 +31,7 @@ import SwiftAgent
 /// - Text files only (skips binary files)
 /// - Maximum file size: 1MB per file
 /// - UTF-8 encoding only
-public struct GrepTool: OpenFoundationModels.Tool {
+public struct GrepTool: Tool {
     public typealias Arguments = GrepInput
     public typealias Output = GrepOutput
 

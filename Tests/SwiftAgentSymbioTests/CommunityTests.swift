@@ -152,7 +152,7 @@ distributed actor NonTerminatableAgent: Communicable {
 
 // MARK: - Community Spawn Tests
 
-@Suite("Community Spawn Tests")
+@Suite("Community Spawn Tests", .serialized)
 struct CommunitySpawnTests {
 
     @Test("spawn creates a local agent and returns Member")
@@ -247,7 +247,7 @@ struct CommunitySpawnTests {
 
 // MARK: - Community Terminate Tests
 
-@Suite("Community Terminate Tests")
+@Suite("Community Terminate Tests", .serialized)
 struct CommunityTerminateTests {
 
     init() async {
@@ -349,7 +349,7 @@ struct CommunityTerminateTests {
 
 // MARK: - Community Send Tests
 
-@Suite("Community Send Tests")
+@Suite("Community Send Tests", .serialized)
 struct CommunitySendTests {
 
     init() async {
@@ -435,7 +435,7 @@ struct CommunitySendTests {
 
 // MARK: - Community Changes Tests
 
-@Suite("Community Changes Tests")
+@Suite("Community Changes Tests", .serialized)
 struct CommunityChangesTests {
 
     @Test("spawn emits joined event")
@@ -499,7 +499,7 @@ struct CommunityChangesTests {
 
 // MARK: - Community Lifecycle Tests
 
-@Suite("Community Lifecycle Tests")
+@Suite("Community Lifecycle Tests", .serialized)
 struct CommunityLifecycleTests {
 
     @Test("stop terminates all local agents")

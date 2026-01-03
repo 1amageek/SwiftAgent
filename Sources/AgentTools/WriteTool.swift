@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for writing content to files.
@@ -24,7 +23,7 @@ import SwiftAgent
 /// - Maximum content size: 1MB
 /// - UTF-8 encoding only
 /// - Operates only within working directory
-public struct WriteTool: OpenFoundationModels.Tool {
+public struct WriteTool: Tool {
     public typealias Arguments = WriteInput
     public typealias Output = WriteOutput
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// A response from an agent.
 ///

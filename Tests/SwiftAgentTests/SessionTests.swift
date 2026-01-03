@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 @testable import SwiftAgent
+
+#if !USE_FOUNDATION_MODELS
 import OpenFoundationModels
 
 // MARK: - Test Helpers
@@ -273,3 +275,5 @@ struct SessionWithRegularStepsTests {
         #expect(result == 20)
     }
 }
+
+#endif

@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftAgent
-import OpenFoundationModels
 
 /// A tool provider that creates AgentTools instances.
 ///

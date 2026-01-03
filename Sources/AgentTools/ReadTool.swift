@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for reading file contents from the local filesystem.
@@ -30,7 +29,7 @@ import SwiftAgent
 /// - Maximum file size: 1MB
 /// - UTF-8 encoding only
 /// - Text files only (no binary support)
-public struct ReadTool: OpenFoundationModels.Tool {
+public struct ReadTool: Tool {
     public typealias Arguments = ReadInput
     public typealias Output = ReadOutput
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// Tool for activating skills.
 ///
@@ -25,7 +24,7 @@ import OpenFoundationModels
 /// let tool = SkillTool(registry: registry)
 /// // Add to agent's tool set
 /// ```
-public struct SkillTool: OpenFoundationModels.Tool {
+public struct SkillTool: Tool {
 
     public typealias Arguments = SkillToolArguments
     public typealias Output = SkillToolOutput
@@ -159,6 +158,6 @@ extension SkillToolOutput: PromptRepresentable {
 extension SkillToolOutput: CustomStringConvertible {
 
     public var description: String {
-        promptRepresentation.description
+        String(describing: promptRepresentation)
     }
 }

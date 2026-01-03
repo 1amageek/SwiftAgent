@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// A strategy for compacting conversation context when approaching limits.
 ///

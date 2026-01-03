@@ -7,12 +7,19 @@
 
 import Foundation
 import MCP
-import OpenFoundationModels
+import SwiftAgent
+
+// Typealias to avoid name collision with MCP.Tool
+#if USE_FOUNDATION_MODELS
+public typealias LMTool = FoundationModels.Tool
+#else
+public typealias LMTool = OpenFoundationModels.Tool
+#endif
 
 // MARK: - MCP Dynamic Tool
 
-/// A dynamic tool that wraps an MCP tool and conforms to OpenFoundationModels.Tool
-public struct MCPDynamicTool: OpenFoundationModels.Tool, Sendable {
+/// A dynamic tool that wraps an MCP tool and conforms to Tool protocol
+public struct MCPDynamicTool: LMTool, Sendable {
     public typealias Arguments = GeneratedContent
     public typealias Output = String
 
@@ -256,6 +263,8 @@ public struct MCPDynamicTool: OpenFoundationModels.Tool, Sendable {
                 result[key] = try convertGeneratedContentItemToValue(value)
             }
             return .object(result)
+        @unknown default:
+            return .null
         }
     }
 }
@@ -292,7 +301,7 @@ extension MCPClient {
 
     /// Gets all tools from the MCP server as an array of any Tool
     /// - Returns: Array of tools that can be used with LanguageModelSession
-    public func anyTools() async throws -> [any OpenFoundationModels.Tool] {
+    public func anyTools() async throws -> [any LMTool] {
         return try await tools()
     }
 }

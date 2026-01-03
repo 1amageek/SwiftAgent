@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 import SwiftAgent
 
 /// A tool for performing exact string replacements in files.
@@ -30,7 +29,7 @@ import SwiftAgent
 /// - Maximum file size: 1MB
 /// - UTF-8 encoding only
 /// - Text files only
-public struct EditTool: OpenFoundationModels.Tool {
+public struct EditTool: Tool {
     public typealias Arguments = EditInput
     public typealias Output = EditOutput
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 // MARK: - Session Context
 

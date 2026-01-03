@@ -1,8 +1,10 @@
 import Testing
 @testable import SwiftAgent
 @testable import AgentTools
-import OpenFoundationModels
 import Foundation
+
+#if !USE_FOUNDATION_MODELS
+import OpenFoundationModels
 
 @Suite("Agents Tests")
 struct AgentsTests {
@@ -130,3 +132,5 @@ struct AgentsTests {
         #expect(result == 5)
     }
 }
+
+#endif

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import OpenFoundationModels
 
 /// A pipeline that chains middleware for tool execution.
 ///
@@ -268,7 +267,7 @@ private final class ToolExecutionBox<T: Tool>: @unchecked Sendable {
 
     func execute() async throws -> String {
         let output = try await tool.call(arguments: arguments)
-        return output.promptRepresentation.description
+        return String(describing: output.promptRepresentation)
     }
 }
 

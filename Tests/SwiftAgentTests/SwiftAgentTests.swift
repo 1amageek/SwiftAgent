@@ -2,6 +2,8 @@ import Testing
 import Foundation
 import SwiftAgent
 @testable import AgentTools
+
+#if !USE_FOUNDATION_MODELS
 import OpenFoundationModels
 
 // MARK: - Test Helpers
@@ -178,3 +180,5 @@ struct AgentsTests {
         #expect(result == 10)
     }
 }
+
+#endif

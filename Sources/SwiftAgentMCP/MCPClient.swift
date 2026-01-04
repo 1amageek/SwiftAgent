@@ -6,8 +6,8 @@
 //
 
 import Foundation
-import MCP
 import System
+import SwiftAgent
 
 // MARK: - MCP Server Configuration
 
@@ -57,7 +57,7 @@ public actor MCPClient {
     /// - Parameter config: The server configuration
     private init(config: MCPServerConfig) {
         self.config = config
-        self.client = Client(name: "SwiftAgent", version: "1.0.0")
+        self.client = Client(name: SwiftAgent.Info.name, version: SwiftAgent.Info.version)
     }
 
     /// Connects to an MCP server using the provided configuration

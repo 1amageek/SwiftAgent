@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import MCP
 import SwiftAgent
 
 // Typealias to avoid name collision with MCP.Tool

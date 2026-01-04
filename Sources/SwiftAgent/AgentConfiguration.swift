@@ -289,6 +289,87 @@ extension AgentConfiguration {
         copy.context = nil
         return copy
     }
+
+    // MARK: - Security Configuration
+
+    /// Returns a copy with security configuration applied.
+    ///
+    /// This configures both permission checking and sandboxing for tool execution.
+    /// Both are implemented as middleware in the tool pipeline, achieving clean
+    /// layer separation:
+    ///
+    /// - **PermissionMiddleware**: Checks allow/deny rules before execution
+    /// - **SandboxMiddleware**: Intercepts Bash commands and runs them in sandbox
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// // Standard security with CLI prompts
+    /// let config = AgentConfiguration(...)
+    ///     .withSecurity(.standard.withHandler(CLIPermissionHandler()))
+    ///
+    /// // Development mode (permissive)
+    /// let config = AgentConfiguration(...)
+    ///     .withSecurity(.development)
+    ///
+    /// // Custom security rules
+    /// let security = SecurityConfiguration(
+    ///     permissions: PermissionConfiguration(
+    ///         allow: [.tool("Read"), .bash("git:*")],
+    ///         deny: [.bash("rm:*")],
+    ///         defaultAction: .ask,
+    ///         handler: CLIPermissionHandler()
+    ///     ),
+    ///     sandbox: .standard
+    /// )
+    /// let config = AgentConfiguration(...)
+    ///     .withSecurity(security)
+    /// ```
+    ///
+    /// ## Execution Flow
+    ///
+    /// ```
+    /// Tool Request
+    ///     │
+    ///     ▼
+    /// PermissionMiddleware (allow/deny/ask)
+    ///     │
+    ///     ▼
+    /// SandboxMiddleware (intercept Bash, run in sandbox)
+    ///     │
+    ///     ▼
+    /// Tool Execution
+    /// ```
+    ///
+    /// - Parameter security: The security configuration to apply.
+    /// - Returns: A new configuration with security enabled.
+    public func withSecurity(_ security: SecurityConfiguration) -> AgentConfiguration {
+        var copy = self
+
+        // Create pipeline if needed
+        if copy.toolPipeline == nil {
+            copy.toolPipeline = ToolPipeline()
+        }
+
+        // Add permission middleware (runs first)
+        copy.toolPipeline?.use(PermissionMiddleware(configuration: security.permissions))
+
+        // Add sandbox middleware if configured (runs after permission check)
+        // SandboxMiddleware injects config via withContext(SandboxContext.self),
+        // ExecuteCommandTool reads it via @OptionalContext(SandboxContext.self)
+        if let sandboxConfig = security.sandbox {
+            copy.toolPipeline?.use(SandboxMiddleware(configuration: sandboxConfig))
+        }
+
+        return copy
+    }
+
+    /// Returns a copy with read-only security (no write/execute).
+    ///
+    /// Convenience method for quick read-only mode setup.
+    public func withReadOnlySecurity() -> AgentConfiguration {
+        withSecurity(.readOnly)
+    }
 }
 
 // MARK: - Validation
@@ -336,17 +417,28 @@ extension AgentConfiguration {
 
     /// Creates a configuration for code assistance.
     ///
-    /// Uses a secure middleware pipeline with permission checking for dangerous operations.
+    /// Uses standard security with permission checking and sandboxing.
+    /// Prompts for confirmation on dangerous operations.
+    ///
+    /// - Parameters:
+    ///   - modelProvider: Model provider for the agent.
+    ///   - workingDirectory: Working directory for file operations.
+    ///   - permissionHandler: Handler for permission prompts (default: CLIPermissionHandler).
+    ///   - toolPipeline: Additional tool middleware pipeline (default: nil).
     public static func codeAssistant(
         modelProvider: any ModelProvider,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
+        permissionHandler: (any PermissionHandler)? = nil,
         toolPipeline: ToolPipeline? = nil
     ) -> AgentConfiguration {
-        // Default secure pipeline for code assistant
+        // Base security configuration
+        let security = SecurityConfiguration.standard
+            .withHandler(permissionHandler ?? CLIPermissionHandler())
+
+        // Default pipeline with logging and timeout
         let pipeline = toolPipeline ?? ToolPipeline()
-            .use(LoggingMiddleware())
-            .use(PermissionMiddleware.blockList(["rm", "sudo", "chmod 777"]))
-            .use(TimeoutMiddleware(duration: .seconds(60)))
+        pipeline.use(LoggingMiddleware())
+        pipeline.use(TimeoutMiddleware(duration: .seconds(60)))
 
         return AgentConfiguration(
             instructions: Instructions("""
@@ -363,12 +455,12 @@ extension AgentConfiguration {
             modelConfiguration: .code,
             workingDirectory: workingDirectory,
             toolPipeline: pipeline
-        )
+        ).withSecurity(security)
     }
 
     /// Creates a configuration for code review.
     ///
-    /// Uses a read-only tool preset with logging middleware.
+    /// Uses read-only security (no write or execute operations).
     public static func codeReviewer(
         modelProvider: any ModelProvider,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
@@ -376,7 +468,7 @@ extension AgentConfiguration {
     ) -> AgentConfiguration {
         // Default read-only pipeline for code reviewer
         let pipeline = toolPipeline ?? ToolPipeline()
-            .use(LoggingMiddleware())
+        pipeline.use(LoggingMiddleware())
 
         return AgentConfiguration(
             instructions: Instructions("""
@@ -392,7 +484,7 @@ extension AgentConfiguration {
             modelProvider: modelProvider,
             workingDirectory: workingDirectory,
             toolPipeline: pipeline
-        )
+        ).withSecurity(.readOnly)
     }
 }
 

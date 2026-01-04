@@ -52,6 +52,7 @@ public actor MCPClient {
     private var process: Process?
     private var transport: (any Transport)?
     private var isConnected: Bool = false
+    private var stderrTask: Task<Void, Never>?
 
     /// Creates a new MCP client with the given configuration
     /// - Parameter config: The server configuration
@@ -121,6 +122,18 @@ public actor MCPClient {
         try process.run()
         self.process = process
 
+        // Start task to drain stderr to prevent pipe blocking.
+        // The FileHandle is owned by stderrPipe, which is retained by Process.
+        // When Process terminates, availableData returns empty and loop exits.
+        let stderrHandle = stderrPipe.fileHandleForReading
+        stderrTask = Task.detached {
+            while true {
+                let data = stderrHandle.availableData
+                if data.isEmpty { break }
+                // Stderr is discarded to prevent pipe buffer from filling up
+            }
+        }
+
         // Create FileDescriptors from the pipe file handles
         let inputFD = FileDescriptor(rawValue: stdoutPipe.fileHandleForReading.fileDescriptor)
         let outputFD = FileDescriptor(rawValue: stdinPipe.fileHandleForWriting.fileDescriptor)
@@ -149,6 +162,10 @@ public actor MCPClient {
     /// Disconnects from the MCP server
     public func disconnect() async {
         isConnected = false
+
+        // Cancel stderr drain task
+        stderrTask?.cancel()
+        stderrTask = nil
 
         // Terminate the subprocess if running
         if let process = process, process.isRunning {

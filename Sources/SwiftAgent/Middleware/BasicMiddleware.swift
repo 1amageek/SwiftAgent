@@ -75,81 +75,6 @@ public struct LoggingMiddleware: ToolMiddleware {
     }
 }
 
-// MARK: - PermissionMiddleware
-
-/// Middleware that checks permissions before tool execution.
-///
-/// ## Example
-///
-/// ```swift
-/// let pipeline = ToolPipeline()
-///     .use(PermissionMiddleware { context in
-///         // Return true to allow, false to deny
-///         return context.toolName != "dangerous_tool"
-///     })
-/// ```
-public struct PermissionMiddleware: ToolMiddleware {
-    /// Error thrown when permission is denied.
-    public struct PermissionDenied: Error, LocalizedError {
-        public let toolName: String
-        public let reason: String?
-
-        public var errorDescription: String? {
-            if let reason = reason {
-                return "Permission denied for '\(toolName)': \(reason)"
-            }
-            return "Permission denied for '\(toolName)'"
-        }
-    }
-
-    private let check: @Sendable (ToolContext) async throws -> Bool
-    private let onDenied: (@Sendable (ToolContext) -> String?)?
-
-    /// Creates a permission middleware with a check closure.
-    ///
-    /// - Parameters:
-    ///   - check: Returns `true` to allow, `false` to deny.
-    ///   - onDenied: Optional closure that returns a denial reason.
-    public init(
-        check: @escaping @Sendable (ToolContext) async throws -> Bool,
-        onDenied: (@Sendable (ToolContext) -> String?)? = nil
-    ) {
-        self.check = check
-        self.onDenied = onDenied
-    }
-
-    /// Creates a permission middleware that allows specific tools.
-    ///
-    /// - Parameter allowedTools: Set of allowed tool names.
-    public static func allowList(_ allowedTools: Set<String>) -> PermissionMiddleware {
-        PermissionMiddleware(
-            check: { allowedTools.contains($0.toolName) },
-            onDenied: { _ in "Tool not in allow list" }
-        )
-    }
-
-    /// Creates a permission middleware that blocks specific tools.
-    ///
-    /// - Parameter blockedTools: Set of blocked tool names.
-    public static func blockList(_ blockedTools: Set<String>) -> PermissionMiddleware {
-        PermissionMiddleware(
-            check: { !blockedTools.contains($0.toolName) },
-            onDenied: { _ in "Tool is blocked" }
-        )
-    }
-
-    public func handle(_ context: ToolContext, next: @escaping Next) async throws -> ToolResult {
-        let allowed = try await check(context)
-
-        guard allowed else {
-            let reason = onDenied?(context)
-            throw PermissionDenied(toolName: context.toolName, reason: reason)
-        }
-
-        return try await next(context)
-    }
-}
-
 // MARK: - RetryMiddleware
 
 /// Middleware that retries failed tool executions.
@@ -280,7 +205,7 @@ public struct PassthroughMiddleware: ToolMiddleware {
 /// let pipeline = ToolPipeline()
 ///     .use(ConditionalMiddleware(
 ///         condition: { $0.toolName.hasPrefix("dangerous_") },
-///         middleware: PermissionMiddleware { _ in false }
+///         middleware: PermissionMiddleware(configuration: .restrictive)
 ///     ))
 /// ```
 public struct ConditionalMiddleware: ToolMiddleware {

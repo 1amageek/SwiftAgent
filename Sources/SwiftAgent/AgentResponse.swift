@@ -260,8 +260,14 @@ public struct AgentResponseStream<Content: Generable & Sendable>: AsyncSequence,
 
     /// Collects all snapshots and returns the final response.
     ///
-    /// - Returns: The complete agent response.
-    /// - Throws: Any error that occurred during streaming.
+    /// This method iterates through all stream snapshots and returns the final
+    /// complete response. If the stream produces no snapshots (empty response),
+    /// this method throws `AgentError.generationFailed`.
+    ///
+    /// - Returns: The complete agent response with content, tool calls, and duration.
+    /// - Throws: `AgentError.generationFailed` if the stream completes without
+    ///   producing any snapshots. This is intentional - an empty response is
+    ///   considered an error condition.
     public func collect() async throws -> AgentResponse<Content> {
         var finalSnapshot: Snapshot?
         var allToolCalls: [ToolCallRecord] = []

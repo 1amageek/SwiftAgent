@@ -91,7 +91,6 @@ extension ToolConfiguration {
         /// - `Bash`: ExecuteCommandTool
         /// - `Git`: GitTool
         /// - `WebFetch`: URLFetchTool
-        /// - `WebSearch`: WebSearchTool
         public var toolNames: [String] {
             switch self {
             case .default:

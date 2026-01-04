@@ -8,6 +8,29 @@
 import Foundation
 
 /// Context passed through the middleware chain.
+///
+/// `ToolContext` is propagated via TaskLocal during tool execution,
+/// allowing tools to access middleware context information.
+///
+/// ## Accessing Context in Tools
+///
+/// ```swift
+/// struct MyTool: Tool {
+///     func call(arguments: Args) async throws -> Output {
+///         if let context = ToolContext.current {
+///             // Access the current tool context
+///             print("Executing: \(context.toolName)")
+///         }
+///     }
+/// }
+/// ```
+///
+/// ## Note
+///
+/// For injecting typed configuration (like sandbox settings), prefer
+/// using the `@Context`/`@OptionalContext` property wrappers with
+/// a custom `ContextKey`. This provides type safety and follows
+/// SwiftAgent's established patterns.
 public struct ToolContext: Sendable {
     /// The name of the tool being called.
     public let toolName: String
@@ -21,7 +44,10 @@ public struct ToolContext: Sendable {
     /// The session ID (if available).
     public let sessionID: String?
 
-    /// Additional metadata.
+    /// Additional metadata injected by middleware.
+    ///
+    /// Middleware can use this for string-based data passing.
+    /// For typed configuration, prefer using the `@Context` system.
     public var metadata: [String: String]
 
     public init(
@@ -36,6 +62,22 @@ public struct ToolContext: Sendable {
         self.toolUseID = toolUseID
         self.sessionID = sessionID
         self.metadata = metadata
+    }
+
+    // MARK: - TaskLocal Support
+
+    /// TaskLocal storage for the current context.
+    @TaskLocal
+    public static var current: ToolContext?
+
+    /// Executes an operation with this context as the current context.
+    ///
+    /// - Parameter operation: The operation to execute.
+    /// - Returns: The result of the operation.
+    public func withCurrent<T: Sendable>(
+        _ operation: () async throws -> T
+    ) async rethrows -> T {
+        try await ToolContext.$current.withValue(self, operation: operation)
     }
 }
 

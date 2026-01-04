@@ -24,10 +24,14 @@ public enum AgentCapabilityNamespace {
 // MARK: - Perception to CapabilityID Conversion
 
 extension Perception {
-    /// Convert this perception to a CapabilityID for discovery
-    /// Uses the perception namespace with the identifier as the name
+    /// Convert this perception to a CapabilityID for discovery.
+    ///
+    /// Uses the perception namespace with the identifier as the name.
+    /// Format: `agent.perception.{identifier}`
     public var capabilityID: CapabilityID {
-        // Format: agent.perception.{identifier}
+        // Safe: format is "agent.perception.{identifier}" where identifier
+        // is constrained by the Perception protocol to be a valid string.
+        // Failure here would indicate a framework bug, not a runtime error.
         // swiftlint:disable:next force_try
         try! CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
     }

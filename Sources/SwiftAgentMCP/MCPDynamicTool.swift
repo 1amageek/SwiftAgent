@@ -96,8 +96,12 @@ public struct MCPDynamicTool: LMTool, Sendable {
         do {
             return try GenerationSchema(root: dynamicSchema, dependencies: [])
         } catch {
-            // This should not happen with a valid empty schema, but provide a fallback
-            fatalError("Failed to create empty GenerationSchema: \(error)")
+            // Empty schemas should always be valid. If this fails, it indicates
+            // a bug in DynamicGenerationSchema or GenerationSchema implementation.
+            fatalError("""
+                Failed to create empty GenerationSchema for tool '\(name)': \(error)
+                This is a framework bug - please report at https://github.com/1amageek/SwiftAgent/issues
+                """)
         }
     }
 

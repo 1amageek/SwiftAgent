@@ -56,6 +56,17 @@ public protocol ContextKey {
 ///
 /// Use `@Context` to access values that have been provided via `withContext`.
 ///
+/// ## Design Note
+///
+/// This follows SwiftUI's `@Environment` pattern. If the context value is not provided
+/// via `withContext { }`, accessing `wrappedValue` will trigger a `fatalError`. This is
+/// intentional to catch configuration errors early during development.
+///
+/// For optional access, use `@OptionalContext` instead:
+/// ```swift
+/// @OptionalContext(URLTrackerContext.self) var tracker: URLTracker?
+/// ```
+///
 /// ## Usage
 ///
 /// ```swift
@@ -69,6 +80,11 @@ public protocol ContextKey {
 ///         tracker.markVisited(input)
 ///         // ... crawl logic
 ///     }
+/// }
+///
+/// // Provide context via withContext
+/// try await withContext(URLTrackerContext.self, value: tracker) {
+///     try await CrawlerStep().run(url)
 /// }
 /// ```
 @propertyWrapper

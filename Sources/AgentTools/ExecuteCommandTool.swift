@@ -19,6 +19,21 @@ import SwiftAgent
 /// - Configurable timeout (up to 10 minutes)
 /// - Working directory specification
 /// - Output size limits (1MB)
+/// - **Sandbox support via `@Context`** (macOS)
+///
+/// ## Sandbox Support
+///
+/// When `SandboxMiddleware` is in the tool pipeline, this tool automatically
+/// executes commands in a macOS sandbox. The middleware injects configuration
+/// via TaskLocal using `withContext(SandboxContext.self, ...)`, which this tool
+/// reads using `@OptionalContext(SandboxContext.self)`.
+///
+/// ```swift
+/// let config = AgentConfiguration(...)
+///     .withSecurity(.standard)  // Adds SandboxMiddleware
+///
+/// // Commands will now execute in a sandbox
+/// ```
 ///
 /// ## Usage
 /// - Specify the executable name (e.g., "ls", "git", "swift")
@@ -33,6 +48,9 @@ import SwiftAgent
 /// - Maximum 1MB output size
 /// - No interactive commands
 public struct ExecuteCommandTool: Tool {
+
+    /// Sandbox configuration from middleware via TaskLocal.
+    @OptionalContext(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration?
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
 
@@ -132,6 +150,15 @@ public struct ExecuteCommandTool: Tool {
         // curl and wget intentionally excluded (SSRF risk - use URLFetchTool)
     ]
 
+    /// Creates an ExecuteCommandTool.
+    ///
+    /// - Parameter workingDirectory: The default working directory for commands.
+    ///
+    /// ## Security
+    ///
+    /// Sandboxing is enforced at the middleware layer via `SandboxMiddleware`,
+    /// not in this tool. Use `AgentConfiguration.withSecurity()` to enable
+    /// sandboxed command execution.
     public init(workingDirectory: String = FileManager.default.currentDirectoryPath) {
         self.workingDirectory = workingDirectory
     }
@@ -188,7 +215,22 @@ public struct ExecuteCommandTool: Tool {
         // Determine working directory
         let execWorkingDir = arguments.working_dir.isEmpty ? workingDirectory : arguments.working_dir
 
-        // Execute command
+        // Check for sandbox configuration from middleware (via @OptionalContext TaskLocal)
+        #if os(macOS)
+        if let sandboxConfig {
+            // Execute in sandbox
+            return try await executeSandboxed(
+                executable: execPath,
+                arguments: args,
+                workingDirectory: execWorkingDir,
+                timeout: timeoutSeconds,
+                configuration: sandboxConfig,
+                description: arguments.command
+            )
+        }
+        #endif
+
+        // Execute without sandbox
         return try await executeCommand(
             executable: execPath,
             arguments: args,
@@ -197,6 +239,69 @@ public struct ExecuteCommandTool: Tool {
             description: arguments.command
         )
     }
+
+    #if os(macOS)
+    /// Executes a command within a sandbox.
+    private func executeSandboxed(
+        executable: String,
+        arguments: [String],
+        workingDirectory: String,
+        timeout: TimeInterval,
+        configuration: SandboxExecutor.Configuration,
+        description: String
+    ) async throws -> ExecuteCommandOutput {
+        let startTime = Date()
+
+        do {
+            let result = try await SandboxExecutor.execute(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                configuration: configuration,
+                timeout: timeout
+            )
+
+            let executionTime = Date().timeIntervalSince(startTime)
+
+            // Combine stdout and stderr
+            var output = result.stdout
+            if !result.stderr.isEmpty && result.exitCode != 0 {
+                output += "\n[STDERR]\n" + result.stderr
+            }
+
+            // Truncate if needed
+            let truncated = output.count > Self.maxOutputSize
+            if truncated {
+                let keepSize = Self.maxOutputSize / 2
+                let prefix = String(output.prefix(keepSize))
+                let suffix = String(output.suffix(keepSize))
+                output = prefix + "\n... [Output truncated] ...\n" + suffix
+            }
+
+            let metadata: [String: String] = [
+                "command": executable,
+                "arguments": arguments.joined(separator: " "),
+                "working_directory": workingDirectory,
+                "exit_code": String(result.exitCode),
+                "execution_time": String(format: "%.3f", executionTime),
+                "sandboxed": "true",
+                "truncated": String(truncated),
+                "description": description
+            ]
+
+            return ExecuteCommandOutput(
+                success: result.exitCode == 0,
+                output: output,
+                exitCode: result.exitCode,
+                executionTime: executionTime,
+                truncated: truncated,
+                metadata: metadata
+            )
+        } catch let error as SandboxExecutor.SandboxError {
+            throw FileSystemError.operationFailed(reason: error.reason)
+        }
+    }
+    #endif
 
     /// Parse command string into parts, handling quoted strings
     private func parseCommand(_ command: String) -> [String] {

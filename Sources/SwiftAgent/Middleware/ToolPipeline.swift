@@ -71,17 +71,27 @@ public final class ToolPipeline: @unchecked Sendable {
     }
 
     /// Executes the middleware chain.
+    ///
+    /// The final context (after all middleware modifications) is propagated
+    /// via `ToolContext.current` TaskLocal during tool execution.
     internal static func execute(
         context: ToolContext,
         middleware: [any ToolMiddleware],
         execute: @escaping @Sendable (ToolContext) async throws -> ToolResult
     ) async throws -> ToolResult {
+        // Wrap the execute function to propagate context via TaskLocal
+        let executeWithContext: @Sendable (ToolContext) async throws -> ToolResult = { ctx in
+            try await ctx.withCurrent {
+                try await execute(ctx)
+            }
+        }
+
         guard !middleware.isEmpty else {
-            return try await execute(context)
+            return try await executeWithContext(context)
         }
 
         // Build the chain from the end
-        var chain: ToolMiddleware.Next = execute
+        var chain: ToolMiddleware.Next = executeWithContext
 
         for m in middleware.reversed() {
             let currentChain = chain
@@ -117,10 +127,11 @@ public struct PipelinedTool<T: Tool>: Tool, Sendable where T.Arguments: Sendable
         let startTime = ContinuousClock.now
         let args = arguments  // Capture for Sendable
 
-        // Create context
+        // Create context with JSON if possible, otherwise debug description
+        let argumentsString = _encodeArgumentsToJSON(args) ?? String(describing: args)
         let context = ToolContext(
             toolName: name,
-            arguments: String(describing: args)
+            arguments: argumentsString
         )
 
         // Box to capture the typed output
@@ -225,9 +236,12 @@ private func _executeTypedToolWithMiddleware<T: Tool>(
     // Convert GeneratedContent to typed arguments
     let typedArgs = try T.Arguments(arguments)
 
+    // Use GeneratedContent's built-in JSON conversion
+    let argumentsJSON = arguments.jsonString
+
     let context = ToolContext(
         toolName: tool.name,
-        arguments: String(describing: typedArgs)
+        arguments: argumentsJSON
     )
 
     // Wrap tool and args for Sendable capture
@@ -290,5 +304,39 @@ public enum ToolPipelineError: Error, LocalizedError {
         case .middlewareShortCircuited(let toolName):
             return "Middleware short-circuited without executing tool '\(toolName)'. For typed tools, all middleware must call next()."
         }
+    }
+}
+
+/// Attempts to encode typed arguments to JSON if they conform to Encodable.
+private func _encodeArgumentsToJSON<T>(_ arguments: T) -> String? {
+    guard let encodable = arguments as? Encodable else {
+        return nil
+    }
+    return _encodeToJSON(encodable)
+}
+
+private func _encodeToJSON(_ value: Encodable) -> String? {
+    do {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(AnyEncodable(value))
+        return String(data: data, encoding: .utf8)
+    } catch {
+        return nil
+    }
+}
+
+/// Type-erased wrapper for Encodable values.
+private struct AnyEncodable: Encodable {
+    private let _encode: (Encoder) throws -> Void
+
+    init(_ value: Encodable) {
+        self._encode = { encoder in
+            try value.encode(to: encoder)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try _encode(encoder)
     }
 }

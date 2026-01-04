@@ -21,7 +21,21 @@ public enum SessionContext {
 
 /// A property wrapper that provides access to the current LanguageModelSession from the task context.
 ///
-/// Usage:
+/// ## Design Note
+///
+/// This follows SwiftUI's `@Environment` pattern. If the session context is not provided
+/// via `withSession { }`, accessing `wrappedValue` will trigger a `fatalError`. This is
+/// intentional to catch configuration errors early during development.
+///
+/// For optional access, check `SessionContext.current` directly:
+/// ```swift
+/// if let session = SessionContext.current {
+///     // Use session
+/// }
+/// ```
+///
+/// ## Usage
+///
 /// ```swift
 /// struct MyStep: Step {
 ///     @Session var session: LanguageModelSession
@@ -31,6 +45,11 @@ public enum SessionContext {
 ///         let response = try await session.respond { Prompt(input) }
 ///         return response.content
 ///     }
+/// }
+///
+/// // Provide session via withSession
+/// try await withSession(mySession) {
+///     try await MyStep().run("Hello")
 /// }
 /// ```
 @propertyWrapper

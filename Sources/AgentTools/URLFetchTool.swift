@@ -528,41 +528,75 @@ extension URLFetchTool {
     
     /// Check if an IP address is in a private range
     func isPrivateIP(_ ip: String) -> Bool {
-        // IPv4 private ranges
-        if ip.hasPrefix("10.") ||
-           ip.hasPrefix("172.") ||
-           ip.hasPrefix("192.168.") ||
-           ip.hasPrefix("169.254.") ||  // Link-local
-           ip.hasPrefix("127.") ||      // Loopback
-           ip == "0.0.0.0" {
-            
-            // For 172.x.x.x, check if it's in the 172.16.0.0/12 range
-            if ip.hasPrefix("172.") {
-                let components = ip.split(separator: ".").compactMap { Int($0) }
-                if components.count >= 2 {
-                    let secondOctet = components[1]
-                    return secondOctet >= 16 && secondOctet <= 31
-                }
-            }
+        let lowercaseIP = ip.lowercased()
+
+        // IPv4-mapped IPv6: ::ffff:a.b.c.d
+        // Must check BEFORE other IPv6 checks to properly delegate to IPv4 logic
+        if lowercaseIP.hasPrefix("::ffff:") {
+            let ipv4Part = String(lowercaseIP.dropFirst(7))
+            return isPrivateIPv4(ipv4Part)
+        }
+
+        // Check IPv4 addresses
+        if isPrivateIPv4(ip) {
             return true
         }
-        
-        // IPv6 private ranges
-        let ipv6PrivatePrefixes = [
-            "fc",   // Unique local
-            "fd",   // Unique local
-            "fe80", // Link-local
-            "::1",  // Loopback
-            "::"    // Unspecified
-        ]
-        
-        let lowercaseIP = ip.lowercased()
-        for prefix in ipv6PrivatePrefixes {
-            if lowercaseIP.hasPrefix(prefix) {
-                return true
+
+        // IPv6: Unique Local Address (fc00::/7 = fc00-fdff)
+        if lowercaseIP.hasPrefix("fc") || lowercaseIP.hasPrefix("fd") {
+            return true
+        }
+
+        // IPv6: Link-Local (fe80::/10 = fe80-febf)
+        // The /10 prefix means first 10 bits are fixed: 1111 1110 10xx xxxx
+        // This covers fe80, fe81, ..., fe8f, fe90, ..., febf
+        if lowercaseIP.hasPrefix("fe") {
+            let thirdChar = lowercaseIP.dropFirst(2).first
+            if let char = thirdChar {
+                // fe80-febf: third character must be 8, 9, a, or b
+                if "89ab".contains(char) {
+                    return true
+                }
             }
         }
-        
+
+        // IPv6: Loopback (::1/128)
+        if lowercaseIP == "::1" || lowercaseIP == "0000:0000:0000:0000:0000:0000:0000:0001" {
+            return true
+        }
+
+        // IPv6: Unspecified (::/128)
+        if lowercaseIP == "::" || lowercaseIP == "0000:0000:0000:0000:0000:0000:0000:0000" {
+            return true
+        }
+
+        // IPv6: Multicast (ff00::/8) - block all multicast addresses
+        if lowercaseIP.hasPrefix("ff") {
+            return true
+        }
+
+        return false
+    }
+
+    /// Check if an IPv4 address is in a private range
+    private func isPrivateIPv4(_ ip: String) -> Bool {
+        // 172.16.0.0/12 (172.16.x.x - 172.31.x.x)
+        if ip.hasPrefix("172.") {
+            let components = ip.split(separator: ".").compactMap { Int($0) }
+            guard components.count >= 2 else { return false }
+            let secondOctet = components[1]
+            return secondOctet >= 16 && secondOctet <= 31
+        }
+
+        // Other private/reserved ranges
+        if ip.hasPrefix("10.") ||        // 10.0.0.0/8
+           ip.hasPrefix("192.168.") ||   // 192.168.0.0/16
+           ip.hasPrefix("169.254.") ||   // Link-local
+           ip.hasPrefix("127.") ||       // Loopback
+           ip == "0.0.0.0" {             // Unspecified
+            return true
+        }
+
         return false
     }
     

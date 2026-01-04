@@ -475,31 +475,69 @@ public actor AgentSession: Identifiable {
         let sessionStore = configuration.sessionStore
 
         return AgentResponseStream<String>.create { [weak self] continuation in
+            // Capture weak reference once for use in termination handler
+            let weakSelf = self
+
+            // Register termination handler for cancellation only.
+            // Normal completion resets isResponding in finishStreamAndReset().
+            continuation.onTermination = { @Sendable termination in
+                switch termination {
+                case .cancelled:
+                    // Only reset on cancellation - normal finish is handled below
+                    Task {
+                        await weakSelf?.resetRespondingState()
+                    }
+                case .finished:
+                    // Normal completion or error - handled by finishStreamAndReset()
+                    break
+                @unknown default:
+                    break
+                }
+            }
+
             do {
                 let stream = languageModelSession.streamResponse(
                     to: text,
                     options: generationOptions
                 )
 
-                var toolCalls: [ToolCallRecord] = []
+                // Track the last snapshot for final toolCalls injection
+                var lastRawContent: GeneratedContent?
+                var lastContent: String = ""
 
                 for try await snapshot in stream {
+                    lastRawContent = snapshot.rawContent
+                    lastContent = snapshot.content
+
+                    // During streaming, toolCalls are not yet available
                     let agentSnapshot = AgentResponseStream<String>.Snapshot(
                         content: snapshot.content,
                         rawContent: snapshot.rawContent,
-                        toolCalls: toolCalls,
+                        toolCalls: [],
                         isComplete: false
                     )
                     continuation.yield(agentSnapshot)
                 }
 
-                // Extract tool calls from final transcript after stream completes
+                // Extract tool calls and finalize stream
                 if let self = self {
                     let transcriptEntries = await self.getCurrentTranscriptEntries()
-                    toolCalls = Transcript.extractToolCalls(from: transcriptEntries)
+                    let extractedToolCalls = Transcript.extractToolCalls(from: transcriptEntries)
 
-                    await self.finishStream(
-                        toolCalls: toolCalls,
+                    // Yield final snapshot WITH toolCalls only if we have content
+                    if let rawContent = lastRawContent {
+                        let finalSnapshot = AgentResponseStream<String>.Snapshot(
+                            content: lastContent,
+                            rawContent: rawContent,
+                            toolCalls: extractedToolCalls,
+                            isComplete: true
+                        )
+                        continuation.yield(finalSnapshot)
+                    }
+
+                    // ALWAYS reset isResponding, even if stream had no snapshots
+                    await self.finishStreamAndReset(
+                        toolCalls: extractedToolCalls,
                         autoSave: autoSave,
                         sessionStore: sessionStore
                     )
@@ -508,7 +546,7 @@ public actor AgentSession: Identifiable {
                 continuation.finish()
 
             } catch {
-                // Reset responding state on error
+                // Reset isResponding on error
                 if let self = self {
                     await self.resetRespondingState()
                 }
@@ -522,22 +560,33 @@ public actor AgentSession: Identifiable {
         Array(transcript)
     }
 
-    /// Finishes a streaming response by updating session state.
-    private func finishStream(
+    /// Finishes a streaming response: records tool calls, saves, and resets state.
+    ///
+    /// This method ensures atomic completion of stream processing:
+    /// 1. Record tool calls to history
+    /// 2. Auto-save if configured
+    /// 3. Reset isResponding flag
+    ///
+    /// This ordering prevents race conditions where isResponding is reset
+    /// before tool call recording is complete.
+    private func finishStreamAndReset(
         toolCalls: [ToolCallRecord],
         autoSave: Bool,
         sessionStore: (any SessionStore)?
     ) async {
-        isResponding = false
+        // 1. Record tool calls
         toolCallHistory.append(contentsOf: toolCalls)
 
-        // Auto-save if configured
+        // 2. Auto-save if configured
         if autoSave, let store = sessionStore {
             try? await save(to: store)
         }
+
+        // 3. Reset responding state AFTER all processing is complete
+        isResponding = false
     }
 
-    /// Resets the responding state on error.
+    /// Resets the responding state (for cancellation/error scenarios).
     private func resetRespondingState() {
         isResponding = false
     }

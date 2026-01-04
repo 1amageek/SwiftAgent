@@ -26,6 +26,12 @@ import SwiftAgent
 ///     // Use the tool
 /// }
 /// ```
+///
+/// ## Security
+///
+/// Security policies (permissions and sandboxing) are enforced at the
+/// middleware layer, not in the tool provider. Use `AgentConfiguration.withSecurity()`
+/// to configure security policies.
 public struct AgentToolsProvider: ToolProvider {
 
     /// The working directory for file operations.
@@ -123,6 +129,12 @@ extension DefaultToolProvider {
     /// Creates a DefaultToolProvider backed by AgentToolsProvider.
     ///
     /// This is a convenience factory for creating a fully functional tool provider.
+    ///
+    /// ## Security
+    ///
+    /// Security policies (permissions and sandboxing) are enforced at the
+    /// middleware layer via `AgentConfiguration.withSecurity()`, not in the
+    /// tool provider.
     ///
     /// - Parameter workingDirectory: The working directory for file operations.
     /// - Returns: A DefaultToolProvider that uses AgentToolsProvider for tool creation.

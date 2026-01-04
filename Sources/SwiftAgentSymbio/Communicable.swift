@@ -1,6 +1,9 @@
-// MARK: - Communicable
-// Protocol for agents that can communicate with other agents
-// Uses Swift Distributed Actors for transparent local/remote communication
+//
+//  Communicable.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import SwiftAgent

@@ -1,6 +1,9 @@
-// MARK: - PeerConnector
-// Connects the Agent layer to the peer network
-// Handles Perception/Presence to CapabilityID/ResolvedPeer conversion
+//
+//  PeerConnector.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import SwiftAgent

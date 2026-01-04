@@ -1,6 +1,9 @@
-// MARK: - SymbioActorSystem
-// Distributed Actor System for agent communication
-// Uses PeerConnector (swift-discovery) for remote communication
+//
+//  SymbioActorSystem.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import Distributed

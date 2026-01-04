@@ -1,5 +1,9 @@
-// MARK: - ReplicateTool
-// Tool for LLM to spawn SubAgents when tasks require parallelization
+//
+//  ReplicateTool.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import SwiftAgent

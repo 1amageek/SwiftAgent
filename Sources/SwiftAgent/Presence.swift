@@ -1,6 +1,9 @@
-// MARK: - Presence
-// Declaration of existence for agents
-// Inspired by Bonjour's service announcement mechanism
+//
+//  Presence.swift
+//  SwiftAgent
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 

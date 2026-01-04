@@ -172,6 +172,7 @@ public struct Chain4<S1: Step, S2: Step, S3: Step, S4: Step>: Step where S1.Outp
     }
 }
 
+/// A structure that combines five `Step` instances and executes them sequentially.
 public struct Chain5<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input {
     public typealias Input = S1.Input
     public typealias Output = S5.Output
@@ -200,7 +201,7 @@ public struct Chain5<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step>: Step whe
     }
 }
 
-// 同様に Chain6, Chain7, Chain8 を以下のように実装します：
+/// A structure that combines six `Step` instances and executes them sequentially.
 public struct Chain6<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input {
     public typealias Input = S1.Input
     public typealias Output = S6.Output
@@ -232,6 +233,7 @@ public struct Chain6<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step>
     }
 }
 
+/// A structure that combines seven `Step` instances and executes them sequentially.
 public struct Chain7<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step, S7: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input, S6.Output == S7.Input {
     public typealias Input = S1.Input
     public typealias Output = S7.Output
@@ -266,6 +268,7 @@ public struct Chain7<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step,
     }
 }
 
+/// A structure that combines eight `Step` instances and executes them sequentially.
 public struct Chain8<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step, S7: Step, S8: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input, S6.Output == S7.Input, S7.Output == S8.Input {
     public typealias Input = S1.Input
     public typealias Output = S8.Output

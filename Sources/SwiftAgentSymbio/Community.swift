@@ -1,6 +1,9 @@
-// MARK: - Community
-// The community of agents that this agent can interact with
-// Wraps SymbioActorSystem and provides a high-level API for agent interaction
+//
+//  Community.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import SwiftAgent

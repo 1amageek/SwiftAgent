@@ -1,6 +1,9 @@
-// MARK: - SymbioInvocationDecoder
-// Invocation Decoder for SymbioActorSystem
-// Decodes distributed actor invocation arguments
+//
+//  SymbioInvocationDecoder.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import Distributed

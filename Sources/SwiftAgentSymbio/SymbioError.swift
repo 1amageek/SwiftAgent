@@ -1,5 +1,9 @@
-// MARK: - SymbioError
-// Error types for SwiftAgentSymbio
+//
+//  SymbioError.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 

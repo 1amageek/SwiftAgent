@@ -1,9 +1,9 @@
-// MARK: - Address
-// Network address for SymbioActorSystem
-// Simple identifier following DNS/Bonjour design principles:
-// - Address is just a unique endpoint identifier
-// - Resolution (where to find it) is handled by the system
-// - No routing information embedded in the Address
+//
+//  Address.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import Distributed

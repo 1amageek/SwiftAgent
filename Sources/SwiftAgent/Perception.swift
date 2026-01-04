@@ -1,6 +1,9 @@
-// MARK: - Perception
-// Signal pathway to consciousness
-// Based on the eight consciousnesses model
+//
+//  Perception.swift
+//  SwiftAgent
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 

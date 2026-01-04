@@ -1,6 +1,9 @@
-// MARK: - SymbioInvocationEncoder
-// Invocation Encoder for SymbioActorSystem
-// Encodes distributed actor invocation arguments for transmission
+//
+//  SymbioInvocationEncoder.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import Distributed

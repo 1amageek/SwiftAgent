@@ -1,6 +1,9 @@
-// MARK: - SymbioResultHandler
-// Result Handler for SymbioActorSystem
-// Handles distributed actor invocation results
+//
+//  SymbioResultHandler.swift
+//  SwiftAgentSymbio
+//
+//  Created by SwiftAgent.
+//
 
 import Foundation
 import Distributed

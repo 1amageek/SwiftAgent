@@ -7,9 +7,9 @@
 
 import Foundation
 
-// MARK: - Model Provider (OpenFoundationModels only)
+// MARK: - Model Provider (USE_OTHER_MODELS only)
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 
 /// A protocol for providing language models.
 ///

@@ -89,10 +89,10 @@ swift run AgentCLI ask "Analyze this codebase" --working-dir /path/to/project
 
 ### Tool Access
 The MainAgent has access to:
-- **FileSystemTool**: Read/write files within working directory
-- **ExecuteCommandTool**: Run shell commands
-- **GitTool**: Git operations
-- **URLFetchTool**: HTTP requests
+- **ReadTool/WriteTool**: Read/write files within working directory
+- **ExecuteCommandTool (Bash)**: Run shell commands
+- **GitTool (Git)**: Git operations
+- **URLFetchTool (WebFetch)**: HTTP requests
 
 ### Safety Features
 - Working directory restrictions for file operations
@@ -131,7 +131,7 @@ Loop(maxIterations: 5) { context in
 3. Add to the main command configuration
 
 ### Adding New Tools
-1. Implement the OpenFoundationModels.Tool protocol
+1. Implement the Tool protocol (FoundationModels or OpenFoundationModels)
 2. Add to the session's tools array
 3. Test tool integration
 

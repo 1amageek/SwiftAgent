@@ -5,10 +5,10 @@
 //  Created by Norikazu Muramoto on 2025/01/12.
 //
 
-#if USE_FOUNDATION_MODELS
-@_exported import FoundationModels
-#else
+#if USE_OTHER_MODELS
 @_exported import OpenFoundationModels
+#else
+@_exported import FoundationModels
 #endif
 
 /// Framework information

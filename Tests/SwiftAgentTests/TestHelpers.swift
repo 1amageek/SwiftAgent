@@ -9,7 +9,7 @@ import Foundation
 import Testing
 @testable import SwiftAgent
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 import OpenFoundationModels
 
 // MARK: - Mock Language Model

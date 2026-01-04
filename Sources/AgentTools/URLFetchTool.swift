@@ -37,7 +37,7 @@ public struct URLFetchTool: Tool {
     public typealias Arguments = FetchInput
     public typealias Output = URLFetchOutput
 
-    public static let name = "url_fetch"
+    public static let name = "WebFetch"
     public var name: String { Self.name }
 
     public static let description = """

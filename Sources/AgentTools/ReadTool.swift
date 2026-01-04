@@ -33,7 +33,7 @@ public struct ReadTool: Tool {
     public typealias Arguments = ReadInput
     public typealias Output = ReadOutput
 
-    public static let name = "read"
+    public static let name = "Read"
     public var name: String { Self.name }
 
     /// Default number of lines to read if no limit specified

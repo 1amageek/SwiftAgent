@@ -33,7 +33,7 @@ public struct EditTool: Tool {
     public typealias Arguments = EditInput
     public typealias Output = EditOutput
 
-    public static let name = "edit"
+    public static let name = "Edit"
     public var name: String { Self.name }
 
     public static let description = """

@@ -35,14 +35,14 @@ public struct WebSearchTool: Tool {
     public typealias Arguments = WebSearchInput
     public typealias Output = WebSearchOutput
 
-    public static let name = "web_search"
+    public static let name = "WebSearch"
     public var name: String { Self.name }
 
     public static let description = """
     Search the web to find relevant URLs when you don't know the exact page. \
     Use for discovering information, finding solutions, or researching topics. \
     Returns list of results with titles, URLs, and snippets. \
-    After finding URLs, use url_fetch to read full content.
+    After finding URLs, use WebFetch to read full content.
     """
 
     public var description: String { Self.description }

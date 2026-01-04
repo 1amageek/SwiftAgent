@@ -9,10 +9,10 @@ import Foundation
 import SwiftAgent
 
 // Typealias to avoid name collision with MCP.Tool
-#if USE_FOUNDATION_MODELS
-public typealias LMTool = FoundationModels.Tool
-#else
+#if USE_OTHER_MODELS
 public typealias LMTool = OpenFoundationModels.Tool
+#else
+public typealias LMTool = FoundationModels.Tool
 #endif
 
 // MARK: - MCP Dynamic Tool

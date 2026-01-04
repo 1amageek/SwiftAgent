@@ -4,6 +4,8 @@
 
 SwiftAgent is a powerful Swift framework for building AI agents using a declarative SwiftUI-like syntax. It provides a type-safe, composable way to create complex agent workflows while maintaining Swift's expressiveness.
 
+> **Note**: SwiftAgent uses Apple's FoundationModels by default. For development/testing with other LLM providers, use `USE_OTHER_MODELS=1` to switch to OpenFoundationModels.
+
 ## Architecture Overview
 
 ```mermaid
@@ -12,7 +14,7 @@ graph TB
         Step["Step&lt;Input, Output&gt;"]
     end
 
-    subgraph "OpenFoundationModels Integration"
+    subgraph "FoundationModels Integration"
         Tool["Tool Protocol"]
         LMS["LanguageModelSession"]
         Generable["@Generable"]
@@ -171,7 +173,7 @@ graph TB
 - **Declarative Syntax**: Build agents using familiar SwiftUI-like syntax
 - **Composable Steps**: Chain multiple steps together seamlessly with StepBuilder
 - **Type-Safe Tools**: Define and use tools with compile-time type checking
-- **Model-Agnostic**: Works with any AI model through OpenFoundationModels
+- **Model-Agnostic**: Works with Apple's FoundationModels (default) or any AI model through OpenFoundationModels
 - **Modular Design**: Create reusable agent components
 - **Async/Await Support**: Built for modern Swift concurrency
 - **Protocol-Based**: Flexible and extensible architecture
@@ -458,10 +460,13 @@ SwiftAgent provides a high-level agent management system inspired by Claude Agen
 
 ### AgentSession
 
+> **Note**: AgentSession requires OpenFoundationModels. Build with `USE_OTHER_MODELS=1`.
+
 `AgentSession` is the main interface for managing AI agent conversations:
 
 ```swift
 import SwiftAgent
+// Requires USE_OTHER_MODELS=1
 import OpenFoundationModels
 
 // Create configuration
@@ -542,13 +547,13 @@ let codeReviewer = SubagentDefinition(
         "You are a code review expert"
         "Focus on best practices and potential bugs"
     },
-    tools: .only(["file_read", "text_search"])
+    tools: .only(["Read", "Grep"])
 )
 
 let testWriter = SubagentDefinition(
     name: "test-writer",
     instructions: Instructions("You write comprehensive tests"),
-    tools: .only(["file_read", "file_write"])
+    tools: .only(["Read", "Write"])
 )
 
 // Create configuration with subagents
@@ -684,14 +689,14 @@ let config1 = AgentConfiguration(
 // Only specific tools
 let config2 = AgentConfiguration(
     modelProvider: myProvider,
-    tools: .only(["file_read", "file_write", "text_search"]),
+    tools: .only(["Read", "Write", "Grep"]),
     instructions: Instructions("...")
 )
 
 // Exclude certain tools
 let config3 = AgentConfiguration(
     modelProvider: myProvider,
-    tools: .except(["command_execute", "git_command"]),
+    tools: .except(["Bash", "Git"]),
     instructions: Instructions("...")
 )
 ```
@@ -725,7 +730,7 @@ for entry in response.transcriptEntries {
 
 ## AI Model Integration
 
-SwiftAgent uses OpenFoundationModels for AI model integration, providing a unified interface for multiple AI providers:
+SwiftAgent uses Apple's **FoundationModels** framework by default, leveraging on-device AI capabilities. For development and testing with other LLM providers, you can enable **OpenFoundationModels** by setting `USE_OTHER_MODELS=1`.
 
 ### Dynamic Instructions with InstructionsBuilder
 
@@ -767,9 +772,26 @@ GenerateText(session: session) { input in
 }
 ```
 
-### Using Model Providers
+### Using FoundationModels (Default)
 
-SwiftAgent works with any AI provider through OpenFoundationModels:
+```swift
+import SwiftAgent
+import FoundationModels
+
+let session = LanguageModelSession(
+    model: SystemLanguageModel.default
+) {
+    Instructions("You are a helpful assistant.")
+}
+```
+
+### Using OpenFoundationModels (Optional)
+
+Build with `USE_OTHER_MODELS=1` to use other LLM providers:
+
+```bash
+USE_OTHER_MODELS=1 swift build
+```
 
 ```swift
 import SwiftAgent
@@ -782,9 +804,9 @@ let session = LanguageModelSession(
 }
 ```
 
-### Available Provider Packages
+### Available Provider Packages (OpenFoundationModels)
 
-SwiftAgent is provider-agnostic. Choose from available OpenFoundationModels provider packages:
+When using OpenFoundationModels, choose from available provider packages:
 
 - [OpenFoundationModels-OpenAI](https://github.com/1amageek/OpenFoundationModels-OpenAI) - OpenAI models (GPT-4o, etc.)
 - [OpenFoundationModels-Ollama](https://github.com/1amageek/OpenFoundationModels-Ollama) - Local models via Ollama
@@ -1010,9 +1032,12 @@ Add SwiftAgentMCP to your dependencies:
 
 ### Usage
 
+> **Note**: SwiftAgentMCP requires OpenFoundationModels. Build with `USE_OTHER_MODELS=1`.
+
 ```swift
 import SwiftAgent
 import SwiftAgentMCP
+// Requires USE_OTHER_MODELS=1
 import OpenFoundationModels
 
 // 1. Configure the MCP server
@@ -1557,7 +1582,7 @@ Extract text and tables from PDF files.
 
 ```swift
 import SwiftAgent
-import OpenFoundationModels
+import FoundationModels  // Default, or use OpenFoundationModels with USE_OTHER_MODELS=1
 
 struct Translator: Step {
     @Session var session: LanguageModelSession
@@ -1571,7 +1596,7 @@ struct Translator: Step {
 }
 
 // Usage
-let session = LanguageModelSession(model: myModel) {
+let session = LanguageModelSession(model: SystemLanguageModel.default) {
     Instructions("You are a professional translator")
 }
 
@@ -1690,6 +1715,31 @@ dependencies: [
 
 ### 1. Add SwiftAgent to your Package.swift
 
+**Using FoundationModels (Default)**:
+
+```swift
+import PackageDescription
+
+let package = Package(
+    name: "MyAgentApp",
+    platforms: [.iOS(.v18), .macOS(.v15)],
+    dependencies: [
+        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main")
+    ],
+    targets: [
+        .target(
+            name: "MyAgentApp",
+            dependencies: [
+                .product(name: "SwiftAgent", package: "SwiftAgent"),
+                .product(name: "AgentTools", package: "SwiftAgent")
+            ]
+        )
+    ]
+)
+```
+
+**Using OpenFoundationModels** (for other LLM providers):
+
 ```swift
 import PackageDescription
 
@@ -1714,11 +1764,13 @@ let package = Package(
 )
 ```
 
+Build with: `USE_OTHER_MODELS=1 swift build`
+
 ### 2. Create your first Step
 
 ```swift
 import SwiftAgent
-import OpenFoundationModels
+import FoundationModels  // Default, or OpenFoundationModels with USE_OTHER_MODELS=1
 
 struct MyAssistant: Step {
     @Session var session: LanguageModelSession
@@ -1736,6 +1788,31 @@ struct MyAssistant: Step {
 ```
 
 ### 3. Run your Step
+
+**Using FoundationModels (Default)**:
+
+```swift
+@main
+struct MyApp {
+    static func main() async throws {
+        let session = LanguageModelSession(
+            model: SystemLanguageModel.default
+        ) {
+            Instructions {
+                "You are a helpful assistant"
+                "Be concise and informative"
+            }
+        }
+
+        let result = try await withSession(session) {
+            try await MyAssistant().run("Hello, world!")
+        }
+        print(result)
+    }
+}
+```
+
+**Using OpenFoundationModels**:
 
 ```swift
 @main

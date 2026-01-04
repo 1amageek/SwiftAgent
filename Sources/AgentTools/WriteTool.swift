@@ -27,7 +27,7 @@ public struct WriteTool: Tool {
     public typealias Arguments = WriteInput
     public typealias Output = WriteOutput
 
-    public static let name = "write"
+    public static let name = "Write"
     public var name: String { Self.name }
 
     public static let description = """

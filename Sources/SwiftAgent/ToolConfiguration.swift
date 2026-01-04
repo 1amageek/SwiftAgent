@@ -63,7 +63,7 @@ extension ToolConfiguration {
     /// Predefined tool presets for common use cases.
     public enum ToolPreset: String, Sendable, CaseIterable {
 
-        /// All default tools: Read, Write, Edit, MultiEdit, Grep, Glob, ExecuteCommand, Git, URLFetch
+        /// All default tools: Read, Write, Edit, MultiEdit, Grep, Glob, Bash, Git, WebFetch
         case `default`
 
         /// File operations only: Read, Write, Edit, MultiEdit
@@ -72,7 +72,7 @@ extension ToolConfiguration {
         /// Read-only operations: Read, Grep, Glob
         case readOnly
 
-        /// Development tools: Read, Write, Edit, ExecuteCommand, Git
+        /// Development tools: Read, Write, Edit, Bash, Git
         case development
 
         /// Minimal tools: Read only
@@ -80,53 +80,55 @@ extension ToolConfiguration {
 
         /// Tool names included in this preset.
         ///
-        /// These names correspond to the actual tool names defined in AgentTools module:
-        /// - `file_read`: ReadTool
-        /// - `file_write`: WriteTool
-        /// - `file_edit`: EditTool
-        /// - `file_multi_edit`: MultiEditTool
-        /// - `text_search`: GrepTool
-        /// - `file_pattern`: GlobTool
-        /// - `command_execute`: ExecuteCommandTool
-        /// - `git_command`: GitTool
-        /// - `web_fetch`: URLFetchTool
+        /// These names correspond to the actual tool names defined in AgentTools module,
+        /// following Claude Code naming convention (PascalCase):
+        /// - `Read`: ReadTool
+        /// - `Write`: WriteTool
+        /// - `Edit`: EditTool
+        /// - `MultiEdit`: MultiEditTool
+        /// - `Grep`: GrepTool
+        /// - `Glob`: GlobTool
+        /// - `Bash`: ExecuteCommandTool
+        /// - `Git`: GitTool
+        /// - `WebFetch`: URLFetchTool
+        /// - `WebSearch`: WebSearchTool
         public var toolNames: [String] {
             switch self {
             case .default:
                 return [
-                    "file_read",
-                    "file_write",
-                    "file_edit",
-                    "file_multi_edit",
-                    "text_search",
-                    "file_pattern",
-                    "command_execute",
-                    "git_command",
-                    "web_fetch"
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "MultiEdit",
+                    "Grep",
+                    "Glob",
+                    "Bash",
+                    "Git",
+                    "WebFetch"
                 ]
             case .fileOnly:
                 return [
-                    "file_read",
-                    "file_write",
-                    "file_edit",
-                    "file_multi_edit"
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "MultiEdit"
                 ]
             case .readOnly:
                 return [
-                    "file_read",
-                    "text_search",
-                    "file_pattern"
+                    "Read",
+                    "Grep",
+                    "Glob"
                 ]
             case .development:
                 return [
-                    "file_read",
-                    "file_write",
-                    "file_edit",
-                    "command_execute",
-                    "git_command"
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "Bash",
+                    "Git"
                 ]
             case .minimal:
-                return ["file_read"]
+                return ["Read"]
             }
         }
     }

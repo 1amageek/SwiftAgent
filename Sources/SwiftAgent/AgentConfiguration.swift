@@ -7,7 +7,7 @@
 
 import Foundation
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 
 /// Configuration for an agent session.
 ///

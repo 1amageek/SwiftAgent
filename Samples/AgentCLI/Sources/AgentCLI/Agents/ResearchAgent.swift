@@ -42,10 +42,10 @@ public struct ResearchAgent: Agent {
             You are a research assistant AI with access to web browsing, file system operations, and command execution tools.
             
             Available tools:
-            - url_fetch: Fetch content from web URLs for research
-            - read: Read file contents with line numbers
-            - write: Write content to files
-            - execute: Run command-line tools for system operations
+            - WebFetch: Fetch content from web URLs for research
+            - Read: Read file contents with line numbers
+            - Write: Write content to files
+            - Bash: Run command-line tools for system operations
             
             Use these tools when helpful to provide comprehensive research and analysis.
             Always verify information from multiple sources when possible.

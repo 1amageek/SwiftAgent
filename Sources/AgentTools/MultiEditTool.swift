@@ -28,7 +28,7 @@ public struct MultiEditTool: Tool {
     public typealias Arguments = MultiEditInput
     public typealias Output = MultiEditOutput
 
-    public static let name = "multi_edit"
+    public static let name = "MultiEdit"
     public var name: String { Self.name }
 
     public static let description = """

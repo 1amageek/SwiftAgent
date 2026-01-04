@@ -35,7 +35,7 @@ public struct GrepTool: Tool {
     public typealias Arguments = GrepInput
     public typealias Output = GrepOutput
 
-    public static let name = "grep"
+    public static let name = "Grep"
     public var name: String { Self.name }
 
     /// Supported output modes

@@ -7,10 +7,40 @@
 
 import Foundation
 
-/// A step that executes multiple child steps in parallel.
+/// A step that executes multiple child steps in parallel and collects successful results.
 ///
-/// `Parallel` allows for concurrent execution of multiple steps that share the same input
-/// type and output type. The results are collected into an array in the order the steps complete.
+/// `Parallel` implements a **best-effort** strategy: it collects all successful results
+/// while tolerating individual step failures. This is ideal for data aggregation and
+/// resilient processing patterns.
+///
+/// ## Use Cases
+///
+/// ### Data Aggregation
+/// ```swift
+/// let parallel = Parallel<Query, SearchResult> {
+///     SearchGitHub()              // May be temporarily down
+///     SearchStackOverflow()
+///     SearchDocumentation()
+/// }
+/// // Returns results from successful sources, even if GitHub fails
+/// ```
+///
+/// ### Best-Effort Processing
+/// ```swift
+/// let parallel = Parallel<[URL], ResizedImage> {
+///     ResizeImage(size: .thumbnail)
+///     ResizeImage(size: .medium)
+///     ResizeImage(size: .large)
+/// }
+/// // Processes all valid images, skips corrupted ones
+/// ```
+///
+/// ## Behavior
+/// - Executes all steps concurrently
+/// - Collects all **successful** results
+/// - Continues even if some steps fail
+/// - Only throws if **all** steps fail
+/// - Results are returned in completion order (not declaration order)
 ///
 /// Example:
 /// ```swift
@@ -32,37 +62,64 @@ public struct Parallel<Input: Sendable, ElementOutput: Sendable>: Step {
         self.steps = builder()
     }
     
+    /// Runs all steps concurrently and collects successful results.
+    ///
+    /// This method implements a **best-effort** strategy:
+    /// - Executes all steps in parallel
+    /// - Collects all successful results
+    /// - Tolerates individual step failures
+    /// - Only throws if all steps fail
+    ///
+    /// - Parameter input: The input to pass to each step.
+    /// - Returns: An array of successful outputs (in completion order).
+    /// - Throws:
+    ///   - `ParallelError.allStepsFailed` if all steps fail.
+    ///   - `ParallelError.noResults` if no steps were provided.
     @discardableResult
     public func run(_ input: Input) async throws -> [ElementOutput] {
-        try await withThrowingTaskGroup(of: ElementOutput.self) { group in
-            var results: [ElementOutput] = []
-            var collectedErrors: [Error] = []
-            
+        // Use Result to capture both successes and failures without throwing
+        let outcome: Result<[ElementOutput], Error> = await withTaskGroup(
+            of: Result<ElementOutput, Error>.self
+        ) { group in
             // Launch all steps in parallel
             for step in steps {
                 group.addTask { @Sendable in
-                    try await step.run(input)
+                    do {
+                        let output = try await step.run(input)
+                        return .success(output)
+                    } catch {
+                        return .failure(error)
+                    }
                 }
             }
-            
-            // Collect results as they complete
-            do {
-                for try await result in group {
-                    results.append(result)
+
+            var results: [ElementOutput] = []
+            var errors: [Error] = []
+
+            // Collect all results, separating successes from failures
+            for await result in group {
+                switch result {
+                case .success(let output):
+                    results.append(output)
+                case .failure(let error):
+                    errors.append(error)
                 }
-            } catch {
-                collectedErrors.append(error)
             }
-            
-            // Only throw if all steps failed
-            guard !results.isEmpty else {
-                throw collectedErrors.isEmpty
-                ? ParallelError.noResults
-                : ParallelError.allStepsFailed(collectedErrors)
+
+            // Return partial results if any succeeded
+            if !results.isEmpty {
+                return .success(results)
             }
-            
-            return results
+
+            // All steps failed
+            return .failure(
+                errors.isEmpty
+                    ? ParallelError.noResults
+                    : ParallelError.allStepsFailed(errors)
+            )
         }
+
+        return try outcome.get()
     }
 }
 

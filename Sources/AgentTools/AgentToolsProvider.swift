@@ -22,7 +22,7 @@ import SwiftAgent
 /// let tools = provider.tools(for: ToolConfiguration.ToolPreset.default.toolNames)
 ///
 /// // Get a specific tool
-/// if let readTool = provider.tool(named: "file_read") {
+/// if let readTool = provider.tool(named: "Read") {
 ///     // Use the tool
 /// }
 /// ```
@@ -55,34 +55,34 @@ public struct AgentToolsProvider: ToolProvider {
 
     public func tool(named name: String) -> (any Tool)? {
         switch name {
-        case "read":
+        case "Read":
             return ReadTool(workingDirectory: workingDirectory)
 
-        case "write":
+        case "Write":
             return WriteTool(workingDirectory: workingDirectory)
 
-        case "edit":
+        case "Edit":
             return EditTool(workingDirectory: workingDirectory)
 
-        case "multi_edit":
+        case "MultiEdit":
             return MultiEditTool(workingDirectory: workingDirectory)
 
-        case "grep":
+        case "Grep":
             return GrepTool(workingDirectory: workingDirectory)
 
-        case "glob":
+        case "Glob":
             return GlobTool(workingDirectory: workingDirectory)
 
-        case "bash":
+        case "Bash":
             return ExecuteCommandTool(workingDirectory: workingDirectory)
 
-        case "git":
+        case "Git":
             return GitTool()
 
-        case "url_fetch":
+        case "WebFetch":
             return URLFetchTool()
 
-        case "web_search":
+        case "WebSearch":
             if let provider = searchProvider {
                 return WebSearchTool(provider: provider)
             }
@@ -103,16 +103,16 @@ public struct AgentToolsProvider: ToolProvider {
 
     /// All tool names available in AgentTools.
     public static let allToolNames: [String] = [
-        "read",       // ReadTool
-        "write",      // WriteTool
-        "edit",       // EditTool
-        "multi_edit", // MultiEditTool
-        "grep",       // GrepTool
-        "glob",       // GlobTool
-        "bash",       // ExecuteCommandTool
-        "git",        // GitTool
-        "url_fetch",  // URLFetchTool
-        "web_search"  // WebSearchTool
+        "Read",       // ReadTool
+        "Write",      // WriteTool
+        "Edit",       // EditTool
+        "MultiEdit",  // MultiEditTool
+        "Grep",       // GrepTool
+        "Glob",       // GlobTool
+        "Bash",       // ExecuteCommandTool
+        "Git",        // GitTool
+        "WebFetch",   // URLFetchTool
+        "WebSearch"   // WebSearchTool
     ]
 }
 

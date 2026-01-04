@@ -36,7 +36,7 @@ public struct ExecuteCommandTool: Tool {
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
 
-    public static let name = "bash"
+    public static let name = "Bash"
     public var name: String { Self.name }
 
     /// Default timeout in seconds

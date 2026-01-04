@@ -9,7 +9,7 @@ import Testing
 import Foundation
 @testable import SwiftAgent
 
-#if USE_FOUNDATION_MODELS
+#if !USE_OTHER_MODELS
 import FoundationModels
 
 // MARK: - LanguageModelSession Tests

@@ -28,7 +28,7 @@ public struct GitTool: Tool {
     public typealias Arguments = GitInput
     public typealias Output = GitOutput
 
-    public static let name = "git"
+    public static let name = "Git"
     public var name: String { Self.name }
 
     public static let description = """

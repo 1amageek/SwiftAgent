@@ -3,7 +3,7 @@ import Foundation
 import SwiftAgent
 @testable import AgentTools
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 import OpenFoundationModels
 
 // MARK: - Test Helpers
@@ -102,28 +102,28 @@ struct AgentsTests {
     @Test("ReadTool Creation")
     func readToolCreation() async throws {
         let tool = ReadTool(workingDirectory: "/tmp")
-        #expect(tool.name == "read")
+        #expect(tool.name == "Read")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("GitTool Creation")
     func gitToolCreation() async throws {
         let tool = GitTool()
-        #expect(tool.name == "git")
+        #expect(tool.name == "Git")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("URLFetchTool Creation")
     func urlFetchToolCreation() async throws {
         let tool = URLFetchTool()
-        #expect(tool.name == "url_fetch")
+        #expect(tool.name == "WebFetch")
         #expect(!tool.description.isEmpty)
     }
 
     @Test("ExecuteCommandTool Creation")
     func executeCommandToolCreation() async throws {
         let tool = ExecuteCommandTool()
-        #expect(tool.name == "bash")
+        #expect(tool.name == "Bash")
         #expect(!tool.description.isEmpty)
     }
 

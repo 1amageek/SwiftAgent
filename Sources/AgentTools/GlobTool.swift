@@ -29,7 +29,7 @@ public struct GlobTool: Tool {
     public typealias Arguments = GlobInput
     public typealias Output = GlobOutput
 
-    public static let name = "glob"
+    public static let name = "Glob"
     public var name: String { Self.name }
 
     public static let description = """

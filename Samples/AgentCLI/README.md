@@ -110,9 +110,9 @@ Equipped with tools for web browsing, file operations, and command execution.
 ```
 
 **Available Tools:**
-- `url_fetch`: Fetch content from web URLs
-- `filesystem`: Read/write files and directories
-- `execute`: Run command-line tools
+- `WebFetch`: Fetch content from web URLs
+- `Read`/`Write`: Read/write files
+- `Bash`: Run command-line tools
 
 ### Analysis Agent
 Provides structured analysis with key insights, recommendations, and confidence levels.

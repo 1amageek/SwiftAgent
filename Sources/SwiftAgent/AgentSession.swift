@@ -7,7 +7,7 @@
 
 import Foundation
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 
 /// An agent session that manages conversations and tool execution.
 ///

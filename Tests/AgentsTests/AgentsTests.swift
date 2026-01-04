@@ -3,7 +3,7 @@ import Testing
 @testable import AgentTools
 import Foundation
 
-#if !USE_FOUNDATION_MODELS
+#if USE_OTHER_MODELS
 import OpenFoundationModels
 
 @Suite("Agents Tests")

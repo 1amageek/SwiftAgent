@@ -4,9 +4,10 @@
 import PackageDescription
 import Foundation
 
-// Set USE_FOUNDATION_MODELS=1 to use Apple's FoundationModels instead of OpenFoundationModels
-// Example: USE_FOUNDATION_MODELS=1 swift build
-let useFoundationModels = ProcessInfo.processInfo.environment["USE_FOUNDATION_MODELS"] != nil
+// By default, SwiftAgent uses Apple's FoundationModels framework.
+// Set USE_OTHER_MODELS=1 to use OpenFoundationModels for development/testing with other LLM providers.
+// Example: USE_OTHER_MODELS=1 swift build
+let useOtherModels = ProcessInfo.processInfo.environment["USE_OTHER_MODELS"] != nil
 
 let package = Package(
     name: "SwiftAgent",
@@ -40,8 +41,8 @@ let package = Package(
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime")
-            ] + (useFoundationModels ? [] : [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")]),
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .target(
             name: "SwiftAgentSymbio",
@@ -50,7 +51,7 @@ let package = Package(
                 .product(name: "Discovery", package: "swift-discovery"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime")
             ],
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .target(
             name: "SwiftAgentMCP",
@@ -58,30 +59,30 @@ let package = Package(
                 "SwiftAgent",
                 .product(name: "MCP", package: "swift-sdk")
             ],
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .target(
             name: "AgentTools",
             dependencies: [
                 "SwiftAgent"
-            ] + (useFoundationModels ? [] : [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")]),
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(
             name: "SwiftAgentTests",
             dependencies: [
                 "SwiftAgent",
                 "AgentTools"
-            ] + (useFoundationModels ? [] : [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")]),
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(
             name: "AgentsTests",
             dependencies: [
                 "SwiftAgent",
                 "AgentTools"
-            ] + (useFoundationModels ? [] : [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")]),
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(
             name: "SwiftAgentSymbioTests",
@@ -89,7 +90,7 @@ let package = Package(
                 "SwiftAgent",
                 "SwiftAgentSymbio"
             ],
-            swiftSettings: useFoundationModels ? [.define("USE_FOUNDATION_MODELS")] : []
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
     ]
 )

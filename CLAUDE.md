@@ -1,6 +1,8 @@
 # SwiftAgent
 
-OpenFoundationModelsを基盤とした型安全で宣言的なAIエージェントフレームワーク。
+Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェントフレームワーク。
+
+> **Note**: デフォルトはApple FoundationModelsを使用。`USE_OTHER_MODELS=1` で OpenFoundationModels に切り替え可能。
 
 ## コア概念
 
@@ -369,7 +371,7 @@ LLM → ReplicateTool.call() → Replicable.replicate() → Community.spawn()
 
 **ReplicateTool:**
 ```swift
-public struct ReplicateTool: OpenFoundationModels.Tool {
+public struct ReplicateTool: Tool {
     public static let name = "replicate_agent"
 
     private let agent: any Replicable
@@ -449,10 +451,100 @@ final class SymbioActorSystem: DistributedActorSystem {
 - `swift-actor-runtime`: ActorRegistry、InvocationEncoder/Decoder、ResultHandler
 - `swift-discovery`: PeerConnector、Transport、CapabilityID
 
+## AgentTools
+
+Claude Code スタイルのツール名を採用。
+
+| ツール名 | 説明 |
+|---------|------|
+| `Read` | ファイル読み込み |
+| `Write` | ファイル書き込み |
+| `Edit` | ファイル編集（文字列置換） |
+| `MultiEdit` | 複数編集のアトミック適用 |
+| `Glob` | ファイルパターン検索 |
+| `Grep` | 正規表現による内容検索 |
+| `Bash` | シェルコマンド実行 |
+| `Git` | Git操作 |
+| `WebFetch` | URL内容取得 |
+| `WebSearch` | Web検索 |
+
+```swift
+// ツールプロバイダーの使用
+let provider = AgentToolsProvider(workingDirectory: "/path/to/work")
+let tools = provider.allTools()
+
+// 特定のツールを取得
+if let readTool = provider.tool(named: "Read") {
+    // ...
+}
+
+// プリセットの使用
+let defaultTools = provider.tools(for: ToolConfiguration.ToolPreset.default.toolNames)
+```
+
+## Race / Parallel 設計
+
+### Race: 成功優先戦略
+
+複数のステップを並列実行し、**最初の成功**を返す。フォールバック・冗長性パターンに最適。
+
+```swift
+// 複数APIへのフォールバック
+let race = Race<URL, Data> {
+    FetchFromPrimaryServer()    // メインサーバー（時々ダウン）
+    FetchFromMirrorServer()     // ミラー（遅いが安定）
+    FetchFromCDN()              // CDN（キャッシュがあれば高速）
+}
+// → 最初に成功した結果を返す。全て失敗した場合のみエラー
+
+// タイムアウト付き
+let race = Race<String, String>(timeout: .seconds(30)) {
+    GenerateWithOpenAI()
+    GenerateWithLocal()
+}
+```
+
+**動作:**
+- 最初の**成功**結果を返す
+- 失敗したステップは無視して他を待つ
+- **全て**失敗した場合のみエラーをスロー
+- 成功が見つかったら残りをキャンセル
+- タイムアウトは即座に失敗
+
+### Parallel: ベストエフォート戦略
+
+複数のステップを並列実行し、**成功した結果を全て収集**。データ集約パターンに最適。
+
+```swift
+// 複数ソースからのデータ集約
+let parallel = Parallel<Query, SearchResult> {
+    SearchGitHub()              // 一時的にダウンすることがある
+    SearchStackOverflow()
+    SearchDocumentation()
+}
+// → 成功した結果を全て返す。GitHubが失敗しても他の結果は返る
+
+// 画像処理
+let parallel = Parallel<URL, ResizedImage> {
+    ResizeImage(size: .thumbnail)
+    ResizeImage(size: .medium)
+    ResizeImage(size: .large)
+}
+// → 1つが壊れた画像で失敗しても、他は処理される
+```
+
+**動作:**
+- 全ステップを並列実行
+- 成功した結果を**全て**収集
+- 一部が失敗しても成功分を返す
+- **全て**失敗した場合のみ `ParallelError.allStepsFailed` をスロー
+- 結果は完了順（宣言順ではない）
+
 ## 依存関係
 
 ```
-                    OpenFoundationModels
+                    FoundationModels (default)
+                    OpenFoundationModels (USE_OTHER_MODELS=1)
                            ↓
                        SwiftAgent
                       ↙    ↓    ↘
@@ -463,6 +555,18 @@ final class SymbioActorSystem: DistributedActorSystem {
                                    swift-discovery
 ```
 
+## ビルド
+
+```bash
+# デフォルト (Apple FoundationModels)
+swift build
+
+# OpenFoundationModels を使用（開発/テスト用）
+USE_OTHER_MODELS=1 swift build
+USE_OTHER_MODELS=1 swift test
+```
+
 ## 参考リンク
-- [OpenFoundationModels DeepWiki](https://deepwiki.com/1amageek/OpenFoundationModels)
+- [FoundationModels (Apple)](https://developer.apple.com/documentation/foundationmodels)
+- [OpenFoundationModels](https://github.com/1amageek/OpenFoundationModels)
 - [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk)

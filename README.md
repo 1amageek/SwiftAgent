@@ -91,6 +91,20 @@ graph TB
         URLFetchTool["URLFetchTool"]
     end
 
+    subgraph "Permission"
+        PermissionConfig["PermissionConfiguration"]
+        PermissionMiddleware["PermissionMiddleware"]
+        PermissionRule["PermissionRule"]
+        PermissionHandler["PermissionHandler"]
+    end
+
+    subgraph "Sandbox (macOS)"
+        SandboxConfig["SandboxExecutor.Configuration"]
+        SandboxMiddleware["SandboxMiddleware"]
+        SandboxExecutor["SandboxExecutor"]
+        SandboxContext["SandboxContext"]
+    end
+
     subgraph "MCP Integration (SwiftAgentMCP)"
         MCPClient["MCPClient"]
         MCPDynamicTool["MCPDynamicTool"]
@@ -166,6 +180,15 @@ graph TB
     Communicable --> Community
     Communicable -.-> Replicable
     SymbioActorSystem --> PeerConnector
+
+    PermissionConfig --> PermissionRule
+    PermissionConfig --> PermissionHandler
+    PermissionMiddleware --> PermissionConfig
+
+    SandboxMiddleware --> SandboxConfig
+    SandboxMiddleware --> SandboxContext
+    SandboxExecutor --> SandboxConfig
+    ExecuteCommandTool -.-> SandboxContext
 ```
 
 ## Features
@@ -193,6 +216,8 @@ graph TB
 - **Model Providers**: Flexible model configuration with provider abstraction
 - **Agent Skills**: Portable skill packages with auto-discovery and progressive disclosure
 - **Distributed Agents**: SwiftAgentSymbio for multi-agent communication using Swift Distributed Actors
+- **Permission**: Rule-based tool access control (allow/deny/ask)
+- **Sandbox**: macOS sandbox for command execution (file/network restrictions)
 
 ## Core Components
 
@@ -1014,7 +1039,17 @@ let session = LanguageModelSession(
 
 ## SwiftAgentMCP
 
-SwiftAgentMCP provides optional MCP (Model Context Protocol) integration for SwiftAgent, enabling use of tools from MCP servers.
+SwiftAgentMCP provides optional MCP (Model Context Protocol) integration for SwiftAgent, enabling use of tools from MCP servers. The implementation is compatible with Claude Code's MCP conventions.
+
+### Features
+
+- **Claude Code compatible**: Tool names use `mcp__servername__toolname` format
+- **Configuration file support**: Load from `.mcp.json` files with `${VAR}` expansion
+- **Multiple server management**: Connect to multiple MCP servers via `MCPClientManager`
+- **Transport options**: stdio, HTTP, SSE (Server-Sent Events)
+- **Authentication**: OAuth 2.0, Bearer token, Basic auth with proactive token refresh
+- **Timeout configuration**: Configurable startup and tool execution timeouts
+- **Server enable/disable**: Dynamically enable or disable servers
 
 ### Installation
 
@@ -1030,44 +1065,125 @@ Add SwiftAgentMCP to your dependencies:
 )
 ```
 
-### Usage
+### Quick Start with Configuration File
 
-> **Note**: SwiftAgentMCP requires OpenFoundationModels. Build with `USE_OTHER_MODELS=1`.
+Create a `.mcp.json` file in your project or `~/.config/claude/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"],
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+    },
+    "slack": {
+      "url": "https://slack-mcp.example.com/sse",
+      "transport": "sse",
+      "auth": {
+        "type": "bearer",
+        "token": "${SLACK_TOKEN}"
+      }
+    }
+  }
+}
+```
 
 ```swift
 import SwiftAgent
 import SwiftAgentMCP
-// Requires USE_OTHER_MODELS=1
-import OpenFoundationModels
 
-// 1. Configure the MCP server
+// Load from .mcp.json (searches ./.mcp.json then ~/.config/claude/.mcp.json)
+let manager = try await MCPClientManager.loadDefault()
+
+// Get all tools from all connected servers
+let tools = try await manager.allTools()
+// Tool names: mcp__github__get_issue, mcp__slack__send_message, etc.
+
+// Use with LanguageModelSession
+let session = LanguageModelSession(model: myModel, tools: tools) {
+    Instructions("You are a helpful assistant")
+}
+
+// Server management
+await manager.disable(serverName: "slack")
+await manager.enable(serverName: "slack")
+
+// Cleanup
+await manager.disconnectAll()
+```
+
+### Manual Configuration
+
+```swift
+// Create manager
+let manager = MCPClientManager()
+
+// Connect to a stdio server
+try await manager.connect(config: MCPServerConfig(
+    name: "github",
+    transport: .stdio(
+        command: "docker",
+        arguments: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"],
+        environment: ["GITHUB_TOKEN": "..."]
+    )
+))
+
+// Connect to an SSE server
+try await manager.connect(config: MCPServerConfig(
+    name: "slack",
+    transport: .sse(
+        endpoint: URL(string: "https://slack-mcp.example.com/sse")!,
+        headers: ["Authorization": "Bearer ..."]
+    )
+))
+```
+
+### Single Server Usage
+
+For simple cases with a single server:
+
+```swift
 let config = MCPServerConfig(
     name: "filesystem",
     transport: .stdio(
         command: "/usr/local/bin/npx",
         arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-    )
+    ),
+    timeout: MCPTimeoutConfig(startup: .seconds(60), toolExecution: .seconds(300))
 )
 
-// 2. Connect to the MCP server
 let mcpClient = try await MCPClient.connect(config: config)
 defer { Task { await mcpClient.disconnect() } }
 
-// 3. Get tools from the MCP server (OpenFoundationModels.Tool compatible)
 let mcpTools = try await mcpClient.tools()
+```
 
-// 4. Use with LanguageModelSession
-let session = LanguageModelSession(
-    model: myModel,
-    tools: mcpTools
-) {
-    Instructions("You are a helpful assistant with file system access")
-}
+### Transport Options
 
-// 5. Use in your Steps
-try await withSession(session) {
-    try await MyFileStep().run("List all Swift files")
-}
+| Transport | Config | MCP SDK |
+|-----------|--------|---------|
+| stdio | `command`, `args`, `env` | `StdioTransport` |
+| HTTP | `url`, `transport: "http"` | `HTTPClientTransport(streaming: false)` |
+| SSE | `url`, `transport: "sse"` | `HTTPClientTransport(streaming: true)` |
+
+### Timeout Configuration
+
+Configure via environment variables or JSON:
+
+| Setting | Environment Variable | JSON Field | Default |
+|---------|---------------------|------------|---------|
+| Startup | `MCP_TIMEOUT` | `timeout` | 30s |
+| Tool Execution | `MCP_TOOL_TIMEOUT` | `toolTimeout` | 120s |
+
+### Permission Integration
+
+MCP tool names follow the format `mcp__servername__toolname`, enabling per-server permission rules:
+
+```swift
+let security = SecurityConfiguration.standard
+    .allowing(.mcp("github"))      // Allow all GitHub tools (mcp__github__*)
+    .denying(.mcp("filesystem"))   // Deny filesystem tools (mcp__filesystem__*)
 ```
 
 ### MCP Resources and Prompts
@@ -1083,6 +1199,21 @@ let (description, messages) = try await mcpClient.getPrompt(
     name: "code_review",
     arguments: ["language": "swift"]
 )
+```
+
+### Server Status
+
+```swift
+// Check server status
+let statuses = await manager.serverStatuses()
+for status in statuses {
+    print("\(status.name): connected=\(status.isConnected), enabled=\(status.isEnabled)")
+}
+
+// Get specific client
+if let githubClient = await manager.client(named: "github") {
+    let tools = try await githubClient.tools()
+}
 ```
 
 ## SwiftAgentSymbio
@@ -1834,6 +1965,127 @@ struct MyApp {
     }
 }
 ```
+
+## Permission
+
+Permission controls **which tools** can be executed. It evaluates rules before any tool runs.
+
+```swift
+let config = PermissionConfiguration(
+    allow: [.tool("Read"), .bash("git:*")],
+    deny: [.bash("rm -rf:*"), .bash("sudo:*")],
+    defaultAction: .ask,
+    handler: CLIPermissionHandler()
+)
+```
+
+### Rule Evaluation
+
+```
+Tool Request → Session Memory → Allow Rules → Deny Rules → Default Action
+                    ↓                ↓            ↓              ↓
+               (if cached)      (permit)      (reject)     (allow/deny/ask)
+```
+
+### Pattern Syntax
+
+| Pattern | Matches |
+|---------|---------|
+| `"Read"` | Read tool |
+| `"Bash(git:*)"` | git commands |
+| `"Write(/tmp/*)"` | Writes under /tmp/ |
+| `"mcp__*"` | All MCP tools |
+
+Patterns are **case-sensitive**.
+
+### File-based Configuration
+
+```swift
+// Load from JSON
+let config = try PermissionConfiguration.load(from: url)
+
+// Merge (later takes precedence, duplicates removed)
+let merged = base.merged(with: override)
+```
+
+See [docs/SECURITY.md](docs/SECURITY.md) for JSON format.
+
+## Sandbox
+
+Sandbox controls **how commands** are executed. It restricts file and network access for `Bash`/`ExecuteCommand` tools. **macOS only**.
+
+```swift
+let config = SandboxExecutor.Configuration(
+    networkPolicy: .local,
+    filePolicy: .workingDirectoryOnly,
+    allowSubprocesses: true
+)
+```
+
+### Policies
+
+| Network | Access |
+|---------|--------|
+| `.none` | No network |
+| `.local` | localhost only |
+| `.full` | Unrestricted |
+
+| File | Read | Write |
+|------|:----:|:-----:|
+| `.readOnly` | All | None |
+| `.workingDirectoryOnly` | All | Working dir + /tmp |
+| `.custom(read:write:)` | Specified paths | Specified paths |
+
+## Combining Permission and Sandbox
+
+`withSecurity` applies both Permission and Sandbox as middleware:
+
+```swift
+// Using presets
+let config = AgentConfiguration(...)
+    .withSecurity(.standard)
+
+// Custom configuration
+let security = SecurityConfiguration(
+    permissions: PermissionConfiguration(
+        allow: [.tool("Read"), .bash("git:*")],
+        deny: [.bash("sudo:*")],
+        defaultAction: .ask,
+        handler: CLIPermissionHandler()
+    ),
+    sandbox: SandboxExecutor.Configuration(
+        networkPolicy: .local,
+        filePolicy: .workingDirectoryOnly
+    )
+)
+let config = AgentConfiguration(...).withSecurity(security)
+```
+
+### Presets
+
+| Preset | Permission | Sandbox |
+|--------|------------|---------|
+| `.standard` | Interactive (ask) | Local network, working dir write |
+| `.development` | Permissive | None |
+| `.restrictive` | Minimal | No network, read-only |
+| `.readOnly` | Read tools only | None |
+
+### Execution Flow
+
+```
+Tool Request
+    │
+    ▼
+PermissionMiddleware ── deny ──→ PermissionDenied
+    │ allow
+    ▼
+SandboxMiddleware (injects config via @Context)
+    │
+    ▼
+Tool Execution (reads config via @OptionalContext)
+```
+
+For detailed documentation, see [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Advanced Features
 

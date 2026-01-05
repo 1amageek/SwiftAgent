@@ -22,7 +22,56 @@ public enum MCPTransportConfig: Sendable {
     )
 
     /// HTTP transport - communicate with a remote server
-    case http(endpoint: URL)
+    case http(
+        endpoint: URL,
+        headers: [String: String] = [:]
+    )
+
+    /// SSE (Server-Sent Events) transport - for real-time bidirectional communication
+    case sse(
+        endpoint: URL,
+        headers: [String: String] = [:],
+        autoReconnect: Bool = true
+    )
+}
+
+// MARK: - Timeout Configuration
+
+/// Timeout configuration for MCP operations
+public struct MCPTimeoutConfig: Sendable {
+
+    /// Server startup timeout (default: 30 seconds)
+    public let startup: Duration
+
+    /// Tool execution timeout (default: 120 seconds)
+    public let toolExecution: Duration
+
+    /// Default timeout configuration
+    public static let `default` = MCPTimeoutConfig(
+        startup: .seconds(30),
+        toolExecution: .seconds(120)
+    )
+
+    public init(startup: Duration, toolExecution: Duration) {
+        self.startup = startup
+        self.toolExecution = toolExecution
+    }
+
+    /// Load timeout configuration from environment variables
+    ///
+    /// - `MCP_TIMEOUT`: Server startup timeout in milliseconds
+    /// - `MCP_TOOL_TIMEOUT`: Tool execution timeout in milliseconds
+    public static func fromEnvironment() -> MCPTimeoutConfig {
+        let startup = ProcessInfo.processInfo.environment["MCP_TIMEOUT"]
+            .flatMap { Int($0) }
+            .map { Duration.milliseconds($0) } ?? .seconds(30)
+
+        let tool = ProcessInfo.processInfo.environment["MCP_TOOL_TIMEOUT"]
+            .flatMap { Int($0) }
+            .map { Duration.milliseconds($0) } ?? .seconds(120)
+
+        return MCPTimeoutConfig(startup: startup, toolExecution: tool)
+    }
 }
 
 /// Configuration for an MCP server
@@ -33,13 +82,28 @@ public struct MCPServerConfig: Sendable {
     /// Transport configuration
     public let transport: MCPTransportConfig
 
+    /// Authentication configuration (optional)
+    public let auth: MCPConfiguration.MCPAuthConfig?
+
+    /// Timeout configuration (optional)
+    public let timeout: MCPTimeoutConfig?
+
     /// Creates a new MCP server configuration
     /// - Parameters:
     ///   - name: Unique name for this server
     ///   - transport: Transport configuration
-    public init(name: String, transport: MCPTransportConfig) {
+    ///   - auth: Authentication configuration (optional)
+    ///   - timeout: Timeout configuration (optional)
+    public init(
+        name: String,
+        transport: MCPTransportConfig,
+        auth: MCPConfiguration.MCPAuthConfig? = nil,
+        timeout: MCPTimeoutConfig? = nil
+    ) {
         self.name = name
         self.transport = transport
+        self.auth = auth
+        self.timeout = timeout
     }
 }
 
@@ -49,6 +113,7 @@ public struct MCPServerConfig: Sendable {
 public actor MCPClient {
     private let config: MCPServerConfig
     private let client: Client
+    private let timeoutConfig: MCPTimeoutConfig
     private var process: Process?
     private var transport: (any Transport)?
     private var isConnected: Bool = false
@@ -59,6 +124,7 @@ public actor MCPClient {
     private init(config: MCPServerConfig) {
         self.config = config
         self.client = Client(name: SwiftAgent.Info.name, version: SwiftAgent.Info.version)
+        self.timeoutConfig = config.timeout ?? MCPTimeoutConfig.fromEnvironment()
     }
 
     /// Connects to an MCP server using the provided configuration
@@ -70,8 +136,33 @@ public actor MCPClient {
         return mcpClient
     }
 
-    /// Establishes connection to the MCP server
+    /// Establishes connection to the MCP server with timeout
     private func establishConnection() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            // Connection task
+            group.addTask {
+                try await self.connectTransport()
+            }
+
+            // Timeout task
+            group.addTask {
+                try await Task.sleep(for: self.timeoutConfig.startup)
+                throw MCPClientError.connectionTimeout
+            }
+
+            // Wait for first to complete (success or timeout)
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+
+    /// Connects via the configured transport
+    private func connectTransport() async throws {
         switch config.transport {
         case .stdio(let command, let arguments, let environment, let workingDirectory):
             try await connectViaStdio(
@@ -80,8 +171,10 @@ public actor MCPClient {
                 environment: environment,
                 workingDirectory: workingDirectory
             )
-        case .http(let endpoint):
-            try await connectViaHTTP(endpoint: endpoint)
+        case .http(let endpoint, let headers):
+            try await connectViaHTTP(endpoint: endpoint, headers: headers)
+        case .sse(let endpoint, let headers, _):
+            try await connectViaSSE(endpoint: endpoint, headers: headers)
         }
     }
 
@@ -150,9 +243,35 @@ public actor MCPClient {
         isConnected = true
     }
 
-    /// Connects via HTTP transport
-    private func connectViaHTTP(endpoint: URL) async throws {
-        let transport = HTTPClientTransport(endpoint: endpoint)
+    /// Connects via HTTP transport (standard request-response mode)
+    ///
+    /// - Note: Custom headers are currently not supported by the MCP SDK's HTTPClientTransport.
+    ///   This is a known limitation. For OAuth authentication, consider using bearer tokens
+    ///   configured through the MCP server's native authentication mechanism.
+    private func connectViaHTTP(endpoint: URL, headers: [String: String] = [:]) async throws {
+        // TODO: MCP SDK HTTPClientTransport does not currently support custom headers.
+        // When the SDK adds support, inject headers here for OAuth/bearer auth.
+        // streaming: false = standard HTTP request-response mode
+        let transport = HTTPClientTransport(endpoint: endpoint, streaming: false)
+        self.transport = transport
+
+        try await client.connect(transport: transport)
+        isConnected = true
+    }
+
+    /// Connects via SSE (Server-Sent Events) transport
+    ///
+    /// SSE mode uses HTTPClientTransport with `streaming: true` to enable
+    /// Server-Sent Events for real-time server-pushed updates.
+    ///
+    /// - Note: Custom headers are currently not supported by the MCP SDK's HTTPClientTransport.
+    ///   This is a known limitation. For OAuth authentication, consider using bearer tokens
+    ///   configured through the MCP server's native authentication mechanism.
+    private func connectViaSSE(endpoint: URL, headers: [String: String] = [:]) async throws {
+        // TODO: MCP SDK HTTPClientTransport does not currently support custom headers.
+        // When the SDK adds support, inject headers here for OAuth/bearer auth.
+        // streaming: true = SSE mode for server-pushed events
+        let transport = HTTPClientTransport(endpoint: endpoint, streaming: true)
         self.transport = transport
 
         try await client.connect(transport: transport)
@@ -186,17 +305,41 @@ public actor MCPClient {
         return tools
     }
 
-    /// Calls a tool on the MCP server
+    /// Calls a tool on the MCP server with timeout
     /// - Parameters:
     ///   - name: The name of the tool
     ///   - arguments: The arguments to pass
     /// - Returns: The tool result content and error flag
+    /// - Throws: `MCPClientError.toolCallTimeout` if the tool execution exceeds the timeout
     public func callTool(name: String, arguments: [String: Value]?) async throws -> ([MCP.Tool.Content], Bool) {
         guard isConnected else {
             throw MCPClientError.notConnected
         }
-        let result = try await client.callTool(name: name, arguments: arguments)
-        return (result.content, result.isError ?? false)
+
+        // Execute with timeout
+        return try await withThrowingTaskGroup(of: ([MCP.Tool.Content], Bool).self) { group in
+            // Tool execution task
+            group.addTask {
+                let result = try await self.client.callTool(name: name, arguments: arguments)
+                return (result.content, result.isError ?? false)
+            }
+
+            // Timeout task
+            group.addTask {
+                try await Task.sleep(for: self.timeoutConfig.toolExecution)
+                throw MCPClientError.toolCallTimeout(name)
+            }
+
+            // Wait for first to complete
+            do {
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
     }
 
     /// Lists all available resources from the MCP server
@@ -263,8 +406,13 @@ public actor MCPClient {
 public enum MCPClientError: Error, LocalizedError {
     case notConnected
     case connectionFailed(String)
+    case connectionTimeout
     case toolCallFailed(String, String)
+    case toolCallTimeout(String)
     case processLaunchFailed(String)
+    case serverNotFound(String)
+    case authenticationFailed(String)
+    case reconnectionFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -272,10 +420,20 @@ public enum MCPClientError: Error, LocalizedError {
             return "MCP client is not connected"
         case .connectionFailed(let message):
             return "MCP connection failed: \(message)"
+        case .connectionTimeout:
+            return "MCP connection timed out"
         case .toolCallFailed(let name, let message):
             return "MCP tool '\(name)' call failed: \(message)"
+        case .toolCallTimeout(let name):
+            return "MCP tool '\(name)' call timed out"
         case .processLaunchFailed(let message):
             return "Failed to launch MCP server process: \(message)"
+        case .serverNotFound(let name):
+            return "MCP server '\(name)' not found"
+        case .authenticationFailed(let message):
+            return "MCP authentication failed: \(message)"
+        case .reconnectionFailed(let message):
+            return "MCP reconnection failed: \(message)"
         }
     }
 }

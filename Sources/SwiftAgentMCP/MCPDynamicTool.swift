@@ -18,6 +18,9 @@ public typealias LMTool = FoundationModels.Tool
 // MARK: - MCP Dynamic Tool
 
 /// A dynamic tool that wraps an MCP tool and conforms to Tool protocol
+///
+/// Tool names follow Claude Code convention: `mcp__servername__toolname`
+/// This enables per-server permission rules via `PermissionRule.mcp("servername")`.
 public struct MCPDynamicTool: LMTool, Sendable {
     public typealias Arguments = GeneratedContent
     public typealias Output = String
@@ -28,8 +31,16 @@ public struct MCPDynamicTool: LMTool, Sendable {
     /// The MCP client to use for tool calls
     private let client: MCPClient
 
-    /// The tool name
+    /// The server name for namespacing
+    private let serverName: String
+
+    /// The tool name in Claude Code format: `mcp__servername__toolname`
     public var name: String {
+        "mcp__\(serverName)__\(mcpTool.name)"
+    }
+
+    /// The original tool name without server prefix
+    public var originalName: String {
         mcpTool.name
     }
 
@@ -54,9 +65,11 @@ public struct MCPDynamicTool: LMTool, Sendable {
     /// - Parameters:
     ///   - mcpTool: The MCP tool definition
     ///   - client: The MCP client for making tool calls
-    public init(mcpTool: MCP.Tool, client: MCPClient) {
+    ///   - serverName: The server name for namespacing (used in tool name prefix)
+    public init(mcpTool: MCP.Tool, client: MCPClient, serverName: String) {
         self.mcpTool = mcpTool
         self.client = client
+        self.serverName = serverName
     }
 
     /// Calls the MCP tool with the given arguments
@@ -66,7 +79,8 @@ public struct MCPDynamicTool: LMTool, Sendable {
         // Convert GeneratedContent to [String: Value] for MCP
         let mcpArguments = try convertGeneratedContentToValue(arguments)
 
-        let (content, isError) = try await client.callTool(name: name, arguments: mcpArguments)
+        // Use original tool name (without server prefix) for MCP server call
+        let (content, isError) = try await client.callTool(name: mcpTool.name, arguments: mcpArguments)
 
         // Extract text from Tool.Content enum
         let textContent = content.compactMap { item -> String? in
@@ -296,10 +310,14 @@ public enum MCPToolError: Error, LocalizedError {
 
 extension MCPClient {
     /// Gets all tools from the MCP server as OpenFoundationModels-compatible tools
+    ///
+    /// Tool names are prefixed with server name: `mcp__servername__toolname`
+    ///
     /// - Returns: Array of MCPDynamicTool instances conforming to Tool protocol
     public func tools() async throws -> [MCPDynamicTool] {
         let mcpTools = try await listTools()
-        return mcpTools.map { MCPDynamicTool(mcpTool: $0, client: self) }
+        let serverName = self.name
+        return mcpTools.map { MCPDynamicTool(mcpTool: $0, client: self, serverName: serverName) }
     }
 
     /// Gets all tools from the MCP server as an array of any Tool

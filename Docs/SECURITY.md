@@ -1,10 +1,15 @@
-# Permission Configuration
+# Security Configuration
 
-SwiftAgentのパーミッション設定をJSONファイルで管理するためのドキュメント。
+SwiftAgentのセキュリティ設定（パーミッション＆サンドボックス）のドキュメント。
 
 ## 概要
 
-`PermissionConfiguration`は、ツール実行の許可/拒否ルールを定義します。このライブラリは読み込み・書き出し機能のみを提供し、ファイルの保存場所の決定は利用側プロジェクトの責務です。
+SwiftAgentは2層のセキュリティを提供します：
+
+1. **PermissionConfiguration** - ツール実行の許可/拒否ルール
+2. **SandboxExecutor** - コマンド実行のサンドボックス化（macOS専用）
+
+`PermissionConfiguration`はJSONファイルでの読み込み・書き出しをサポートします。ファイルの保存場所の決定は利用側プロジェクトの責務です。
 
 ## 責務の分離
 
@@ -285,6 +290,87 @@ Tool呼び出し
 | 1 | 初期バージョン |
 
 将来のバージョンで破壊的変更がある場合、`version` フィールドを使用して互換性を管理します。
+
+---
+
+## Sandbox（macOS専用）
+
+コマンド実行をサンドボックス内で制限します。`SandboxMiddleware` が `@Context` を通じて `ExecuteCommandTool` に設定を伝播します。
+
+### SandboxExecutor.Configuration
+
+```swift
+let config = SandboxExecutor.Configuration(
+    networkPolicy: .local,              // ネットワークポリシー
+    filePolicy: .workingDirectoryOnly,  // ファイルアクセスポリシー
+    allowSubprocesses: true             // サブプロセス許可
+)
+```
+
+### NetworkPolicy
+
+| ポリシー | 説明 |
+|---------|------|
+| `.none` | ネットワークアクセス完全拒否 |
+| `.local` | localhost のみ許可 |
+| `.full` | 全ネットワークアクセス許可 |
+
+### FilePolicy
+
+| ポリシー | 読み取り | 書き込み |
+|---------|:--------:|:--------:|
+| `.readOnly` | 全て許可 | 全て拒否 |
+| `.workingDirectoryOnly` | 全て許可 | 作業ディレクトリ + /tmp |
+| `.custom(read:write:)` | 指定パス + システムパス | 指定パス + /tmp |
+
+### プリセット
+
+```swift
+// 標準：ローカルネットワーク、作業ディレクトリへの書き込み
+SandboxExecutor.Configuration.standard
+
+// 制限：ネットワークなし、読み取り専用
+SandboxExecutor.Configuration.restrictive
+```
+
+### タイムアウト
+
+- 最小: 0より大きい値
+- 最大: 86400秒（24時間）
+- デフォルト: 120秒
+
+---
+
+## withSecurity
+
+`AgentConfiguration.withSecurity()` は単なる値の設定ではなく、ミドルウェアをパイプラインに追加する処理を実行します。
+
+```swift
+// 内部動作
+public func withSecurity(_ security: SecurityConfiguration) -> AgentConfiguration {
+    var copy = self
+
+    // パイプラインがなければ作成
+    if copy.toolPipeline == nil {
+        copy.toolPipeline = ToolPipeline()
+    }
+
+    // ミドルウェアを正しい順序で追加
+    copy.toolPipeline?.use(PermissionMiddleware(...))  // 先に権限チェック
+    copy.toolPipeline?.use(SandboxMiddleware(...))     // 次にサンドボックス
+
+    return copy
+}
+```
+
+### プリセット
+
+| プリセット | Permission | Sandbox |
+|-----------|------------|---------|
+| `.standard` | 対話的許可 | 標準サンドボックス |
+| `.development` | 緩い許可 | なし |
+| `.restrictive` | 最小限許可 | 制限的サンドボックス |
+| `.readOnly` | 読み取り専用 | なし |
 
 ---
 

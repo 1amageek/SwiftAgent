@@ -196,13 +196,29 @@ let config = AgentConfiguration(
 ```
 
 ### SwiftAgentMCP
-MCP (Model Context Protocol) 統合モジュール。
+MCP統合モジュール。Claude Code互換。
 
 ```swift
-let mcpClient = try await MCPClient.connect(config: config)
+// 複数サーバー管理
+let manager = try await MCPClientManager.loadDefault()  // .mcp.json から読み込み
+let tools = try await manager.allTools()  // mcp__server__tool 形式
+
+// 単一サーバー
+let mcpClient = try await MCPClient.connect(config: MCPServerConfig(
+    name: "github",
+    transport: .stdio(command: "docker", arguments: ["run", "-i", "ghcr.io/github/github-mcp-server"])
+))
 let mcpTools = try await mcpClient.tools()
-let session = LanguageModelSession(model: model, tools: mcpTools) { Instructions("...") }
+
+// Permission連携
+.allowing(.mcp("github"))  // mcp__github__* を許可
 ```
+
+**ルール:**
+- ツール名形式: `mcp__servername__toolname`
+- 設定ファイル: `.mcp.json`（環境変数 `${VAR}` 展開対応）
+- トランスポート: `.stdio()`, `.http()`, `.sse()`
+- MCP SDK: `HTTPClientTransport(streaming: false)` = HTTP, `streaming: true` = SSE
 
 ### SwiftAgentSymbio
 エージェント間通信と発見の分散システムモジュール。Swift Distributed Actors を使用。
@@ -480,6 +496,122 @@ if let readTool = provider.tool(named: "Read") {
 
 // プリセットの使用
 let defaultTools = provider.tools(for: ToolConfiguration.ToolPreset.default.toolNames)
+```
+
+## Security
+
+ツール実行に対するパーミッションとサンドボックスを提供。詳細: [docs/SECURITY.md](docs/SECURITY.md)
+
+### アーキテクチャ
+
+```
+ツールリクエスト
+    │
+    ▼
+PermissionMiddleware (allow/deny/ask)
+    │
+    ▼
+SandboxMiddleware (Bashをサンドボックス化)
+    │
+    ▼
+ツール実行
+```
+
+### 使用方法
+
+```swift
+// withSecurity でセキュリティを有効化（ミドルウェアをパイプラインに追加）
+let config = AgentConfiguration(...)
+    .withSecurity(.standard.withHandler(CLIPermissionHandler()))
+
+// プリセット
+.withSecurity(.standard)     // 対話的許可、標準サンドボックス
+.withSecurity(.development)  // 緩い許可、サンドボックスなし
+.withSecurity(.restrictive)  // 最小限の許可、厳格なサンドボックス
+.withSecurity(.readOnly)     // 読み取り専用、実行不可
+
+// カスタム設定
+let security = SecurityConfiguration(
+    permissions: PermissionConfiguration(
+        allow: [.tool("Read"), .bash("git:*")],
+        deny: [.bash("rm:*")],
+        defaultAction: .ask,
+        handler: CLIPermissionHandler()
+    ),
+    sandbox: .standard
+)
+```
+
+### SecurityConfiguration
+
+| プロパティ | 型 | 説明 |
+|-----------|-----|------|
+| `permissions` | `PermissionConfiguration` | パーミッションルール |
+| `sandbox` | `SandboxExecutor.Configuration?` | サンドボックス設定（nil=無効） |
+
+### PermissionConfiguration
+
+```swift
+let config = PermissionConfiguration(
+    allow: [.tool("Read"), .bash("git:*")],  // 許可ルール
+    deny: [.bash("rm -rf:*")],               // 拒否ルール
+    defaultAction: .ask,                      // デフォルト動作
+    handler: CLIPermissionHandler(),          // 対話ハンドラ
+    enableSessionMemory: true                 // Always Allow/Block を記憶
+)
+
+// ファイルからの読み込み
+let config = try PermissionConfiguration.load(from: url)
+
+// マージ（後者優先、重複排除）
+let merged = base.merged(with: override)
+```
+
+**ルール評価順序:** session memory → allow → deny → defaultAction
+
+**パターン構文（大文字小文字区別）:**
+
+| パターン | マッチ対象 |
+|---------|----------|
+| `"Read"` | Read ツール |
+| `"Bash(git:*)"` | git で始まるコマンド |
+| `"Write(/tmp/*)"` | /tmp/ 以下への書き込み |
+| `"mcp__*"` | 全MCPツール |
+
+### SandboxExecutor（macOS専用）
+
+```swift
+let config = SandboxExecutor.Configuration(
+    networkPolicy: .local,              // none, local, full
+    filePolicy: .workingDirectoryOnly,  // readOnly, workingDirectoryOnly, custom
+    allowSubprocesses: true
+)
+
+// プリセット
+SandboxExecutor.Configuration.standard     // ローカルネットワーク、作業ディレクトリ書込
+SandboxExecutor.Configuration.restrictive  // ネットワークなし、読み取り専用
+```
+
+**FilePolicy:**
+
+| ポリシー | 読み取り | 書き込み |
+|---------|:--------:|:--------:|
+| `readOnly` | 全て許可 | 全て拒否 |
+| `workingDirectoryOnly` | 全て許可 | 作業ディレクトリ+tmp |
+| `custom(read:write:)` | 指定パス+システム | 指定パス+tmp |
+
+### Context による設定伝播
+
+`SandboxMiddleware` は `@Context` システムを使用して設定を `ExecuteCommandTool` に伝播:
+
+```swift
+// SandboxMiddleware 内部
+return try await withContext(SandboxContext.self, value: configuration) {
+    try await next(context)
+}
+
+// ExecuteCommandTool 内部
+@OptionalContext(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration?
 ```
 
 ## Race / Parallel 設計

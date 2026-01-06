@@ -221,9 +221,9 @@ graph TB
 
 ## Core Components
 
-### Steps
+### Step
 
-Steps are the fundamental building blocks in SwiftAgent. They process input and produce output in a type-safe manner:
+`Step` is the fundamental building block in SwiftAgent. It processes input and produces output in a type-safe manner:
 
 ```swift
 public protocol Step<Input, Output> {
@@ -231,6 +231,54 @@ public protocol Step<Input, Output> {
     associatedtype Output: Sendable
 
     func run(_ input: Input) async throws -> Output
+}
+```
+
+### Agent
+
+`Agent` is a declarative protocol built on top of `Step`. Instead of implementing `run` manually, you define a `body` property and the framework handles execution automatically:
+
+```swift
+public protocol Agent: Step where Input == Body.Input, Output == Body.Output {
+    associatedtype Body: Step
+    @StepBuilder var body: Body { get }
+}
+```
+
+**Use `Agent` for declarative composition:**
+
+```swift
+struct Translator: Agent {
+    @Session var session: LanguageModelSession
+
+    var body: some Step<String, String> {
+        GenerateText(session: session) { input in
+            Prompt("Translate to Japanese: \(input)")
+        }
+    }
+}
+
+// Multi-step pipeline
+struct Pipeline: Agent {
+    @Session var session: LanguageModelSession
+
+    var body: some Step<String, String> {
+        Transform { $0.trimmingCharacters(in: .whitespaces) }
+        GenerateText(session: session) { Prompt("Process: \($0)") }
+        Transform { "Result: \($0)" }
+    }
+}
+```
+
+**Use `Step` when you need custom control flow:**
+
+```swift
+struct CustomStep: Step {
+    func run(_ input: String) async throws -> String {
+        // Custom logic that can't be expressed declaratively
+        if input.isEmpty { return "Empty input" }
+        return try await someAsyncOperation(input)
+    }
 }
 ```
 
@@ -603,7 +651,7 @@ let review = try await session.invokeSubagent(
 Use the `Delegate` step to integrate subagent delegation into Step chains:
 
 ```swift
-struct CodeReviewPipeline: Step {
+struct CodeReviewPipeline: Agent {
     let modelProvider: any ModelProvider
 
     var body: some Step<String, String> {
@@ -614,10 +662,6 @@ struct CodeReviewPipeline: Step {
         ) { code in
             Prompt("Review this code:\n\n\(code)")
         }
-    }
-
-    func run(_ input: String) async throws -> String {
-        try await body.run(input)
     }
 }
 
@@ -862,17 +906,16 @@ struct Story {
     let content: String
 }
 
-struct StoryGenerator: Step {
+struct StoryGenerator: Agent {
     @Session var session: LanguageModelSession
 
-    func run(_ topic: String) async throws -> Story {
-        let generate = Generate<String, Story>(session: session) { input in
+    var body: some Step<String, Story> {
+        Generate<String, Story>(session: session) { input in
             Prompt {
                 "Write a story about: \(input)"
                 "Include vivid descriptions"
             }
         }
-        return try await generate.run(topic)
     }
 }
 
@@ -887,14 +930,13 @@ let story = try await withSession(session) {
 Generate string output using AI models:
 
 ```swift
-struct TextGenerator: Step {
+struct TextGenerator: Agent {
     @Session var session: LanguageModelSession
 
-    func run(_ topic: String) async throws -> String {
-        let generate = GenerateText<String>(session: session) { input in
+    var body: some Step<String, String> {
+        GenerateText(session: session) { input in
             Prompt("Write about: \(input)")
         }
-        return try await generate.run(topic)
     }
 }
 ```
@@ -1709,20 +1751,19 @@ Extract text and tables from PDF files.
 
 ## Examples
 
-### Simple Translation Step
+### Simple Translation Agent
 
 ```swift
 import SwiftAgent
 import FoundationModels  // Default, or use OpenFoundationModels with USE_OTHER_MODELS=1
 
-struct Translator: Step {
+struct Translator: Agent {
     @Session var session: LanguageModelSession
 
-    func run(_ text: String) async throws -> String {
-        let generate = GenerateText<String>(session: session) { input in
+    var body: some Step<String, String> {
+        GenerateText(session: session) { input in
             Prompt("Translate to Japanese: \(input)")
         }
-        return try await generate.run(text)
     }
 }
 
@@ -1739,18 +1780,17 @@ let result = try await withSession(session) {
 ### Code Analysis with Tools
 
 ```swift
-struct CodeAnalyzer: Step {
+struct CodeAnalyzer: Agent {
     @Session var session: LanguageModelSession
 
-    func run(_ request: String) async throws -> AnalysisResult {
-        let generate = Generate<String, AnalysisResult>(session: session) { input in
+    var body: some Step<String, AnalysisResult> {
+        Generate<String, AnalysisResult>(session: session) { input in
             Prompt {
                 "Analyze the following: \(input)"
                 "Use available tools to examine the code"
                 "Provide actionable recommendations"
             }
         }
-        return try await generate.run(request)
     }
 }
 
@@ -1785,10 +1825,9 @@ let result = try await withSession(session) {
 ### Multi-Step Pipeline
 
 ```swift
-struct ContentPipeline: Step {
+struct ContentPipeline: Agent {
     @Session var session: LanguageModelSession
 
-    @StepBuilder
     var body: some Step<String, String> {
         // Step 1: Clean input
         Transform { $0.trimmingCharacters(in: .whitespaces) }
@@ -1800,10 +1839,6 @@ struct ContentPipeline: Step {
 
         // Step 3: Format output
         Transform { "## Content\n\n\($0)" }
-    }
-
-    func run(_ input: String) async throws -> String {
-        try await body.run(input)
     }
 }
 
@@ -1897,23 +1932,22 @@ let package = Package(
 
 Build with: `USE_OTHER_MODELS=1 swift build`
 
-### 2. Create your first Step
+### 2. Create your first Agent
 
 ```swift
 import SwiftAgent
 import FoundationModels  // Default, or OpenFoundationModels with USE_OTHER_MODELS=1
 
-struct MyAssistant: Step {
+struct MyAssistant: Agent {
     @Session var session: LanguageModelSession
 
-    func run(_ input: String) async throws -> String {
-        let generate = GenerateText<String>(session: session) { request in
+    var body: some Step<String, String> {
+        GenerateText(session: session) { request in
             Prompt {
                 "User request: \(request)"
                 "Provide a helpful response"
             }
         }
-        return try await generate.run(input)
     }
 }
 ```

@@ -9,6 +9,7 @@ Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェ�
 | 概念 | 説明 |
 |------|------|
 | **Step** | `Input -> Output` の非同期変換単位 |
+| **Agent** | `body` を定義するだけで `run` が自動実装される宣言的Step |
 | **Session** | TaskLocalベースのセッション伝播（`@Session`, `withSession`） |
 | **Memory/Relay** | Step間の状態共有（`@Memory` で保持、`$` で `Relay` を取得） |
 | **Context** | 汎用TaskLocal伝播（`ContextKey`, `@Context`, `withContext`） |
@@ -68,14 +69,13 @@ struct MyStep: Step {
 }
 try await withContext(TrackerContext.self, value: tracker) { try await MyStep().run(url) }
 
-// StepBuilder による合成
-struct Pipeline: Step {
+// Agent による宣言的な合成
+struct Pipeline: Agent {
     @Session var session: LanguageModelSession
-    @StepBuilder var body: some Step<String, String> {
+    var body: some Step<String, String> {
         Transform { $0.trimmingCharacters(in: .whitespaces) }
         GenerateText(session: session) { Prompt($0) }
     }
-    func run(_ input: String) async throws -> String { try await body.run(input) }
 }
 
 // 構造化出力

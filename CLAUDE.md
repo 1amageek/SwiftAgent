@@ -572,8 +572,8 @@ let merged = base.merged(with: override)
 **ルール評価順序:**
 
 ```
-1. Session Memory
-2. Final Deny (絶対禁止・Override不可)
+1. Final Deny (絶対禁止・Override不可・セッションメモリより優先)
+2. Session Memory
 3. Override (マッチすれば通常Denyをスキップ)
 4. Deny (通常禁止)
 5. Allow
@@ -585,9 +585,11 @@ let merged = base.merged(with: override)
 | パターン | マッチ対象 |
 |---------|----------|
 | `"Read"` | Read ツール |
-| `"Bash(git:*)"` | git で始まるコマンド |
+| `"Bash(git:*)"` | git コマンド（`git` + 区切り文字で始まる） |
 | `"Write(/tmp/*)"` | /tmp/ 以下への書き込み |
 | `"mcp__*"` | 全MCPツール |
+
+**注意:** `prefix:*` パターンは区切り文字（スペース、ダッシュ、タブ等）を要求します。`git:*` は `git status` にマッチしますが `gitsomething` にはマッチしません。ファイルパスは正規化後にマッチングされます（`/tmp/../etc/` → `/etc/`）。
 
 ### SandboxExecutor（macOS専用）
 

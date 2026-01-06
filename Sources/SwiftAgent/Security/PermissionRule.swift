@@ -22,8 +22,19 @@ import Foundation
 /// ToolName                    - Exact tool name match
 /// ToolName(argument_pattern)  - Tool name + argument pattern
 /// Tool*                       - Wildcard in tool name
-/// ToolName(prefix:*)          - Argument starts with prefix
+/// ToolName(prefix:*)          - Argument is prefix or starts with prefix + separator
 /// ```
+///
+/// ## Separator Characters for `prefix:*` Patterns
+///
+/// The `prefix:*` pattern matches if:
+/// - The value equals the prefix exactly, OR
+/// - The value starts with prefix followed by a separator character
+///
+/// Recognized separators: space ` `, dash `-`, tab `\t`, semicolon `;`,
+/// pipe `|`, ampersand `&`, newline `\n`
+///
+/// Example: `git:*` matches `git`, `git status`, `git-flow` but NOT `gitsomething`
 public struct PermissionRule: Sendable, Equatable, Hashable {
 
     /// The raw pattern string.
@@ -118,17 +129,27 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
             }
         }
 
-        // For Write/Edit tools, match against "file_path" field
+        // For Write/Edit tools, match against "file_path" field (with path normalization)
         if context.toolName == "Write" || context.toolName == "Edit" || context.toolName == "MultiEdit" {
             if let filePath = json["file_path"] as? String {
-                return matchArgumentPattern(argPattern, against: filePath)
+                let normalizedPath = normalizePath(filePath)
+                return matchArgumentPattern(argPattern, against: normalizedPath)
             }
         }
 
-        // For Read tool, match against "file_path" field
+        // For Read tool, match against "file_path" field (with path normalization)
         if context.toolName == "Read" {
             if let filePath = json["file_path"] as? String {
-                return matchArgumentPattern(argPattern, against: filePath)
+                let normalizedPath = normalizePath(filePath)
+                return matchArgumentPattern(argPattern, against: normalizedPath)
+            }
+        }
+
+        // For Glob/Grep tools, match against "path" field (with path normalization)
+        if context.toolName == "Glob" || context.toolName == "Grep" {
+            if let path = json["path"] as? String {
+                let normalizedPath = normalizePath(path)
+                return matchArgumentPattern(argPattern, against: normalizedPath)
             }
         }
 
@@ -144,14 +165,51 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
         return false
     }
 
+    /// Normalizes a file path by resolving `.` and `..` components.
+    ///
+    /// This provides defense-in-depth against path traversal attempts
+    /// in permission rules, complementing the tool-level path validation.
+    ///
+    /// - Parameter path: The path to normalize.
+    /// - Returns: The normalized path with `.` and `..` resolved.
+    private func normalizePath(_ path: String) -> String {
+        // Use URL.standardized to resolve . and .. components
+        URL(fileURLWithPath: path).standardized.path
+    }
+
+    /// Separator characters recognized for `prefix:*` patterns.
+    ///
+    /// These are command/path separators that indicate the prefix
+    /// is a distinct token rather than part of a longer word.
+    private static let prefixSeparators: [Character] = [
+        " ",   // space (most common)
+        "-",   // dash (e.g., git-flow)
+        "\t",  // tab
+        ";",   // semicolon (command separator)
+        "|",   // pipe
+        "&",   // ampersand (background/and)
+        "\n",  // newline
+        "/",   // path separator
+    ]
+
     private func matchArgumentPattern(_ pattern: String, against value: String) -> Bool {
         // Handle "prefix:*" pattern (Claude Code style)
         if pattern.hasSuffix(":*") {
             let prefix = String(pattern.dropLast(2))
-            // Match if value starts with prefix (with optional space/dash after)
-            return value.hasPrefix(prefix) ||
-                   value.hasPrefix(prefix + " ") ||
-                   value.hasPrefix(prefix + "-")
+
+            // Exact match (prefix with nothing after)
+            if value == prefix {
+                return true
+            }
+
+            // Match if value starts with prefix followed by a separator
+            for separator in Self.prefixSeparators {
+                if value.hasPrefix(prefix + String(separator)) {
+                    return true
+                }
+            }
+
+            return false
         }
 
         // Handle general wildcard pattern

@@ -56,10 +56,14 @@ SwiftAgentは2層のセキュリティを提供します：
       "Write(/tmp/*)"
     ],
     "deny": [
-      "Bash(rm -rf:*)",
-      "Bash(sudo:*)",
+      "Bash(rm:*)",
       "Bash(chmod 777:*)"
     ],
+    "finalDeny": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ],
+    "overrides": [],
     "defaultAction": "ask",
     "enableSessionMemory": true
   }
@@ -85,7 +89,9 @@ SwiftAgentは2層のセキュリティを提供します：
 |-----------|-----|:----:|-----------|------|
 | `version` | Int | No | 1 | スキーマバージョン（将来の互換性用） |
 | `permissions.allow` | [String] | Yes | - | 許可するパターンのリスト |
-| `permissions.deny` | [String] | Yes | - | 拒否するパターンのリスト |
+| `permissions.deny` | [String] | Yes | - | 拒否するパターンのリスト（Override可能） |
+| `permissions.finalDeny` | [String] | No | [] | 絶対拒否するパターン（Override不可） |
+| `permissions.overrides` | [String] | No | [] | 親のdenyを解除するパターン |
 | `permissions.defaultAction` | String | No | "ask" | ルールにマッチしない場合のアクション |
 | `permissions.enableSessionMemory` | Bool | No | true | 「常に許可」をセッション内で記憶するか |
 
@@ -260,9 +266,11 @@ try data.write(to: savePath)
 ### ルール評価順序
 
 1. セッションメモリ（「常に許可」「ブロック」）
-2. `allow` ルール（先頭から順にマッチを確認）
-3. `deny` ルール（先頭から順にマッチを確認）
-4. `defaultAction`
+2. `finalDeny` ルール（絶対拒否・Override不可）
+3. `overrides` ルール（マッチすれば通常denyをスキップ）
+4. `deny` ルール（通常拒否・Override可能）
+5. `allow` ルール
+6. `defaultAction`
 
 ```
 Tool呼び出し
@@ -271,14 +279,43 @@ Tool呼び出し
     │
     ├─ セッションでブロック済み？ ─────→ 拒否
     │
-    ├─ allow ルールにマッチ？ ─────────→ 許可
+    ├─ finalDeny ルールにマッチ？ ─────→ 拒否（Override不可）
+    │
+    ├─ overrides ルールにマッチ？ ─────→ deny チェックをスキップ
     │
     ├─ deny ルールにマッチ？ ──────────→ 拒否
+    │
+    ├─ allow ルールにマッチ？ ─────────→ 許可
     │
     └─ defaultAction を適用
            ├─ allow → 許可
            ├─ deny  → 拒否
            └─ ask   → ユーザーに確認
+```
+
+### Override と FinalDeny
+
+子ガードレールが親の制限を一部解除する仕組み：
+
+| ルール型 | Override可能 | 用途 |
+|---------|:------------:|------|
+| `deny` | ✅ | 通常の拒否ルール |
+| `finalDeny` | ❌ | セキュリティクリティカルな絶対拒否 |
+
+```swift
+// 親ガードレール付きStep
+ProcessStep()
+    .guardrail {
+        Deny.final(.bash("sudo:*"))     // 絶対禁止
+        Deny(.bash("rm:*"))             // 通常禁止
+    }
+
+// 子ガードレールで一部解除
+CleanupStep()
+    .guardrail {
+        Override(.bash("rm:*.tmp"))     // ✅ rm:*.tmp を許可
+        Override(.bash("sudo:*"))       // ❌ 無視（finalなので）
+    }
 ```
 
 ---
@@ -287,7 +324,8 @@ Tool呼び出し
 
 | version | 変更内容 |
 |---------|---------|
-| 1 | 初期バージョン |
+| 1 | 初期バージョン（allow, deny, defaultAction, enableSessionMemory） |
+| 1.1 | finalDeny, overrides フィールド追加（後方互換） |
 
 将来のバージョンで破壊的変更がある場合、`version` フィールドを使用して互換性を管理します。
 
@@ -371,6 +409,93 @@ public func withSecurity(_ security: SecurityConfiguration) -> AgentConfiguratio
 | `.development` | 緩い許可 | なし |
 | `.restrictive` | 最小限許可 | 制限的サンドボックス |
 | `.readOnly` | 読み取り専用 | なし |
+
+---
+
+## Guardrail（宣言的セキュリティ）
+
+Step単位で宣言的にセキュリティポリシーを適用する`.guardrail { }`修飾子。
+
+### 基本使用法
+
+```swift
+FetchUserData()
+    .guardrail {
+        Allow(.tool("Read"))
+        Deny(.bash("rm:*"))
+        Sandbox(.restrictive)
+    }
+```
+
+### ルール型
+
+| 型 | 説明 |
+|---|------|
+| `Allow` | 許可ルール |
+| `Deny` | 拒否ルール（Override可能） |
+| `Deny.final` | 絶対拒否（Override不可） |
+| `Override` | 親のDenyを解除 |
+| `AskUser` | 対話的確認 |
+| `Sandbox` | サンドボックス設定 |
+
+### プリセット
+
+```swift
+.guardrail(.readOnly)      // 読み取り専用
+.guardrail(.standard)      // 標準セキュリティ
+.guardrail(.restrictive)   // 厳格（ネットワーク無し）
+.guardrail(.noNetwork)     // ネットワーク無し
+```
+
+### 階層的適用
+
+```swift
+// Agent内での階層的ガードレール
+struct SecurePipeline: Agent {
+    var body: some Step<String, String> {
+        // 親のガードレール
+        ProcessStep()
+            .guardrail {
+                Deny.final(.bash("sudo:*"))  // 絶対禁止
+                Deny(.bash("rm:*"))          // 通常禁止
+            }
+
+        // 子で一部解除
+        CleanupStep()
+            .guardrail {
+                Override(.bash("rm:*.tmp"))  // .tmpのみ許可
+            }
+    }
+}
+```
+
+### 条件付きルール
+
+```swift
+.guardrail {
+    Allow(.tool("Read"))
+
+    if isProduction {
+        Deny(.bash("*"))
+        Sandbox(.restrictive)
+    } else {
+        Sandbox(.permissive)
+    }
+}
+```
+
+### ファイル構成
+
+```
+Sources/SwiftAgent/Guardrail/
+├── GuardrailRule.swift         # Allow, Deny, Override, AskUser, Sandbox
+├── GuardrailConfiguration.swift # ルール集合の設定
+├── GuardrailBuilder.swift      # @resultBuilder
+├── Guardrail.swift             # プリセット
+├── GuardrailContext.swift      # TaskLocal伝播
+├── GuardedStep.swift           # Stepラッパー
+└── Step+Guardrail.swift        # .guardrail() 拡張
+```
 
 ---
 

@@ -30,6 +30,44 @@ public final class ToolPipeline: @unchecked Sendable {
 
     public init() {}
 
+    // MARK: - Factory Methods
+
+    /// Creates a default pipeline with security middleware.
+    ///
+    /// The default pipeline includes:
+    /// - `PermissionMiddleware` with permissive configuration (allows all, reads GuardrailContext)
+    /// - `SandboxMiddleware` with no sandbox (reads GuardrailContext for sandbox config)
+    ///
+    /// This enables `.guardrail { }` to work without explicit `withSecurity()` setup.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// // With default pipeline, guardrails work automatically
+    /// MyStep()
+    ///     .guardrail { Deny(.bash("rm:*")) }
+    ///     .run(input)  // Permission check is enforced
+    /// ```
+    public static var `default`: ToolPipeline {
+        ToolPipeline()
+            .use(PermissionMiddleware(configuration: .permissive))
+            .use(SandboxMiddleware(configuration: .none))
+    }
+
+    /// Creates an empty pipeline with no middleware.
+    ///
+    /// Use this when you want to completely disable security checks.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let config = AgentConfiguration(...)
+    ///     .withPipeline(.empty)  // No security middleware
+    /// ```
+    public static var empty: ToolPipeline {
+        ToolPipeline()
+    }
+
     /// Adds middleware to the pipeline.
     ///
     /// Middleware is executed in the order it is added.

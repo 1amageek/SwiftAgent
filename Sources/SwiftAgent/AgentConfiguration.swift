@@ -60,24 +60,32 @@ public struct AgentConfiguration: Sendable {
 
     /// Tool execution middleware pipeline.
     ///
-    /// The new middleware-based pipeline for tool execution. When set, this takes
-    /// precedence over the legacy `pipelineConfiguration`.
+    /// Defaults to `ToolPipeline.default` which includes `PermissionMiddleware`
+    /// and `SandboxMiddleware` with permissive configurations. This enables
+    /// `.guardrail { }` to work automatically without explicit `withSecurity()`.
     ///
     /// ## Example
     ///
     /// ```swift
+    /// // Default pipeline enables guardrails automatically
+    /// MyStep()
+    ///     .guardrail { Deny(.bash("rm:*")) }
+    ///     .run(input)  // Permission check enforced
+    ///
+    /// // Custom pipeline
     /// let pipeline = ToolPipeline()
     ///     .use(LoggingMiddleware())
-    ///     .use(PermissionMiddleware { context in
-    ///         context.toolName != "dangerous_tool"
-    ///     })
-    ///     .use(RetryMiddleware(maxAttempts: 3))
+    ///     .use(PermissionMiddleware(configuration: .standard))
     ///     .use(TimeoutMiddleware(duration: .seconds(30)))
     ///
     /// let config = AgentConfiguration(...)
     ///     .withPipeline(pipeline)
+    ///
+    /// // Disable all middleware
+    /// let config = AgentConfiguration(...)
+    ///     .withPipeline(.empty)
     /// ```
-    public var toolPipeline: ToolPipeline?
+    public var toolPipeline: ToolPipeline
 
     // MARK: - Skills Configuration
 
@@ -121,7 +129,7 @@ public struct AgentConfiguration: Sendable {
     ///   - workingDirectory: Working directory for file operations.
     ///   - autoSave: Whether to auto-save sessions (default: false).
     ///   - sessionStore: Session store for persistence (default: nil).
-    ///   - toolPipeline: Tool execution middleware pipeline (default: nil).
+    ///   - toolPipeline: Tool execution middleware pipeline (default: .default).
     ///   - skills: Skills configuration (default: nil, skills disabled).
     ///   - context: Context management configuration (default: nil, context management disabled).
     public init(
@@ -132,7 +140,7 @@ public struct AgentConfiguration: Sendable {
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        toolPipeline: ToolPipeline? = nil,
+        toolPipeline: ToolPipeline = .default,
         skills: SkillsConfiguration? = nil,
         context: ContextConfiguration? = nil
     ) {
@@ -157,7 +165,7 @@ public struct AgentConfiguration: Sendable {
     ///   - workingDirectory: Working directory for file operations.
     ///   - autoSave: Whether to auto-save sessions.
     ///   - sessionStore: Session store for persistence.
-    ///   - toolPipeline: Tool execution middleware pipeline (default: nil).
+    ///   - toolPipeline: Tool execution middleware pipeline (default: .default).
     ///   - skills: Skills configuration (default: nil, skills disabled).
     ///   - context: Context management configuration (default: nil, context management disabled).
     ///   - instructions: Instructions builder.
@@ -168,7 +176,7 @@ public struct AgentConfiguration: Sendable {
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         autoSave: Bool = false,
         sessionStore: (any SessionStore)? = nil,
-        toolPipeline: ToolPipeline? = nil,
+        toolPipeline: ToolPipeline = .default,
         skills: SkillsConfiguration? = nil,
         context: ContextConfiguration? = nil,
         @InstructionsBuilder instructions: () throws -> Instructions
@@ -245,14 +253,27 @@ extension AgentConfiguration {
     }
 
     /// Returns a copy with additional middleware added to the pipeline.
-    ///
-    /// If no pipeline exists, creates a new one with the middleware.
     public func withMiddleware(_ middleware: any ToolMiddleware) -> AgentConfiguration {
         var copy = self
-        if copy.toolPipeline == nil {
-            copy.toolPipeline = ToolPipeline()
-        }
-        copy.toolPipeline?.use(middleware)
+        copy.toolPipeline.use(middleware)
+        return copy
+    }
+
+    /// Returns a copy with no security middleware.
+    ///
+    /// Use this to completely disable permission and sandbox checks.
+    /// **Warning**: This removes all security protections.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// // For testing only
+    /// let config = AgentConfiguration(...)
+    ///     .withoutSecurity()
+    /// ```
+    public func withoutSecurity() -> AgentConfiguration {
+        var copy = self
+        copy.toolPipeline = .empty
         return copy
     }
 
@@ -301,6 +322,9 @@ extension AgentConfiguration {
     /// - **PermissionMiddleware**: Checks allow/deny rules before execution
     /// - **SandboxMiddleware**: Intercepts Bash commands and runs them in sandbox
     ///
+    /// **Note**: This replaces the default pipeline with custom security settings.
+    /// If you want to add middleware to the existing pipeline, use `withMiddleware()`.
+    ///
     /// ## Example
     ///
     /// ```swift
@@ -346,21 +370,18 @@ extension AgentConfiguration {
     public func withSecurity(_ security: SecurityConfiguration) -> AgentConfiguration {
         var copy = self
 
-        // Create pipeline if needed
-        if copy.toolPipeline == nil {
-            copy.toolPipeline = ToolPipeline()
-        }
-
-        // Add permission middleware (runs first)
-        copy.toolPipeline?.use(PermissionMiddleware(configuration: security.permissions))
+        // Replace the pipeline with security-configured one
+        let pipeline = ToolPipeline()
+            .use(PermissionMiddleware(configuration: security.permissions))
 
         // Add sandbox middleware if configured (runs after permission check)
         // SandboxMiddleware injects config via withContext(SandboxContext.self),
         // ExecuteCommandTool reads it via @OptionalContext(SandboxContext.self)
         if let sandboxConfig = security.sandbox {
-            copy.toolPipeline?.use(SandboxMiddleware(configuration: sandboxConfig))
+            pipeline.use(SandboxMiddleware(configuration: sandboxConfig))
         }
 
+        copy.toolPipeline = pipeline
         return copy
     }
 

@@ -80,6 +80,38 @@ public struct SandboxExecutor: Sendable {
 
         // MARK: - Presets
 
+        /// No sandbox (disabled).
+        ///
+        /// Use this when you don't want any sandboxing. The middleware
+        /// will skip sandbox execution and run commands directly.
+        ///
+        /// ## Usage
+        ///
+        /// ```swift
+        /// // Used internally by ToolPipeline.default
+        /// SandboxMiddleware(configuration: .none)
+        /// ```
+        public static var none: Configuration {
+            Configuration(
+                networkPolicy: .full,
+                filePolicy: .workingDirectoryOnly,
+                allowSubprocesses: true
+            )
+        }
+
+        /// Whether this configuration effectively disables sandboxing.
+        public var isDisabled: Bool {
+            // Consider disabled if it's the same as .none
+            guard networkPolicy == .full, allowSubprocesses == true else {
+                return false
+            }
+            // Check if filePolicy is workingDirectoryOnly
+            if case .workingDirectoryOnly = filePolicy {
+                return true
+            }
+            return false
+        }
+
         /// Standard sandbox: local network, working directory write.
         public static var standard: Configuration {
             Configuration(

@@ -554,7 +554,9 @@ let security = SecurityConfiguration(
 ```swift
 let config = PermissionConfiguration(
     allow: [.tool("Read"), .bash("git:*")],  // 許可ルール
-    deny: [.bash("rm -rf:*")],               // 拒否ルール
+    deny: [.bash("rm -rf:*")],               // 拒否ルール（Override可能）
+    finalDeny: [.bash("sudo:*")],            // 絶対拒否（Override不可）
+    overrides: [],                            // 親のDenyを上書き
     defaultAction: .ask,                      // デフォルト動作
     handler: CLIPermissionHandler(),          // 対話ハンドラ
     enableSessionMemory: true                 // Always Allow/Block を記憶
@@ -567,7 +569,16 @@ let config = try PermissionConfiguration.load(from: url)
 let merged = base.merged(with: override)
 ```
 
-**ルール評価順序:** session memory → allow → deny → defaultAction
+**ルール評価順序:**
+
+```
+1. Session Memory
+2. Final Deny (絶対禁止・Override不可)
+3. Override (マッチすれば通常Denyをスキップ)
+4. Deny (通常禁止)
+5. Allow
+6. Default Action
+```
 
 **パターン構文（大文字小文字区別）:**
 
@@ -599,6 +610,93 @@ SandboxExecutor.Configuration.restrictive  // ネットワークなし、読み�
 | `readOnly` | 全て許可 | 全て拒否 |
 | `workingDirectoryOnly` | 全て許可 | 作業ディレクトリ+tmp |
 | `custom(read:write:)` | 指定パス+システム | 指定パス+tmp |
+
+### Guardrail（宣言的Step単位セキュリティ）
+
+Step単位で宣言的にセキュリティポリシーを適用する`.guardrail { }`修飾子。
+
+```swift
+// 基本使用法
+FetchUserData()
+    .guardrail {
+        Allow(.tool("Read"))
+        Deny(.bash("rm:*"))
+        Sandbox(.restrictive)
+    }
+
+// Deny.final - 絶対禁止（子でOverride不可）
+Pipeline()
+    .guardrail {
+        Deny.final(.bash("rm -rf:*"))   // 絶対禁止
+        Deny.final(.bash("sudo:*"))     // 絶対禁止
+        Deny(.bash("rm:*"))             // 通常禁止（Override可能）
+    }
+
+// Override - 親のDenyを解除
+CleanupStep()
+    .guardrail {
+        Override(.bash("rm:*.tmp"))     // ✅ 親のDeny(.bash("rm:*"))を解除
+        Override(.bash("rm -rf:*"))     // ❌ 無視（finalなので）
+    }
+
+// プリセット
+AnalyzeData()
+    .guardrail(.readOnly)        // 読み取り専用
+ProcessData()
+    .guardrail(.standard)        // 標準セキュリティ
+HandleSensitive()
+    .guardrail(.restrictive)     // 厳格
+
+// 条件付きルール
+.guardrail {
+    Allow(.tool("Read"))
+    if isProduction {
+        Deny(.bash("*"))
+        Sandbox(.restrictive)
+    }
+}
+```
+
+**ルール型:**
+
+| 型 | 説明 |
+|---|------|
+| `Allow` | 許可ルール |
+| `Deny` | 拒否ルール（Override可能） |
+| `Deny.final` | 絶対拒否（Override不可） |
+| `Override` | 親のDenyを解除 |
+| `AskUser` | 対話的確認 |
+| `Sandbox` | サンドボックス設定 |
+
+**階層的適用:**
+
+```swift
+// Agent内での階層的ガードレール
+struct SecurePipeline: Agent {
+    var body: some Step<String, String> {
+        // 親のガードレール付きStep
+        ProcessStep()
+            .guardrail {
+                Deny(.bash("rm:*"))  // 通常禁止
+            }
+
+        // 子で一部解除
+        CleanupStep()
+            .guardrail {
+                Override(.bash("rm:*.tmp"))  // .tmpのみ許可
+            }
+    }
+}
+
+// ネストしたガードレール
+OuterStep()
+    .guardrail { Deny(.bash("rm:*")) }
+    .map { input in
+        InnerStep()
+            .guardrail { Override(.bash("rm:*.tmp")) }
+            .run(input)
+    }
+```
 
 ### Context による設定伝播
 

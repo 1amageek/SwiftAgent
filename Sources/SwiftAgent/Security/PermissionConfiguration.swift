@@ -44,17 +44,29 @@ public enum PermissionDecision: String, Sendable, Codable {
 ///
 /// ## Rule Evaluation Order
 ///
-/// 1. Session memory (alwaysAllow / blocked)
-/// 2. Allow rules (first match wins)
-/// 3. Deny rules (first match wins)
-/// 4. Default action
+/// 1. Final deny rules (ALWAYS checked first, cannot be bypassed)
+/// 2. Session memory (alwaysAllow / blocked)
+/// 3. Override rules (skip regular deny if matched)
+/// 4. Deny rules (first match wins)
+/// 5. Allow rules (first match wins)
+/// 6. Default action
 public struct PermissionConfiguration: Sendable {
 
-    /// Allowed patterns (checked first after session memory).
+    /// Allowed patterns.
     public var allow: [PermissionRule]
 
-    /// Denied patterns (checked after allow rules).
+    /// Denied patterns (can be overridden by child guardrails).
     public var deny: [PermissionRule]
+
+    /// Final denied patterns (cannot be overridden).
+    ///
+    /// These are absolute restrictions for security-critical policies.
+    public var finalDeny: [PermissionRule]
+
+    /// Override patterns that exempt from regular deny rules.
+    ///
+    /// When matched, skips regular deny checks (but NOT finalDeny).
+    public var overrides: [PermissionRule]
 
     /// Default action when no rule matches.
     public var defaultAction: PermissionDecision
@@ -69,19 +81,25 @@ public struct PermissionConfiguration: Sendable {
     ///
     /// - Parameters:
     ///   - allow: Patterns to allow.
-    ///   - deny: Patterns to deny.
+    ///   - deny: Patterns to deny (can be overridden).
+    ///   - finalDeny: Patterns to deny absolutely (cannot be overridden).
+    ///   - overrides: Patterns that override deny rules.
     ///   - defaultAction: Action when no rule matches.
     ///   - handler: Handler for interactive confirmation.
     ///   - enableSessionMemory: Whether to remember session decisions.
     public init(
         allow: [PermissionRule] = [],
         deny: [PermissionRule] = [],
+        finalDeny: [PermissionRule] = [],
+        overrides: [PermissionRule] = [],
         defaultAction: PermissionDecision = .ask,
         handler: (any PermissionHandler)? = nil,
         enableSessionMemory: Bool = true
     ) {
         self.allow = allow
         self.deny = deny
+        self.finalDeny = finalDeny
+        self.overrides = overrides
         self.defaultAction = defaultAction
         self.handler = handler
         self.enableSessionMemory = enableSessionMemory
@@ -91,6 +109,37 @@ public struct PermissionConfiguration: Sendable {
 // MARK: - Presets
 
 extension PermissionConfiguration {
+
+    /// Permissive configuration that allows all by default.
+    ///
+    /// This configuration is used as the base when no explicit security is configured.
+    /// It still reads `GuardrailContext` to apply Step-level rules.
+    ///
+    /// ## Behavior
+    ///
+    /// - No allow/deny rules
+    /// - Default action is `.allow`
+    /// - Session memory disabled
+    /// - GuardrailContext rules are still applied when present
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// // Typically used internally by ToolPipeline.default
+    /// let pipeline = ToolPipeline()
+    ///     .use(PermissionMiddleware(configuration: .permissive))
+    /// ```
+    public static var permissive: PermissionConfiguration {
+        PermissionConfiguration(
+            allow: [],
+            deny: [],
+            finalDeny: [],
+            overrides: [],
+            defaultAction: .allow,
+            handler: nil,
+            enableSessionMemory: false
+        )
+    }
 
     /// Standard configuration with sensible defaults.
     ///
@@ -260,6 +309,8 @@ extension PermissionConfiguration {
 ///   "permissions": {
 ///     "allow": ["Read", "Bash(git:*)"],
 ///     "deny": ["Bash(rm -rf:*)"],
+///     "finalDeny": ["Bash(sudo:*)"],
+///     "overrides": [],
 ///     "defaultAction": "ask",
 ///     "enableSessionMemory": true
 ///   }
@@ -272,6 +323,8 @@ private struct PermissionConfigurationFile: Codable {
     struct PermissionsData: Codable {
         var allow: [PermissionRule]
         var deny: [PermissionRule]
+        var finalDeny: [PermissionRule]?
+        var overrides: [PermissionRule]?
         var defaultAction: PermissionDecision?
         var enableSessionMemory: Bool?
     }
@@ -327,6 +380,8 @@ extension PermissionConfiguration {
         return PermissionConfiguration(
             allow: file.permissions.allow,
             deny: file.permissions.deny,
+            finalDeny: file.permissions.finalDeny ?? [],
+            overrides: file.permissions.overrides ?? [],
             defaultAction: file.permissions.defaultAction ?? .ask,
             handler: nil,  // handler cannot be loaded from file
             enableSessionMemory: file.permissions.enableSessionMemory ?? true
@@ -355,6 +410,8 @@ extension PermissionConfiguration {
             permissions: .init(
                 allow: allow,
                 deny: deny,
+                finalDeny: finalDeny.isEmpty ? nil : finalDeny,
+                overrides: overrides.isEmpty ? nil : overrides,
                 defaultAction: defaultAction,
                 enableSessionMemory: enableSessionMemory
             )
@@ -387,6 +444,8 @@ extension PermissionConfiguration {
         PermissionConfiguration(
             allow: Self.deduplicateRules(allow + other.allow),
             deny: Self.deduplicateRules(deny + other.deny),
+            finalDeny: Self.deduplicateRules(finalDeny + other.finalDeny),
+            overrides: Self.deduplicateRules(overrides + other.overrides),
             defaultAction: other.defaultAction,
             handler: other.handler ?? handler,
             enableSessionMemory: other.enableSessionMemory

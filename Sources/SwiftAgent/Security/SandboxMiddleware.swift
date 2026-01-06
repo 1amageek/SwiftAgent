@@ -59,10 +59,31 @@ public struct SandboxMiddleware: ToolMiddleware, Sendable {
             return try await next(context)
         }
 
+        // Get effective sandbox configuration (guardrail takes precedence)
+        let effectiveSandbox = effectiveSandboxConfiguration()
+
+        // Skip sandbox injection if effectively disabled
+        guard !effectiveSandbox.isDisabled else {
+            return try await next(context)
+        }
+
         // Use the @Context system to propagate sandbox configuration via TaskLocal
         // ExecuteCommandTool can read it using @OptionalContext(SandboxContext.self)
-        return try await withContext(SandboxContext.self, value: configuration) {
+        return try await withContext(SandboxContext.self, value: effectiveSandbox) {
             try await next(context)
         }
+    }
+
+    // MARK: - Guardrail Integration
+
+    /// Gets the effective sandbox configuration, checking guardrail context first.
+    ///
+    /// Guardrail sandbox takes precedence over the middleware's configuration.
+    private func effectiveSandboxConfiguration() -> SandboxExecutor.Configuration {
+        if let guardrailConfig = GuardrailContext.current,
+           let guardrailSandbox = guardrailConfig.sandbox {
+            return guardrailSandbox
+        }
+        return configuration
     }
 }

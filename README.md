@@ -105,6 +105,13 @@ graph TB
         SandboxContext["SandboxContext"]
     end
 
+    subgraph "Guardrail"
+        GuardrailRule["GuardrailRule"]
+        GuardrailConfig["GuardrailConfiguration"]
+        GuardedStep["GuardedStep"]
+        GuardrailContext["GuardrailContext"]
+    end
+
     subgraph "MCP Integration (SwiftAgentMCP)"
         MCPClient["MCPClient"]
         MCPDynamicTool["MCPDynamicTool"]
@@ -189,6 +196,12 @@ graph TB
     SandboxMiddleware --> SandboxContext
     SandboxExecutor --> SandboxConfig
     ExecuteCommandTool -.-> SandboxContext
+
+    GuardrailRule --> GuardrailConfig
+    GuardedStep --> GuardrailConfig
+    GuardedStep --> GuardrailContext
+    GuardrailContext -.-> PermissionMiddleware
+    GuardrailContext -.-> SandboxMiddleware
 ```
 
 ## Features
@@ -216,8 +229,9 @@ graph TB
 - **Model Providers**: Flexible model configuration with provider abstraction
 - **Agent Skills**: Portable skill packages with auto-discovery and progressive disclosure
 - **Distributed Agents**: SwiftAgentSymbio for multi-agent communication using Swift Distributed Actors
-- **Permission**: Rule-based tool access control (allow/deny/ask)
+- **Permission**: Rule-based tool access control (allow/deny/finalDeny/override/ask)
 - **Sandbox**: macOS sandbox for command execution (file/network restrictions)
+- **Guardrail**: Declarative Step-level security with `.guardrail { }` modifier
 
 ## Core Components
 
@@ -2007,7 +2021,8 @@ Permission controls **which tools** can be executed. It evaluates rules before a
 ```swift
 let config = PermissionConfiguration(
     allow: [.tool("Read"), .bash("git:*")],
-    deny: [.bash("rm -rf:*"), .bash("sudo:*")],
+    deny: [.bash("rm:*")],                    // Can be overridden
+    finalDeny: [.bash("sudo:*")],             // Cannot be overridden
     defaultAction: .ask,
     handler: CLIPermissionHandler()
 )
@@ -2016,9 +2031,10 @@ let config = PermissionConfiguration(
 ### Rule Evaluation
 
 ```
-Tool Request → Session Memory → Allow Rules → Deny Rules → Default Action
-                    ↓                ↓            ↓              ↓
-               (if cached)      (permit)      (reject)     (allow/deny/ask)
+Tool Request → Session Memory → Final Deny → Override → Deny → Allow → Default
+                    ↓               ↓           ↓         ↓       ↓        ↓
+               (if cached)     (reject)     (skip      (reject) (permit) (allow/
+                                            deny)                         deny/ask)
 ```
 
 ### Pattern Syntax
@@ -2083,7 +2099,8 @@ let config = AgentConfiguration(...)
 let security = SecurityConfiguration(
     permissions: PermissionConfiguration(
         allow: [.tool("Read"), .bash("git:*")],
-        deny: [.bash("sudo:*")],
+        deny: [.bash("rm:*")],
+        finalDeny: [.bash("sudo:*")],
         defaultAction: .ask,
         handler: CLIPermissionHandler()
     ),
@@ -2120,6 +2137,80 @@ Tool Execution (reads config via @OptionalContext)
 ```
 
 For detailed documentation, see [docs/SECURITY.md](docs/SECURITY.md).
+
+## Guardrail
+
+Guardrails provide **declarative Step-level security policies** using a SwiftUI-like `.guardrail { }` modifier. They allow fine-grained control over which tools each Step can use.
+
+### Basic Usage
+
+```swift
+FetchUserData()
+    .guardrail {
+        Allow(.tool("Read"))
+        Deny(.bash("rm:*"))
+        Sandbox(.restrictive)
+    }
+```
+
+### Rule Types
+
+| Rule | Description |
+|------|-------------|
+| `Allow` | Permit specific patterns |
+| `Deny` | Block patterns (can be overridden by child) |
+| `Deny.final` | Block patterns (cannot be overridden) |
+| `Override` | Relax parent's `Deny` rules |
+| `AskUser` | Require user confirmation |
+| `Sandbox` | Apply sandbox configuration |
+
+### Hierarchical Application
+
+Guardrails inherit from parent to child. Use `Override` to selectively relax parent restrictions, but `Deny.final` cannot be overridden.
+
+```swift
+struct SecurePipeline: Agent {
+    var body: some Step<String, String> {
+        // Parent guardrail
+        ProcessStep()
+            .guardrail {
+                Deny.final(.bash("sudo:*"))  // Absolute - cannot override
+                Deny(.bash("rm:*"))          // Can be overridden
+            }
+
+        // Child overrides specific pattern
+        CleanupStep()
+            .guardrail {
+                Override(.bash("rm:*.tmp"))  // ✅ Allowed for .tmp files
+                Override(.bash("sudo:*"))    // ❌ Ignored (final)
+            }
+    }
+}
+```
+
+### Presets
+
+```swift
+.guardrail(.readOnly)      // Read-only access
+.guardrail(.standard)      // Standard security
+.guardrail(.restrictive)   // No network, minimal permissions
+.guardrail(.noNetwork)     // Block network access
+```
+
+### Conditional Rules
+
+```swift
+.guardrail {
+    Allow(.tool("Read"))
+
+    if isProduction {
+        Deny(.bash("*"))
+        Sandbox(.restrictive)
+    } else {
+        Sandbox(.permissive)
+    }
+}
+```
 
 ## Advanced Features
 

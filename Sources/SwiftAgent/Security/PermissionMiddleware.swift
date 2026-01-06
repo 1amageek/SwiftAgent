@@ -61,10 +61,16 @@ public struct PermissionDenied: Error, LocalizedError, Sendable {
 ///
 /// ## Rule Evaluation Order
 ///
-/// 1. Session memory (alwaysAllow / blocked)
-/// 2. Allow rules (first match wins)
-/// 3. Deny rules (first match wins)
-/// 4. Default action (allow / deny / ask)
+/// 1. Final deny rules (ALWAYS checked first, cannot be bypassed)
+/// 2. Session memory (alwaysAllow / blocked)
+/// 3. Override rules (skip regular deny if matched)
+/// 4. Deny rules (first match wins) - can be overridden
+/// 5. Allow rules (first match wins)
+/// 6. Default action (allow / deny / ask)
+///
+/// **Security Note**: Final deny rules are checked before session memory
+/// to ensure security-critical restrictions cannot be bypassed by
+/// "Always Allow" decisions.
 public struct PermissionMiddleware: ToolMiddleware, Sendable {
 
     private let configuration: PermissionConfiguration
@@ -104,11 +110,26 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
         _ context: ToolContext,
         next: @escaping Next
     ) async throws -> ToolResult {
+        // Get effective configuration (merged with guardrail if present)
+        let effectiveConfig = effectiveConfiguration()
+
         // Generate a key for session memory
         let memoryKey = generateMemoryKey(for: context)
 
-        // 1. Check session memory
-        if configuration.enableSessionMemory {
+        // 1. ALWAYS check final deny rules first (cannot be bypassed by session memory)
+        //    This ensures security-critical restrictions are never circumvented.
+        for rule in effectiveConfig.finalDeny {
+            if rule.matches(context) {
+                throw PermissionDenied(
+                    toolName: context.toolName,
+                    reason: "Matched final deny rule (cannot be overridden)",
+                    matchedRule: rule
+                )
+            }
+        }
+
+        // 2. Check session memory (for non-finalDeny cases)
+        if effectiveConfig.enableSessionMemory {
             let (isAllowed, isBlocked) = state.withLock { state in
                 (state.allowed.contains(memoryKey), state.blocked.contains(memoryKey))
             }
@@ -125,26 +146,31 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
             }
         }
 
-        // 2. Check allow rules (first match wins)
-        for rule in configuration.allow {
+        // 3. Check override rules (skip regular deny if matched)
+        let isOverridden = effectiveConfig.overrides.contains { $0.matches(context) }
+
+        // 4. Check regular deny rules (if not overridden)
+        if !isOverridden {
+            for rule in effectiveConfig.deny {
+                if rule.matches(context) {
+                    throw PermissionDenied(
+                        toolName: context.toolName,
+                        reason: "Matched deny rule",
+                        matchedRule: rule
+                    )
+                }
+            }
+        }
+
+        // 5. Check allow rules
+        for rule in effectiveConfig.allow {
             if rule.matches(context) {
                 return try await next(context)
             }
         }
 
-        // 3. Check deny rules
-        for rule in configuration.deny {
-            if rule.matches(context) {
-                throw PermissionDenied(
-                    toolName: context.toolName,
-                    reason: "Matched deny rule",
-                    matchedRule: rule
-                )
-            }
-        }
-
-        // 4. Apply default action
-        switch configuration.defaultAction {
+        // 6. Apply default action
+        switch effectiveConfig.defaultAction {
         case .allow:
             return try await next(context)
 
@@ -155,8 +181,26 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
             )
 
         case .ask:
-            return try await promptUser(context: context, memoryKey: memoryKey, next: next)
+            return try await promptUser(
+                context: context,
+                memoryKey: memoryKey,
+                effectiveConfig: effectiveConfig,
+                next: next
+            )
         }
+    }
+
+    // MARK: - Guardrail Integration
+
+    /// Gets the effective permission configuration, merging with guardrail context if present.
+    ///
+    /// Guardrail rules take precedence and are evaluated first.
+    private func effectiveConfiguration() -> PermissionConfiguration {
+        guard let guardrailConfig = GuardrailContext.current,
+              guardrailConfig.hasPermissionRules else {
+            return configuration
+        }
+        return guardrailConfig.mergedPermissions(with: configuration)
     }
 
     // MARK: - Private Methods
@@ -194,9 +238,10 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
     private func promptUser(
         context: ToolContext,
         memoryKey: String,
+        effectiveConfig: PermissionConfiguration,
         next: @escaping Next
     ) async throws -> ToolResult {
-        guard let handler = configuration.handler else {
+        guard let handler = effectiveConfig.handler else {
             throw PermissionDenied(
                 toolName: context.toolName,
                 reason: "No permission handler configured and default is 'ask'"
@@ -207,7 +252,7 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
         let response = try await handler.requestPermission(request)
 
         // Update session memory
-        if configuration.enableSessionMemory {
+        if effectiveConfig.enableSessionMemory {
             state.withLock { state in
                 switch response {
                 case .alwaysAllow:

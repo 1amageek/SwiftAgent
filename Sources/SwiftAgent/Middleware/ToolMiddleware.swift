@@ -29,8 +29,7 @@ import Foundation
 ///
 /// For injecting typed configuration (like sandbox settings), prefer
 /// using the `@Context` property wrapper with a custom `ContextKey`.
-/// This provides type safety and follows SwiftAgent's established patterns
-/// (similar to SwiftUI's `@Environment`/`EnvironmentKey`).
+/// This provides type safety and follows SwiftAgent's established patterns.
 public struct ToolContext: Sendable {
     /// The name of the tool being called.
     public let toolName: String

@@ -10,9 +10,9 @@ Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェ�
 |------|------|
 | **Step** | `Input -> Output` の非同期変換単位 |
 | **Agent** | `body` を定義するだけで `run` が自動実装される宣言的Step |
-| **Session** | TaskLocalベースのセッション伝播（`@Session`, `withSession`） |
+| **Session** | TaskLocalベースのセッション伝播（`@Session`, `.session()`） |
 | **Memory/Relay** | Step間の状態共有（`@Memory` で保持、`$` で `Relay` を取得） |
-| **Context** | 汎用TaskLocal伝播（`ContextKey`, `@Context`, `withContext`） |
+| **Context** | 汎用TaskLocal伝播（`@Contextable`, `@Context`, `.context()`） |
 | **Generate** | LLMによる構造化出力生成 |
 
 ## Step 一覧
@@ -33,7 +33,7 @@ struct MyStep: Step {
         try await session.respond { Prompt(input) }.content
     }
 }
-try await withSession(session) { try await MyStep().run("Hello") }
+try await MyStep().session(session).run("Hello")
 
 // Memory/Relay による状態共有
 struct OrchestratorStep: Step {
@@ -55,21 +55,18 @@ struct CrawlStep: Step {
     }
 }
 
-// Context による汎用TaskLocal伝播（SwiftUI EnvironmentKey パターン）
-enum TrackerContext: ContextKey {
-    @TaskLocal private static var _current: URLTracker?
-    static var defaultValue: URLTracker { URLTracker() }
-    static var current: URLTracker { _current ?? defaultValue }
-    static func withValue<T: Sendable>(_ value: URLTracker, operation: () async throws -> T) async rethrows -> T {
-        try await $_current.withValue(value, operation: operation)
-    }
+// Context による汎用TaskLocal伝播（@Contextable マクロで簡潔に定義）
+@Contextable
+struct AppConfig: Contextable {
+    static var defaultValue: AppConfig { AppConfig(maxRetries: 3) }
+    let maxRetries: Int
 }
 
 struct MyStep: Step {
-    @Context(TrackerContext.self) var tracker: URLTracker
-    func run(_ input: URL) async throws -> Bool { !tracker.hasVisited(input) }
+    @Context var config: AppConfig  // 型から自動でContextKeyを解決
+    func run(_ input: String) async throws -> String { /* config.maxRetries を使用 */ }
 }
-try await withContext(TrackerContext.self, value: tracker) { try await MyStep().run(url) }
+try await MyStep().context(AppConfig(maxRetries: 5)).run("input")
 
 // Agent による宣言的な合成
 struct Pipeline: Agent {
@@ -136,40 +133,92 @@ let constant = Relay<Int>.constant(42)  // 書き込み無視
 
 ## Context
 
-SwiftUIの`EnvironmentKey`パターンに基づく、TaskLocal経由の汎用コンテキスト伝播システム。
+TaskLocal経由の汎用コンテキスト伝播システム。Agent（持つ側）からStep（使う側）へ値を伝播する。
+
+### 基本的な使い方
 
 ```swift
-// 1. ContextKey を定義（defaultValue 必須）
-enum ConfigContext: ContextKey {
-    @TaskLocal private static var _current: AppConfig?
+// 1. @Contextable で型を定義
+@Contextable
+class Library: Contextable {
+    static var defaultValue: Library { Library() }
 
-    static var defaultValue: AppConfig { AppConfig.default }
-    static var current: AppConfig { _current ?? defaultValue }
+    var books: [Book] = []
+    var availableCount: Int { books.filter(\.isAvailable).count }
+}
 
-    static func withValue<T: Sendable>(
-        _ value: AppConfig,
-        operation: () async throws -> T
-    ) async rethrows -> T {
+// 2. Agent（持つ側）で .context() モディファイアで渡す
+struct BookReaderAgent: Agent {
+    let library = Library()
+
+    var body: some Step<Query, Response> {
+        FetchBooksStep()
+        AnalyzeStep()
+            .context(library)
+    }
+}
+
+// 3. Step（使う側）で @Context で受け取る
+struct AnalyzeStep: Step {
+    @Context var library: Library
+
+    func run(_ input: Query) async throws -> Response {
+        let count = library.availableCount
+        // ...
+    }
+}
+```
+
+### @Contextable マクロ
+
+`@Contextable`を適用すると、自動的に`{TypeName}Context: ContextKey`と`typealias ContextKeyType`が生成される。
+
+```swift
+@Contextable
+struct CrawlerConfig: Contextable {
+    static var defaultValue: CrawlerConfig {
+        CrawlerConfig(maxDepth: 3, timeout: 30)
+    }
+    let maxDepth: Int
+    let timeout: Int
+}
+
+// 生成されるコード:
+// enum CrawlerConfigContext: ContextKey { ... }
+// extension CrawlerConfig { typealias ContextKeyType = CrawlerConfigContext }
+```
+
+### 複数Contextの連鎖
+
+```swift
+try await step
+    .context(library)
+    .context(config)
+    .run(input)
+```
+
+### 既存のContextKeyへの対応
+
+手動定義の`ContextKey`を`Contextable`に対応させる場合：
+
+```swift
+// 既存のContextKey
+enum SandboxContext: ContextKey {
+    @TaskLocal private static var _current: SandboxExecutor.Configuration?
+    static var defaultValue: SandboxExecutor.Configuration { .none }
+    static var current: SandboxExecutor.Configuration { _current ?? defaultValue }
+    static func withValue<T: Sendable>(_ value: SandboxExecutor.Configuration, operation: () async throws -> T) async rethrows -> T {
         try await $_current.withValue(value, operation: operation)
     }
 }
 
-// 2. @Context で値にアクセス（defaultValueにフォールバック）
-struct ConfiguredStep: Step {
-    @Context(ConfigContext.self) var config: AppConfig
-
-    func run(_ input: String) async throws -> String {
-        // config を使用（常に非Optional）
-    }
+// Contextable準拠を追加
+extension SandboxExecutor.Configuration: Contextable {
+    public static var defaultValue: SandboxExecutor.Configuration { .none }
+    public typealias ContextKeyType = SandboxContext
 }
 
-// 3. withContext で値を提供
-try await withContext(ConfigContext.self, value: appConfig) {
-    try await ConfiguredStep().run("input")
-}
-
-// Step拡張
-try await myStep.run(input, context: ConfigContext.self, value: config)
+// これで @Context var config: SandboxExecutor.Configuration が使える
 ```
 
 ## @Generable の制限
@@ -701,13 +750,11 @@ OuterStep()
 `SandboxMiddleware` は `@Context` システムを使用して設定を `ExecuteCommandTool` に伝播:
 
 ```swift
-// SandboxMiddleware 内部
-return try await withContext(SandboxContext.self, value: configuration) {
-    try await next(context)
-}
+// SandboxMiddleware 内部（ContextStep経由で伝播）
+return try await ContextStep(step: next, key: SandboxContext.self, value: configuration).run(context)
 
 // ExecuteCommandTool 内部
-@Context(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration
+@Context var sandboxConfig: SandboxExecutor.Configuration
 // sandboxConfig.isDisabled でサンドボックスの有効/無効を判定
 ```
 

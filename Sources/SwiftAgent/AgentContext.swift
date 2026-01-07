@@ -13,8 +13,7 @@ import Foundation
 
 /// Task-local storage for AgentSession.
 ///
-/// This allows agent sessions to be implicitly passed through the async call tree,
-/// similar to SwiftUI's @Environment and SwiftAgent's @Session.
+/// This allows agent sessions to be implicitly passed through the async call tree.
 public enum AgentContext {
     @TaskLocal public static var current: AgentSession?
 }
@@ -64,31 +63,54 @@ public struct Agent: Sendable {
 ///   - agent: The AgentSession to make available.
 ///   - operation: The async operation to run with the agent in context.
 /// - Returns: The result of the operation.
-public func withAgent<T: Sendable>(
+func withAgent<T: Sendable>(
     _ agent: AgentSession,
     operation: () async throws -> T
 ) async rethrows -> T {
     try await AgentContext.$current.withValue(agent, operation: operation)
 }
 
+// MARK: - AgentStep
+
+/// A Step wrapper that provides an AgentSession during execution.
+public struct AgentStep<S: Step>: Step {
+    public typealias Input = S.Input
+    public typealias Output = S.Output
+
+    private let step: S
+    private let agentSession: AgentSession
+
+    public init(step: S, agent: AgentSession) {
+        self.step = step
+        self.agentSession = agent
+    }
+
+    @discardableResult
+    public func run(_ input: Input) async throws -> Output {
+        try await withAgent(agentSession) {
+            try await step.run(input)
+        }
+    }
+}
+
 // MARK: - Step Extension for Agent
 
 extension Step {
-    /// Runs this step with an AgentSession in context.
+
+    /// Provides an AgentSession for this step.
     ///
-    /// Usage:
+    /// ## Usage
+    ///
     /// ```swift
-    /// let result = try await myStep.run("input", agent: agent)
+    /// let result = try await MyStep()
+    ///     .agent(agentSession)
+    ///     .run(input)
     /// ```
     ///
-    /// - Parameters:
-    ///   - input: The input to the step.
-    ///   - agent: The AgentSession to make available.
-    /// - Returns: The output of the step.
-    public func run(_ input: Input, agent: AgentSession) async throws -> Output {
-        try await withAgent(agent) {
-            try await self.run(input)
-        }
+    /// - Parameter agent: The AgentSession to make available.
+    /// - Returns: A step that provides the agent during execution.
+    public func agent(_ agent: AgentSession) -> AgentStep<Self> {
+        AgentStep(step: self, agent: agent)
     }
 }
 
@@ -104,7 +126,7 @@ extension Step {
 ///   - agent: The AgentSession.
 ///   - operation: The async operation to run.
 /// - Returns: The result of the operation.
-public func withSessionAndAgent<T: Sendable>(
+func withSessionAndAgent<T: Sendable>(
     session: LanguageModelSession,
     agent: AgentSession,
     operation: () async throws -> T
@@ -135,7 +157,7 @@ public struct Tools: Sendable {
 }
 
 /// Runs an async operation with a ToolProvider in context.
-public func withToolProvider<T: Sendable>(
+func withToolProvider<T: Sendable>(
     _ provider: ToolProvider,
     operation: () async throws -> T
 ) async rethrows -> T {

@@ -2,6 +2,7 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+import CompilerPluginSupport
 import Foundation
 
 // By default, SwiftAgent uses Apple's FoundationModels framework.
@@ -13,20 +14,13 @@ let package = Package(
     name: "SwiftAgent",
     platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26), .tvOS(.v26)],
     products: [
-        .library(
-            name: "SwiftAgent",
-            targets: ["SwiftAgent"]),
-        .library(
-            name: "SwiftAgentSymbio",
-            targets: ["SwiftAgentSymbio"]),
-        .library(
-            name: "SwiftAgentMCP",
-            targets: ["SwiftAgentMCP"]),
-        .library(
-            name: "AgentTools",
-            targets: ["AgentTools"]),
+        .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
+        .library(name: "SwiftAgentSymbio", targets: ["SwiftAgentSymbio"]),
+        .library(name: "SwiftAgentMCP", targets: ["SwiftAgentMCP"]),
+        .library(name: "AgentTools", targets: ["AgentTools"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-syntax.git", from: "600.0.0"),
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.0.1"),
@@ -35,13 +29,28 @@ let package = Package(
         .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main")
     ],
     targets: [
+        .macro(
+            name: "SwiftAgentMacros",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        ),
         .target(
             name: "SwiftAgent",
-            dependencies: [
+            dependencies: useOtherModels ? [
+                "SwiftAgentMacros",
+                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "Instrumentation", package: "swift-distributed-tracing"),
+                .product(name: "ActorRuntime", package: "swift-actor-runtime"),
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ] : [
+                "SwiftAgentMacros",
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime")
-            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            ],
             swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .target(
@@ -63,25 +72,36 @@ let package = Package(
         ),
         .target(
             name: "AgentTools",
-            dependencies: [
+            dependencies: useOtherModels ? [
+                "SwiftAgent",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ] : [
                 "SwiftAgent"
-            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            ],
             swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(
             name: "SwiftAgentTests",
-            dependencies: [
+            dependencies: useOtherModels ? [
+                "SwiftAgent",
+                "AgentTools",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ] : [
                 "SwiftAgent",
                 "AgentTools"
-            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            ],
             swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(
             name: "AgentsTests",
-            dependencies: [
+            dependencies: useOtherModels ? [
+                "SwiftAgent",
+                "AgentTools",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ] : [
                 "SwiftAgent",
                 "AgentTools"
-            ] + (useOtherModels ? [.product(name: "OpenFoundationModels", package: "OpenFoundationModels")] : []),
+            ],
             swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),
         .testTarget(

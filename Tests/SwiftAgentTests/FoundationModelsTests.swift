@@ -148,7 +148,7 @@ struct FoundationModelsSessionPropertyWrapperTests {
         }
         let step = SessionAccessingStep()
 
-        let result = try await step.run("test", session: session)
+        let result = try await step.session(session).run("test")
 
         #expect(result == true)
     }

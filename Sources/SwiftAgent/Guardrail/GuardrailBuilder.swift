@@ -9,8 +9,6 @@ import Foundation
 
 /// Result builder for declarative guardrail configuration.
 ///
-/// Enables SwiftUI-like syntax for defining security policies on Steps.
-///
 /// ## Usage
 ///
 /// ```swift

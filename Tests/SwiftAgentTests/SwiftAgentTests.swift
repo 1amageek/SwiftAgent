@@ -171,12 +171,12 @@ struct AgentsTests {
         #expect(typeName.contains("GenerateText"))
     }
 
-    @Test("Step run with session parameter")
-    func stepRunWithSessionParameter() async throws {
+    @Test("Step with .session() modifier")
+    func stepWithSessionModifier() async throws {
         let session = createAgentTestSession()
         let transform = Transform<Int, Int> { $0 * 2 }
 
-        let result = try await transform.run(5, session: session)
+        let result = try await transform.session(session).run(5)
         #expect(result == 10)
     }
 }

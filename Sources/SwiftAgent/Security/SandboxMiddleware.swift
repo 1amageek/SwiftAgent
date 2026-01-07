@@ -23,7 +23,7 @@ import Foundation
 ///     └─ Call next(context)  ← Always calls next!
 ///           │
 ///           ▼
-///     ExecuteCommandTool uses @Context(SandboxContext.self)
+///     ExecuteCommandTool uses @Context
 ///     and executes via SandboxExecutor if not disabled
 /// ```
 ///
@@ -68,7 +68,7 @@ public struct SandboxMiddleware: ToolMiddleware, Sendable {
         }
 
         // Use the @Context system to propagate sandbox configuration via TaskLocal
-        // ExecuteCommandTool reads it using @Context(SandboxContext.self)
+        // ExecuteCommandTool reads it using @Context
         return try await withContext(SandboxContext.self, value: effectiveSandbox) {
             try await next(context)
         }

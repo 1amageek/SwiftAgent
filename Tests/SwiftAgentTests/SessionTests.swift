@@ -131,14 +131,41 @@ struct SessionPropertyWrapperTests {
         #expect(result == true)
     }
 
-    @Test("Step.run with session parameter sets context")
-    func stepRunWithSessionParameter() async throws {
+    @Test(".session() modifier provides session context")
+    func sessionModifierProvidesContext() async throws {
         let session = createTestSession()
         let step = SessionAccessingStep()
 
-        let result = try await step.run("test", session: session)
+        let result = try await step
+            .session(session)
+            .run("test")
 
         #expect(result == true)
+    }
+
+    @Test(".session() modifier works with chained steps")
+    func sessionModifierWorksWithChain() async throws {
+        struct DoubleStep: Step, Sendable {
+            func run(_ input: Int) async throws -> Int { input * 2 }
+        }
+
+        struct SessionAwareStep: Step {
+            @Session var session: LanguageModelSession
+            func run(_ input: Int) async throws -> Int {
+                _ = session.isResponding
+                return input + 5
+            }
+        }
+
+        let session = createTestSession()
+        let chain = Chain2(DoubleStep(), SessionAwareStep())
+
+        let result = try await chain
+            .session(session)
+            .run(10)
+
+        // 10 * 2 = 20, 20 + 5 = 25
+        #expect(result == 25)
     }
 }
 

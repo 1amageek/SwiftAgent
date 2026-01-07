@@ -11,8 +11,7 @@ import Foundation
 
 /// A protocol that defines a key for TaskLocal-based context propagation.
 ///
-/// This follows SwiftUI's `EnvironmentKey` pattern, requiring a `defaultValue`
-/// to ensure that context access never fails.
+/// Requires a `defaultValue` to ensure that context access never fails.
 ///
 /// ## Usage
 ///
@@ -35,7 +34,7 @@ import Foundation
 ///
 /// // Use in a Step
 /// struct MyStep: Step {
-///     @Context(URLTrackerContext.self) var tracker: URLTracker
+///     @Context var tracker: URLTracker
 ///
 ///     func run(_ input: URL) async throws -> Bool {
 ///         return !tracker.visitedURLs.contains(input)
@@ -68,42 +67,28 @@ public protocol ContextKey {
 
 /// A property wrapper that provides access to a value from the TaskLocal context.
 ///
-/// Use `@Context` to access values that have been provided via `withContext`.
-/// If no context is provided, the `defaultValue` defined in the `ContextKey` is returned.
-///
-/// ## Design Note
-///
-/// This follows SwiftUI's `@Environment` pattern. Unlike earlier versions that would
-/// crash when a context was missing, this now relies on `defaultValue` to ensure
-/// safe access in all cases.
-///
 /// ## Usage
 ///
 /// ```swift
 /// struct CrawlerStep: Step {
-///     @Context(URLTrackerContext.self) var tracker: URLTracker
+///     @Context var tracker: URLTracker
 ///
 ///     func run(_ input: URL) async throws -> CrawlResult {
 ///         guard !tracker.visitedURLs.contains(input) else {
 ///             return .alreadyVisited
 ///         }
 ///         tracker.markVisited(input)
-///         // ... crawl logic
+///         // ...
 ///     }
-/// }
-///
-/// // Provide context via withContext
-/// try await withContext(URLTrackerContext.self, value: tracker) {
-///     try await CrawlerStep().run(url)
 /// }
 /// ```
 @propertyWrapper
-public struct Context<Key: ContextKey>: Sendable {
+public struct Context<Value: Contextable>: Sendable {
 
-    public init(_ key: Key.Type = Key.self) {}
+    public init() {}
 
-    public var wrappedValue: Key.Value {
-        Key.current
+    public var wrappedValue: Value {
+        Value.ContextKeyType.current
     }
 }
 
@@ -125,7 +110,7 @@ public struct Context<Key: ContextKey>: Sendable {
 ///   - value: The value to make available in context.
 ///   - operation: The async operation to run with the context.
 /// - Returns: The result of the operation.
-public func withContext<Key: ContextKey, T: Sendable>(
+func withContext<Key: ContextKey, T: Sendable>(
     _ key: Key.Type,
     value: Key.Value,
     operation: () async throws -> T
@@ -133,25 +118,44 @@ public func withContext<Key: ContextKey, T: Sendable>(
     try await Key.withValue(value, operation: operation)
 }
 
+// MARK: - ContextStep
+
+/// A Step wrapper that provides a context value during execution.
+public struct ContextStep<S: Step, Key: ContextKey>: Step {
+    public typealias Input = S.Input
+    public typealias Output = S.Output
+
+    private let step: S
+    private let value: Key.Value
+
+    public init(step: S, key: Key.Type, value: Key.Value) {
+        self.step = step
+        self.value = value
+    }
+
+    @discardableResult
+    public func run(_ input: Input) async throws -> Output {
+        try await withContext(Key.self, value: value) {
+            try await step.run(input)
+        }
+    }
+}
+
 // MARK: - Step Extension
 
 extension Step {
 
-    /// Runs this step with a context value.
-    ///
-    /// ## Usage
+    /// Provides a context value for this step.
     ///
     /// ```swift
-    /// let result = try await myStep.run(input, context: URLTrackerContext.self, value: tracker)
+    /// try await myStep
+    ///     .context(config)
+    ///     .run(input)
     /// ```
-    public func run<Key: ContextKey>(
-        _ input: Input,
-        context key: Key.Type,
-        value: Key.Value
-    ) async throws -> Output {
-        try await withContext(key, value: value) {
-            try await self.run(input)
-        }
+    public func context<T: Contextable>(
+        _ value: T
+    ) -> ContextStep<Self, T.ContextKeyType> {
+        ContextStep(step: self, key: T.ContextKeyType.self, value: value)
     }
 }
 

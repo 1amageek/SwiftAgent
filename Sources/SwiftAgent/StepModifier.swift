@@ -7,8 +7,7 @@
 
 import Foundation
 
-/// A protocol that modifies the behavior or appearance of a Step
-/// Similar to SwiftUI's ViewModifier pattern
+/// A protocol that modifies the behavior of a Step.
 public protocol StepModifier {
     /// The input type of the Step being modified
     associatedtype Input: Sendable

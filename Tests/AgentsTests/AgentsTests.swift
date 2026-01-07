@@ -122,13 +122,13 @@ struct AgentsTests {
         #expect(result == true)
     }
 
-    @Test("Step run with session parameter")
-    func stepRunWithSessionParameter() async throws {
+    @Test("Step with .session() modifier")
+    func stepWithSessionModifier() async throws {
         let transform = Transform<String, Int> { $0.count }
         let session = createMockSession()
 
-        // Use the step extension that takes session parameter
-        let result = try await transform.run("hello", session: session)
+        // Use the .session() modifier
+        let result = try await transform.session(session).run("hello")
         #expect(result == 5)
     }
 }

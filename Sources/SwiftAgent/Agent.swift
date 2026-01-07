@@ -412,7 +412,7 @@ public enum ConditionalStepError: Error {
 /// A result builder that constructs an array of steps that can be executed in parallel.
 ///
 /// The parallel step builder provides a declarative syntax for constructing arrays of
-/// independent steps that can be executed concurrently, similar to SwiftUI's view builders.
+/// independent steps that can be executed concurrently.
 ///
 /// Example usage:
 /// ```swift

@@ -6,22 +6,24 @@ import Foundation
 
 /// A simple counter for testing
 @Contextable
-struct Counter: Contextable, Equatable {
-    static var defaultValue: Counter { Counter(value: 0) }
+struct Counter: Equatable {
     let value: Int
+
+    static var defaultValue: Counter { Counter(value: 0) }
 }
 
 /// A configuration for testing
 @Contextable
-struct TestConfig: Contextable, Equatable {
-    static var defaultValue: TestConfig { TestConfig(name: "", maxRetries: 0) }
+struct TestConfig: Equatable {
     let name: String
     let maxRetries: Int
+
+    static var defaultValue: TestConfig { TestConfig(name: "", maxRetries: 0) }
 }
 
 /// A tracker for testing shared state
 @Contextable
-final class URLTracker: Contextable, @unchecked Sendable {
+final class URLTracker: @unchecked Sendable {
     static var defaultValue: URLTracker { URLTracker() }
 
     private var _visitedURLs: Set<URL> = []
@@ -302,15 +304,14 @@ struct ContextConcurrentTests {
 // MARK: - Contextable Protocol Tests
 
 /// Test configuration using @Contextable macro
-/// The type must conform to Contextable with a defaultValue
 @Contextable
-struct CrawlerSettings: Contextable, Equatable {
+struct CrawlerSettings: Equatable {
+    let maxDepth: Int
+    let timeout: Int
+
     static var defaultValue: CrawlerSettings {
         CrawlerSettings(maxDepth: 3, timeout: 30)
     }
-
-    let maxDepth: Int
-    let timeout: Int
 }
 
 @Suite("Contextable Protocol Tests")

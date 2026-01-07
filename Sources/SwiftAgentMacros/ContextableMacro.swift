@@ -14,7 +14,9 @@ import SwiftCompilerPlugin
 ///
 /// This macro generates:
 /// - A peer `{TypeName}Context` enum conforming to `ContextKey`
-/// - An extension with `typealias ContextKeyType`
+/// - An extension adding `Contextable` conformance with `typealias ContextKeyType`
+///
+/// The type must define `static var defaultValue` to satisfy the `Contextable` protocol.
 public struct ContextableMacro: PeerMacro, ExtensionMacro {
 
     // MARK: - PeerMacro
@@ -65,11 +67,13 @@ public struct ContextableMacro: PeerMacro, ExtensionMacro {
             throw ContextableMacroError.unsupportedDeclaration
         }
 
+        let accessModifier = extractAccessModifier(from: declaration)
+        let accessPrefix = accessModifier.map { "\($0) " } ?? ""
         let contextKeyName = "\(typeName)Context"
 
         let extensionDecl: DeclSyntax = """
-            extension \(raw: typeName) {
-                typealias ContextKeyType = \(raw: contextKeyName)
+            extension \(raw: typeName): Contextable {
+                \(raw: accessPrefix)typealias ContextKeyType = \(raw: contextKeyName)
             }
             """
 

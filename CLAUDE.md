@@ -138,13 +138,13 @@ TaskLocal経由の汎用コンテキスト伝播システム。Agent（持つ側
 ### 基本的な使い方
 
 ```swift
-// 1. @Contextable で型を定義
+// 1. @Contextable で型を定義（Contextable準拠は自動追加）
 @Contextable
-class Library: Contextable {
-    static var defaultValue: Library { Library() }
-
+class Library {
     var books: [Book] = []
     var availableCount: Int { books.filter(\.isAvailable).count }
+
+    static var defaultValue: Library { Library() }  // 必須
 }
 
 // 2. Agent（持つ側）で .context() モディファイアで渡す
@@ -171,21 +171,22 @@ struct AnalyzeStep: Step {
 
 ### @Contextable マクロ
 
-`@Contextable`を適用すると、自動的に`{TypeName}Context: ContextKey`と`typealias ContextKeyType`が生成される。
+`@Contextable`を適用すると、自動的に`Contextable`準拠、`{TypeName}Context: ContextKey`、`typealias ContextKeyType`が生成される。
 
 ```swift
 @Contextable
-struct CrawlerConfig: Contextable {
-    static var defaultValue: CrawlerConfig {
-        CrawlerConfig(maxDepth: 3, timeout: 30)
-    }
+struct CrawlerConfig {
     let maxDepth: Int
     let timeout: Int
+
+    static var defaultValue: CrawlerConfig {  // 必須
+        CrawlerConfig(maxDepth: 3, timeout: 30)
+    }
 }
 
 // 生成されるコード:
 // enum CrawlerConfigContext: ContextKey { ... }
-// extension CrawlerConfig { typealias ContextKeyType = CrawlerConfigContext }
+// extension CrawlerConfig: Contextable { typealias ContextKeyType = CrawlerConfigContext }
 ```
 
 ### 複数Contextの連鎖

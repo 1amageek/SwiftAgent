@@ -202,14 +202,15 @@ let readOnly = $count.readOnly { $0 * 2 }
 Propagate configuration through the Step hierarchy using `@Contextable`.
 
 ```swift
-// 1. Define a Contextable type with defaultValue
+// 1. Define a type with @Contextable (adds Contextable conformance automatically)
 @Contextable
-struct CrawlerConfig: Contextable {
-    static var defaultValue: CrawlerConfig {
-        CrawlerConfig(maxDepth: 3, timeout: 30)
-    }
+struct CrawlerConfig {
     let maxDepth: Int
     let timeout: Int
+
+    static var defaultValue: CrawlerConfig {  // Required
+        CrawlerConfig(maxDepth: 3, timeout: 30)
+    }
 }
 
 // 2. Access via @Context (uses defaultValue if not provided)

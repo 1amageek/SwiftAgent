@@ -64,7 +64,8 @@ public struct GuardedStep<S: Step>: Step {
         var config = guardrail.buildConfiguration()
 
         // Merge with parent guardrail if present (inner takes precedence)
-        if let parentConfig = GuardrailContext.current {
+        let parentConfig = GuardrailContext.current
+        if !parentConfig.isEmpty {
             // Parent config is the base, this config overrides
             config = parentConfig.merged(with: config)
         }

@@ -491,20 +491,25 @@ let result = try await withContext(TrackerContext.self, value: tracker) {
 }
 ```
 
-### Optional Context
+### Default Values
 
-Use `@OptionalContext` when the context value may not be available:
+Context keys require a `defaultValue`, following SwiftUI's `EnvironmentKey` pattern. When no context is provided, the default value is used:
 
 ```swift
-struct FlexibleStep: Step {
-    @OptionalContext(TrackerContext.self) var tracker: URLTracker?
+enum TrackerContext: ContextKey {
+    @TaskLocal private static var _current: URLTracker?
 
-    func run(_ input: URL) async throws -> Result {
-        if let tracker {
-            tracker.markVisited(input)
-        }
-        // Continue without tracker if not available
+    static var defaultValue: URLTracker { URLTracker() }
+    static var current: URLTracker { _current ?? defaultValue }
+
+    static func withValue<T: Sendable>(_ value: URLTracker, operation: () async throws -> T) async rethrows -> T {
+        try await $_current.withValue(value, operation: operation)
     }
+}
+
+// @Context always returns a value (never nil)
+struct MyStep: Step {
+    @Context(TrackerContext.self) var tracker: URLTracker  // Uses defaultValue if not set
 }
 ```
 
@@ -2133,7 +2138,7 @@ PermissionMiddleware ── deny ──→ PermissionDenied
 SandboxMiddleware (injects config via @Context)
     │
     ▼
-Tool Execution (reads config via @OptionalContext)
+Tool Execution (reads config via @Context)
 ```
 
 For detailed documentation, see [docs/SECURITY.md](docs/SECURITY.md).

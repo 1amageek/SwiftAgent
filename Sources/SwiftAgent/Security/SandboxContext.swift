@@ -10,7 +10,7 @@ import Foundation
 /// Context key for sandbox configuration propagation via TaskLocal.
 ///
 /// This allows `SandboxMiddleware` to inject sandbox configuration into the
-/// async call tree, and `ExecuteCommandTool` to read it using `@OptionalContext`.
+/// async call tree, and `ExecuteCommandTool` to read it using `@Context`.
 ///
 /// ## Usage
 ///
@@ -22,10 +22,10 @@ import Foundation
 ///
 /// // In tool
 /// struct ExecuteCommandTool: Tool {
-///     @OptionalContext(SandboxContext.self) var sandboxConfig: SandboxExecutor.Configuration?
+///     @Context(SandboxContext.self) var sandboxConfig: SandboxExecutor.Configuration
 ///
 ///     func call(arguments: Args) async throws -> Output {
-///         if let config = sandboxConfig {
+///         if !sandboxConfig.isDisabled {
 ///             // Execute in sandbox
 ///         }
 ///     }
@@ -33,12 +33,20 @@ import Foundation
 /// ```
 public enum SandboxContext: ContextKey {
     @TaskLocal
-    public static var current: SandboxExecutor.Configuration?
+    private static var _current: SandboxExecutor.Configuration?
+
+    public static var defaultValue: SandboxExecutor.Configuration {
+        .none
+    }
+
+    public static var current: SandboxExecutor.Configuration {
+        _current ?? defaultValue
+    }
 
     public static func withValue<T: Sendable>(
         _ value: SandboxExecutor.Configuration,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }

@@ -40,7 +40,8 @@ import Foundation
 /// }
 ///
 /// // In PermissionMiddleware (reading)
-/// if let guardrail = GuardrailContext.current {
+/// let guardrail = GuardrailContext.current
+/// if !guardrail.isEmpty {
 ///     let effectiveConfig = guardrail.mergedPermissions(with: baseConfig)
 ///     // Use effectiveConfig for permission checking
 /// }
@@ -49,7 +50,17 @@ public enum GuardrailContext: ContextKey {
 
     /// TaskLocal storage for the current guardrail configuration.
     @TaskLocal
-    public static var current: GuardrailConfiguration?
+    private static var _current: GuardrailConfiguration?
+
+    /// The default value when no guardrail is configured.
+    public static var defaultValue: GuardrailConfiguration {
+        GuardrailConfiguration()
+    }
+
+    /// The current guardrail configuration, or empty if not set.
+    public static var current: GuardrailConfiguration {
+        _current ?? defaultValue
+    }
 
     /// Runs an operation with the given guardrail configuration in context.
     ///
@@ -61,6 +72,6 @@ public enum GuardrailContext: ContextKey {
         _ value: GuardrailConfiguration,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }

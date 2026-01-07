@@ -26,7 +26,7 @@ import SwiftAgent
 /// When `SandboxMiddleware` is in the tool pipeline, this tool automatically
 /// executes commands in a macOS sandbox. The middleware injects configuration
 /// via TaskLocal using `withContext(SandboxContext.self, ...)`, which this tool
-/// reads using `@OptionalContext(SandboxContext.self)`.
+/// reads using `@Context(SandboxContext.self)`.
 ///
 /// ```swift
 /// let config = AgentConfiguration(...)
@@ -50,7 +50,7 @@ import SwiftAgent
 public struct ExecuteCommandTool: Tool {
 
     /// Sandbox configuration from middleware via TaskLocal.
-    @OptionalContext(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration?
+    @Context(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration
     public typealias Arguments = ExecuteCommandInput
     public typealias Output = ExecuteCommandOutput
 
@@ -215,9 +215,9 @@ public struct ExecuteCommandTool: Tool {
         // Determine working directory
         let execWorkingDir = arguments.working_dir.isEmpty ? workingDirectory : arguments.working_dir
 
-        // Check for sandbox configuration from middleware (via @OptionalContext TaskLocal)
+        // Check for sandbox configuration from middleware (via @Context TaskLocal)
         #if os(macOS)
-        if let sandboxConfig {
+        if !sandboxConfig.isDisabled {
             // Execute in sandbox
             return try await executeSandboxed(
                 executable: execPath,

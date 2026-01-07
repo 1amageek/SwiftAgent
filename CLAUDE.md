@@ -55,11 +55,13 @@ struct CrawlStep: Step {
     }
 }
 
-// Context による汎用TaskLocal伝播
+// Context による汎用TaskLocal伝播（SwiftUI EnvironmentKey パターン）
 enum TrackerContext: ContextKey {
-    @TaskLocal static var current: URLTracker?
+    @TaskLocal private static var _current: URLTracker?
+    static var defaultValue: URLTracker { URLTracker() }
+    static var current: URLTracker { _current ?? defaultValue }
     static func withValue<T: Sendable>(_ value: URLTracker, operation: () async throws -> T) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }
 
@@ -134,42 +136,36 @@ let constant = Relay<Int>.constant(42)  // 書き込み無視
 
 ## Context
 
-任意の型をTaskLocal経由で伝播する汎用システム。
+SwiftUIの`EnvironmentKey`パターンに基づく、TaskLocal経由の汎用コンテキスト伝播システム。
 
 ```swift
-// 1. ContextKey を定義
+// 1. ContextKey を定義（defaultValue 必須）
 enum ConfigContext: ContextKey {
-    @TaskLocal static var current: AppConfig?
+    @TaskLocal private static var _current: AppConfig?
+
+    static var defaultValue: AppConfig { AppConfig.default }
+    static var current: AppConfig { _current ?? defaultValue }
 
     static func withValue<T: Sendable>(
         _ value: AppConfig,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }
 
-// 2. @Context で値にアクセス
+// 2. @Context で値にアクセス（defaultValueにフォールバック）
 struct ConfiguredStep: Step {
     @Context(ConfigContext.self) var config: AppConfig
 
     func run(_ input: String) async throws -> String {
-        // config を使用...
+        // config を使用（常に非Optional）
     }
 }
 
 // 3. withContext で値を提供
 try await withContext(ConfigContext.self, value: appConfig) {
     try await ConfiguredStep().run("input")
-}
-
-// @OptionalContext - 値がなくてもエラーにならない
-struct OptionalStep: Step {
-    @OptionalContext(ConfigContext.self) var config: AppConfig?
-
-    func run(_ input: String) async throws -> String {
-        if let config { /* ... */ }
-    }
 }
 
 // Step拡張
@@ -711,7 +707,8 @@ return try await withContext(SandboxContext.self, value: configuration) {
 }
 
 // ExecuteCommandTool 内部
-@OptionalContext(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration?
+@Context(SandboxContext.self) private var sandboxConfig: SandboxExecutor.Configuration
+// sandboxConfig.isDisabled でサンドボックスの有効/無効を判定
 ```
 
 ## Race / Parallel 設計

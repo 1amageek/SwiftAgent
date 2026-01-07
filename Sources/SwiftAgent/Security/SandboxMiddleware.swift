@@ -23,8 +23,8 @@ import Foundation
 ///     └─ Call next(context)  ← Always calls next!
 ///           │
 ///           ▼
-///     ExecuteCommandTool uses @OptionalContext(SandboxContext.self)
-///     and executes via SandboxExecutor
+///     ExecuteCommandTool uses @Context(SandboxContext.self)
+///     and executes via SandboxExecutor if not disabled
 /// ```
 ///
 /// ## Example
@@ -68,7 +68,7 @@ public struct SandboxMiddleware: ToolMiddleware, Sendable {
         }
 
         // Use the @Context system to propagate sandbox configuration via TaskLocal
-        // ExecuteCommandTool can read it using @OptionalContext(SandboxContext.self)
+        // ExecuteCommandTool reads it using @Context(SandboxContext.self)
         return try await withContext(SandboxContext.self, value: effectiveSandbox) {
             try await next(context)
         }
@@ -80,8 +80,8 @@ public struct SandboxMiddleware: ToolMiddleware, Sendable {
     ///
     /// Guardrail sandbox takes precedence over the middleware's configuration.
     private func effectiveSandboxConfiguration() -> SandboxExecutor.Configuration {
-        if let guardrailConfig = GuardrailContext.current,
-           let guardrailSandbox = guardrailConfig.sandbox {
+        let guardrailConfig = GuardrailContext.current
+        if let guardrailSandbox = guardrailConfig.sandbox {
             return guardrailSandbox
         }
         return configuration

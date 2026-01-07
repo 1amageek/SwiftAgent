@@ -196,8 +196,8 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
     ///
     /// Guardrail rules take precedence and are evaluated first.
     private func effectiveConfiguration() -> PermissionConfiguration {
-        guard let guardrailConfig = GuardrailContext.current,
-              guardrailConfig.hasPermissionRules else {
+        let guardrailConfig = GuardrailContext.current
+        guard guardrailConfig.hasPermissionRules else {
             return configuration
         }
         return guardrailConfig.mergedPermissions(with: configuration)

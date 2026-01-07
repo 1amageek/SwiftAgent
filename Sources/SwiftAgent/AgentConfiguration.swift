@@ -376,7 +376,7 @@ extension AgentConfiguration {
 
         // Add sandbox middleware if configured (runs after permission check)
         // SandboxMiddleware injects config via withContext(SandboxContext.self),
-        // ExecuteCommandTool reads it via @OptionalContext(SandboxContext.self)
+        // ExecuteCommandTool reads it via @Context(SandboxContext.self)
         if let sandboxConfig = security.sandbox {
             pipeline.use(SandboxMiddleware(configuration: sandboxConfig))
         }

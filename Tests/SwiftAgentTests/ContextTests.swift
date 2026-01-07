@@ -6,13 +6,17 @@ import Foundation
 
 /// A simple counter context for testing
 enum CounterContext: ContextKey {
-    @TaskLocal public static var current: Int?
+    @TaskLocal private static var _current: Int?
+
+    public static var defaultValue: Int { 0 }
+
+    public static var current: Int { _current ?? defaultValue }
 
     public static func withValue<T: Sendable>(
         _ value: Int,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }
 
@@ -20,16 +24,22 @@ enum CounterContext: ContextKey {
 struct TestConfig: Sendable {
     let name: String
     let maxRetries: Int
+
+    static let empty = TestConfig(name: "", maxRetries: 0)
 }
 
 enum ConfigContext: ContextKey {
-    @TaskLocal public static var current: TestConfig?
+    @TaskLocal private static var _current: TestConfig?
+
+    public static var defaultValue: TestConfig { .empty }
+
+    public static var current: TestConfig { _current ?? defaultValue }
 
     public static func withValue<T: Sendable>(
         _ value: TestConfig,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }
 
@@ -58,13 +68,17 @@ final class URLTracker: @unchecked Sendable {
 }
 
 enum TrackerContext: ContextKey {
-    @TaskLocal public static var current: URLTracker?
+    @TaskLocal private static var _current: URLTracker?
+
+    public static var defaultValue: URLTracker { URLTracker() }
+
+    public static var current: URLTracker { _current ?? defaultValue }
 
     public static func withValue<T: Sendable>(
         _ value: URLTracker,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await $current.withValue(value, operation: operation)
+        try await $_current.withValue(value, operation: operation)
     }
 }
 
@@ -73,9 +87,9 @@ enum TrackerContext: ContextKey {
 @Suite("Context Tests")
 struct ContextTests {
 
-    @Test("Context is nil by default")
-    func contextNilByDefault() {
-        #expect(CounterContext.current == nil)
+    @Test("Context returns defaultValue by default")
+    func contextDefaultValueByDefault() {
+        #expect(CounterContext.current == 0)  // defaultValue
     }
 
     @Test("withContext sets value for operation")
@@ -87,21 +101,21 @@ struct ContextTests {
         #expect(result == 42)
     }
 
-    @Test("withContext clears value after operation")
-    func withContextClearsAfter() async throws {
+    @Test("withContext restores defaultValue after operation")
+    func withContextRestoresAfter() async throws {
         _ = await withContext(CounterContext.self, value: 100) {
             // Value is set here
             #expect(CounterContext.current == 100)
         }
 
-        // Value should be nil after
-        #expect(CounterContext.current == nil)
+        // Value should be defaultValue after
+        #expect(CounterContext.current == 0)
     }
 
     @Test("withContext returns operation result")
     func withContextReturnsResult() async throws {
         let result = await withContext(CounterContext.self, value: 10) {
-            (CounterContext.current ?? 0) * 2
+            CounterContext.current * 2
         }
 
         #expect(result == 20)
@@ -118,26 +132,11 @@ struct ContextTests {
         }
     }
 
-    @Test("withContext with optional value - some")
-    func withContextOptionalSome() async throws {
-        let result = await withContext(CounterContext.self, value: Optional(42)) {
-            CounterContext.current
-        }
-
-        #expect(result == 42)
-    }
-
-    @Test("withContext with optional value - none")
-    func withContextOptionalNone() async throws {
-        // Set initial value
-        let result = await withContext(CounterContext.self, value: 10) {
-            // Then try to set nil
-            await withContext(CounterContext.self, value: nil as Int?) {
-                CounterContext.current  // Should still be 10
-            }
-        }
-
-        #expect(result == 10)
+    @Test("defaultValue is used when no context is set")
+    func defaultValueIsUsed() async throws {
+        // Without withContext, should use defaultValue
+        #expect(CounterContext.current == 0)
+        #expect(ConfigContext.current.name == "")
     }
 }
 
@@ -172,41 +171,6 @@ struct ContextPropertyWrapperTests {
         let result = try await step.run(10, context: CounterContext.self, value: 50)
 
         #expect(result == 60)
-    }
-}
-
-// MARK: - @OptionalContext Tests
-
-@Suite("@OptionalContext Tests")
-struct OptionalContextTests {
-
-    struct OptionalCounterStep: Step {
-        @OptionalContext(CounterContext.self) var counter: Int?
-
-        func run(_ input: Int) async throws -> Int {
-            return (counter ?? 0) + input
-        }
-    }
-
-    @Test("@OptionalContext returns nil when not set")
-    func optionalContextReturnsNil() async throws {
-        let step = OptionalCounterStep()
-
-        // No context set
-        let result = try await step.run(5)
-
-        #expect(result == 5)  // Uses default of 0
-    }
-
-    @Test("@OptionalContext returns value when set")
-    func optionalContextReturnsValue() async throws {
-        let step = OptionalCounterStep()
-
-        let result = try await withContext(CounterContext.self, value: 100) {
-            try await step.run(5)
-        }
-
-        #expect(result == 105)
     }
 }
 
@@ -247,14 +211,14 @@ struct NestedContextTests {
     @Test("Nested withContext overrides outer context")
     func nestedWithContextOverrides() async throws {
         let result = await withContext(CounterContext.self, value: 10) {
-            let outer = CounterContext.current ?? 0
+            let outer = CounterContext.current
 
             let inner = await withContext(CounterContext.self, value: 100) {
-                CounterContext.current ?? 0
+                CounterContext.current
             }
 
             // After inner block, should be back to outer value
-            let afterInner = CounterContext.current ?? 0
+            let afterInner = CounterContext.current
 
             return (outer, inner, afterInner)
         }

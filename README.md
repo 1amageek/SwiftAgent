@@ -141,6 +141,57 @@ struct OuterStep: Step {
 }
 ```
 
+### AgentSession
+
+An actor for managing interactive sessions with message queuing and real-time steering.
+
+```swift
+let session = AgentSession(tools: myTools) {
+    Instructions("You are a helpful assistant.")
+}
+
+let response = try await session.send("Hello!")
+print(response.content)
+```
+
+**Real-time Steering:**
+
+Messages can be sent while processing. Queued messages are included in the next response cycle.
+
+```swift
+Task {
+    let response = try await session.send("Write a function...")
+}
+
+// This message will be queued and included in processing
+Task {
+    _ = try await session.send("Make sure to use async/await")
+}
+```
+
+**Persistence:**
+
+Save and restore sessions using `SessionSnapshot`:
+
+```swift
+// Save
+let snapshot = await session.snapshot()
+try await store.save(snapshot)
+
+// Restore
+if let snapshot = try await store.load(id: sessionID) {
+    let restored = AgentSession.restore(from: snapshot, tools: myTools)
+}
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `transcript` | `Transcript` | Current conversation transcript |
+| `pendingMessageCount` | `Int` | Messages waiting to be processed |
+| `isResponding` | `Bool` | Whether currently generating |
+
 ### Memory / Relay
 
 Share state between Steps with reference semantics.

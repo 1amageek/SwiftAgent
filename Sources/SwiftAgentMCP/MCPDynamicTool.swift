@@ -8,25 +8,18 @@
 import Foundation
 import SwiftAgent
 
-// Typealias to avoid name collision with MCP.Tool
-#if USE_OTHER_MODELS
-public typealias LMTool = OpenFoundationModels.Tool
-#else
-public typealias LMTool = FoundationModels.Tool
-#endif
-
 // MARK: - MCP Dynamic Tool
 
 /// A dynamic tool that wraps an MCP tool and conforms to Tool protocol
 ///
 /// Tool names follow Claude Code convention: `mcp__servername__toolname`
 /// This enables per-server permission rules via `PermissionRule.mcp("servername")`.
-public struct MCPDynamicTool: LMTool, Sendable {
+public struct MCPDynamicTool: Tool, Sendable {
     public typealias Arguments = GeneratedContent
     public typealias Output = String
 
     /// The MCP tool definition
-    public let mcpTool: MCP.Tool
+    public let mcpTool: MCPTool
 
     /// The MCP client to use for tool calls
     private let client: MCPClient
@@ -66,7 +59,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     ///   - mcpTool: The MCP tool definition
     ///   - client: The MCP client for making tool calls
     ///   - serverName: The server name for namespacing (used in tool name prefix)
-    public init(mcpTool: MCP.Tool, client: MCPClient, serverName: String) {
+    public init(mcpTool: MCPTool, client: MCPClient, serverName: String) {
         self.mcpTool = mcpTool
         self.client = client
         self.serverName = serverName
@@ -120,7 +113,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Converts MCP Value (JSON Schema) to DynamicGenerationSchema
-    private func convertValueToDynamicSchema(_ value: Value, name: String) throws -> DynamicGenerationSchema {
+    private func convertValueToDynamicSchema(_ value: MCPValue, name: String) throws -> DynamicGenerationSchema {
         switch value {
         case .object(let obj):
             return try convertObjectToDynamicSchema(obj, name: name)
@@ -146,7 +139,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Converts a JSON Schema object to DynamicGenerationSchema
-    private func convertObjectToDynamicSchema(_ obj: [String: Value], name: String) throws -> DynamicGenerationSchema {
+    private func convertObjectToDynamicSchema(_ obj: [String: MCPValue], name: String) throws -> DynamicGenerationSchema {
         // Check if this is a JSON Schema definition
         if let typeValue = obj["type"] {
             return try handleJSONSchemaType(obj, typeValue: typeValue, name: name)
@@ -172,7 +165,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Handles JSON Schema type definitions
-    private func handleJSONSchemaType(_ obj: [String: Value], typeValue: Value, name: String) throws -> DynamicGenerationSchema {
+    private func handleJSONSchemaType(_ obj: [String: MCPValue], typeValue: MCPValue, name: String) throws -> DynamicGenerationSchema {
         guard case .string(let typeStr) = typeValue else {
             return DynamicGenerationSchema(type: String.self)
         }
@@ -194,7 +187,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Handles JSON Schema object type
-    private func handleObjectType(_ obj: [String: Value], name: String) throws -> DynamicGenerationSchema {
+    private func handleObjectType(_ obj: [String: MCPValue], name: String) throws -> DynamicGenerationSchema {
         var properties: [DynamicGenerationSchema.Property] = []
         var requiredProps: Set<String> = []
 
@@ -239,7 +232,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Handles JSON Schema array type
-    private func handleArrayType(_ obj: [String: Value], name: String) throws -> DynamicGenerationSchema {
+    private func handleArrayType(_ obj: [String: MCPValue], name: String) throws -> DynamicGenerationSchema {
         if case .object(let itemsObj) = obj["items"] {
             let itemSchema = try convertObjectToDynamicSchema(itemsObj, name: "\(name)Item")
             return DynamicGenerationSchema(arrayOf: itemSchema)
@@ -248,10 +241,10 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Converts GeneratedContent to MCP Value dictionary
-    private func convertGeneratedContentToValue(_ content: GeneratedContent) throws -> [String: Value]? {
+    private func convertGeneratedContentToValue(_ content: GeneratedContent) throws -> [String: MCPValue]? {
         switch content.kind {
         case .structure(properties: let dict, orderedKeys: _):
-            var result: [String: Value] = [:]
+            var result: [String: MCPValue] = [:]
             for (key, value) in dict {
                 result[key] = try convertGeneratedContentItemToValue(value)
             }
@@ -262,7 +255,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
     }
 
     /// Converts a single GeneratedContent item to MCP Value
-    private func convertGeneratedContentItemToValue(_ content: GeneratedContent) throws -> Value {
+    private func convertGeneratedContentItemToValue(_ content: GeneratedContent) throws -> MCPValue {
         switch content.kind {
         case .null:
             return .null
@@ -275,7 +268,7 @@ public struct MCPDynamicTool: LMTool, Sendable {
         case .array(let arr):
             return .array(try arr.map { try convertGeneratedContentItemToValue($0) })
         case .structure(properties: let dict, orderedKeys: _):
-            var result: [String: Value] = [:]
+            var result: [String: MCPValue] = [:]
             for (key, value) in dict {
                 result[key] = try convertGeneratedContentItemToValue(value)
             }
@@ -322,7 +315,7 @@ extension MCPClient {
 
     /// Gets all tools from the MCP server as an array of any Tool
     /// - Returns: Array of tools that can be used with LanguageModelSession
-    public func anyTools() async throws -> [any LMTool] {
+    public func anyTools() async throws -> [any Tool] {
         return try await tools()
     }
 }

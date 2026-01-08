@@ -207,4 +207,10 @@
 /// }
 /// ```
 
-@_exported import MCP
+import MCP
+
+/// Typealias for MCP.Tool to avoid naming collision with SwiftAgent's Tool
+public typealias MCPTool = MCP.Tool
+
+/// Typealias for MCP.Value
+public typealias MCPValue = MCP.Value

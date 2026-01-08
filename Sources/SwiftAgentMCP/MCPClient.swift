@@ -8,6 +8,7 @@
 import Foundation
 import System
 import SwiftAgent
+import MCP
 
 // MARK: - MCP Server Configuration
 

@@ -15,19 +15,25 @@ let package = Package(
     platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26), .tvOS(.v26)],
     products: [
         .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
+        .library(name: "SwiftAgentSkills", targets: ["SwiftAgentSkills"]),
         .library(name: "SwiftAgentSymbio", targets: ["SwiftAgentSymbio"]),
         .library(name: "SwiftAgentMCP", targets: ["SwiftAgentMCP"]),
         .library(name: "AgentTools", targets: ["AgentTools"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/apple/swift-syntax.git", from: "600.0.0"),
-        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
-        .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.0.1"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
-        .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
-        .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main")
-    ],
+    dependencies: {
+        var deps: [Package.Dependency] = [
+            .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
+            .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
+            .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
+            .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
+            .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
+            .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main")
+        ]
+        if useOtherModels {
+            deps.append(.package(url: "https://github.com/1amageek/OpenFoundationModels.git", branch: "main"))
+        }
+        return deps
+    }(),
     targets: [
         .macro(
             name: "SwiftAgentMacros",
@@ -44,12 +50,23 @@ let package = Package(
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime"),
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels"),
+                .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels")
             ] : [
                 "SwiftAgentMacros",
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime")
+            ],
+            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+        ),
+        .target(
+            name: "SwiftAgentSkills",
+            dependencies: useOtherModels ? [
+                "SwiftAgent",
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
+            ] : [
+                "SwiftAgent"
             ],
             swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
         ),

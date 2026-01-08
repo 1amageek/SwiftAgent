@@ -133,12 +133,12 @@ where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
 ///   - tryBuilder: A builder that produces the primary step.
 ///   - catchBuilder: A closure that returns a fallback step.
 /// - Returns: A `TryCatch` step.
-public func Try<TryStep: Step, CatchStep: Step>(
+public func Try<TryStep: Step, CatchStep: Step & Sendable>(
     @StepBuilder _ tryBuilder: () -> TryStep,
     `catch` catchBuilder: @escaping @Sendable () -> CatchStep
 ) -> TryCatch<TryStep, CatchStep>
 where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
-    TryCatch(tryBuilder) { _ in
+    TryCatch(tryBuilder) { @Sendable _ in
         catchBuilder()
     }
 }

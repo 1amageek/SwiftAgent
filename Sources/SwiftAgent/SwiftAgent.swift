@@ -7,8 +7,11 @@
 
 #if USE_OTHER_MODELS
 @_exported import OpenFoundationModels
+@_exported import OpenFoundationModelsExtra
+public typealias Tool = OpenFoundationModels.Tool
 #else
 @_exported import FoundationModels
+public typealias Tool = FoundationModels.Tool
 #endif
 
 /// Framework information

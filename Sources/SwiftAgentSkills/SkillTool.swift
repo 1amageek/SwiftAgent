@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftAgent
 
 /// Tool for activating skills.
 ///

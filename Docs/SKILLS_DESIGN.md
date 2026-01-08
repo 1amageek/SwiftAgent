@@ -60,28 +60,40 @@ Instructions for the agent...
 ### 3.1 Component Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         AgentSession                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │ SubagentRegistry│  │  SkillRegistry  │  │ ToolExecutionPipeline│ │
-│  └─────────────────┘  └────────┬────────┘  └─────────────────────┘  │
-└────────────────────────────────┼────────────────────────────────────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    │                         │
-              ┌─────┴─────┐           ┌───────┴───────┐
-              │  Skill    │           │ SkillDiscovery│
-              │ (struct)  │           │               │
-              └─────┬─────┘           └───────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              AgentSession                                     │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────────────────────┐ │
+│  │  SkillRegistry  │  │SkillPermissions │  │      ToolPipeline             │ │
+│  │                 │  │                 │  │ ┌─────────────────────────┐   │ │
+│  │  - skills       │  │ - rulesBySkill  │◄─┼─│  PermissionMiddleware   │   │ │
+│  │  - activeSkills │  │ - ruleRefCount  │  │ │  (dynamicRulesProvider) │   │ │
+│  └────────┬────────┘  └────────┬────────┘  │ └─────────────────────────┘   │ │
+│           │                    │           └───────────────────────────────┘ │
+│           │           ┌────────┴─────────┐                                   │
+│           │           │                  │                                   │
+│           ▼           ▼                  │                                   │
+│     ┌───────────────────┐                │                                   │
+│     │    SkillTool      │────────────────┘                                   │
+│     │  - registry       │   allowed-tools → SkillPermissions                 │
+│     │  - permissions    │                                                    │
+│     └───────────────────┘                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
                     │
-              ┌─────┴─────┐
-              │SkillLoader│
-              └─────┬─────┘
-                    │
-              ┌─────┴─────┐
-              │SKILL.md   │
-              │(filesystem)│
-              └───────────┘
+       ┌────────────┴────────────┐
+       │                         │
+ ┌─────┴─────┐           ┌───────┴───────┐
+ │  Skill    │           │ SkillDiscovery│
+ │ (struct)  │           │               │
+ └─────┬─────┘           └───────────────┘
+       │
+ ┌─────┴─────┐
+ │SkillLoader│
+ └─────┬─────┘
+       │
+ ┌─────┴─────┐
+ │SKILL.md   │
+ │(filesystem)│
+ └───────────┘
 ```
 
 ### 3.2 Data Flow
@@ -99,6 +111,12 @@ Instructions for the agent...
 2. Session Creation
    AgentSession.create()
         │
+        ├─→ SkillPermissions 作成
+        │
+        ├─→ ToolPipeline.withDynamicPermissions { skillPermissions.rules }
+        │
+        ├─→ SkillTool(registry, permissions: skillPermissions)
+        │
         ▼
    SkillRegistry.generateAvailableSkillsPrompt()
         │
@@ -114,8 +132,28 @@ Instructions for the agent...
         ▼
    SkillLoader.loadFull(path)      ←─── SKILL.md 全体をパース
         │
+        ├─→ allowed-tools がある場合:
+        │   PermissionRule.parse(allowedTools)
+        │        │
+        │        ▼
+        │   SkillPermissions.add(rules, from: skillName)
+        │
         ▼
    Skill.instructions を返却       ←─── LLM コンテキストに追加
+
+4. Permission Evaluation (ツール実行時)
+   PermissionMiddleware.handle(context)
+        │
+        ├─→ effectiveConfiguration()
+        │        │
+        │        ▼
+        │   dynamicRulesProvider() ─→ SkillPermissions.rules
+        │        │
+        │        ▼
+        │   Allow List にスキルのルールを追加
+        │
+        ▼
+   ルール評価: FinalDeny → Memory → Override → Deny → Allow → Default
 ```
 
 ## 4. Component Design
@@ -451,6 +489,8 @@ LLM がスキルを活性化するためのツール。
 ///
 /// This tool allows the LLM to load a skill's full instructions
 /// when it determines a skill is relevant to the current task.
+/// When activated, the skill's allowed-tools are automatically
+/// added to the session's permission allow list.
 public struct SkillTool: Tool {
 
     public typealias Arguments = SkillToolArguments
@@ -464,13 +504,25 @@ public struct SkillTool: Tool {
         """
 
     private let registry: SkillRegistry
+    private let permissions: SkillPermissions?
 
-    public init(registry: SkillRegistry) {
+    public init(registry: SkillRegistry, permissions: SkillPermissions? = nil) {
         self.registry = registry
+        self.permissions = permissions
     }
 
     public func call(arguments: SkillToolArguments) async throws -> SkillToolOutput {
         let skill = try await registry.activate(arguments.skillName)
+
+        // Add skill's allowed-tools to permission allow list
+        if let allowedToolsString = skill.metadata.allowedTools,
+           let permissions = self.permissions {
+            let rules = PermissionRule.parse(allowedToolsString)
+            if !rules.isEmpty {
+                permissions.add(rules, from: skill.metadata.name)
+            }
+        }
+
         return SkillToolOutput(
             skillName: skill.metadata.name,
             instructions: skill.instructions ?? "",
@@ -514,6 +566,99 @@ public struct SkillToolOutput: Sendable, PromptRepresentable {
     }
 }
 ```
+
+### 4.8 SkillPermissions
+
+スキルから付与されたパーミッションを管理するスレッドセーフなコンテナ。
+
+```swift
+/// Holds permission rules granted by activated skills.
+///
+/// This class accumulates permission rules from skills as they are activated
+/// during a session. The rules are added to the allow list when evaluating
+/// tool permissions.
+///
+/// ## Usage
+///
+/// ```swift
+/// let permissions = SkillPermissions()
+///
+/// // When a skill is activated, add its allowed-tools
+/// let rules = PermissionRule.parse("Bash(git:*) Read")
+/// permissions.add(rules, from: "git-workflow")
+///
+/// // PermissionMiddleware reads these rules
+/// let allowedRules = permissions.rules
+/// ```
+///
+/// ## Reference Counting
+///
+/// If multiple skills grant the same permission, the permission remains active
+/// until all skills that granted it are removed. This prevents one skill's
+/// deactivation from revoking permissions still needed by another skill.
+public final class SkillPermissions: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var _rulesBySkill: [String: [PermissionRule]] = [:]
+    private var _ruleRefCount: [String: Int] = [:]
+
+    public init() {}
+
+    /// The accumulated permission rules from all activated skills.
+    ///
+    /// Returns unique rules - if multiple skills grant the same pattern,
+    /// it appears only once in the result.
+    public var rules: [PermissionRule] {
+        lock.withLock {
+            Array(_ruleRefCount.keys).map { PermissionRule($0) }
+        }
+    }
+
+    /// Adds permission rules from a specific skill.
+    public func add(_ rules: [PermissionRule], from skillName: String) {
+        guard !rules.isEmpty else { return }
+        lock.withLock {
+            _rulesBySkill[skillName, default: []].append(contentsOf: rules)
+            for rule in rules {
+                _ruleRefCount[rule.pattern, default: 0] += 1
+            }
+        }
+    }
+
+    /// Removes all permission rules granted by a specific skill.
+    ///
+    /// If another skill also granted the same permission, it remains active.
+    public func remove(from skillName: String) {
+        lock.withLock {
+            guard let skillRules = _rulesBySkill.removeValue(forKey: skillName) else { return }
+            for rule in skillRules {
+                if let count = _ruleRefCount[rule.pattern] {
+                    if count <= 1 {
+                        _ruleRefCount.removeValue(forKey: rule.pattern)
+                    } else {
+                        _ruleRefCount[rule.pattern] = count - 1
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns permission rules granted by a specific skill.
+    public func rules(from skillName: String) -> [PermissionRule]
+
+    /// The names of skills that have granted permissions.
+    public var skillNames: [String]
+
+    /// Clears all permission rules.
+    public func clear()
+}
+```
+
+**Design Notes:**
+
+- **スレッドセーフ**: `NSLock` による排他制御
+- **参照カウント**: 複数スキルが同じパーミッションを付与した場合、全スキルが解除されるまで有効
+- **スキル単位の追跡**: どのスキルがどのパーミッションを付与したかを記録
 
 ## 5. Integration with AgentConfiguration
 
@@ -663,17 +808,22 @@ extension AgentSession {
 ## 7. File Structure
 
 ```
+Sources/SwiftAgentSkills/
+├── SkillMetadata.swift      # YAML frontmatter 構造体
+├── Skill.swift              # スキル構造体
+├── SkillError.swift         # エラー定義
+├── SkillLoader.swift        # SKILL.md パーサー
+├── SkillRegistry.swift      # スキル管理 Actor
+├── SkillDiscovery.swift     # スキル発見
+├── SkillTool.swift          # LLM 用ツール
+└── SkillPermissions.swift   # パーミッション管理
+
 Sources/SwiftAgent/
-├── Skills/
-│   ├── SkillMetadata.swift      # YAML frontmatter 構造体
-│   ├── Skill.swift              # スキル構造体
-│   ├── SkillError.swift         # エラー定義
-│   ├── SkillLoader.swift        # SKILL.md パーサー
-│   ├── SkillRegistry.swift      # スキル管理 Actor
-│   ├── SkillDiscovery.swift     # スキル発見
-│   └── SkillTool.swift          # LLM 用ツール
-├── AgentConfiguration.swift     # (修正) Skills 統合
-├── AgentSession.swift           # (修正) Skills 統合
+├── Security/
+│   ├── PermissionMiddleware.swift  # dynamicRulesProvider 対応
+│   └── PermissionRule.swift        # parse() メソッド追加
+├── Middleware/
+│   └── ToolPipeline.swift          # withDynamicPermissions() 追加
 └── ...
 ```
 
@@ -769,18 +919,85 @@ let config = AgentConfiguration(
 
 - スキル内の `scripts/` は直接実行しない
 - LLM が `ExecuteCommandTool` などを通じて実行する
-- 既存の `ToolPermissionDelegate` で制御可能
+- 既存の `PermissionMiddleware` で制御可能
 
 ### 10.2 File Access
 
 - `references/` と `assets/` は `ReadTool` を通じて読み取り
 - 既存の権限システムで制御
 
-### 10.3 Allowed Tools
+### 10.3 Allowed Tools Permission Integration
 
-- `allowed-tools` フィールドは参考情報として提供
-- 実際の権限は `ToolPermissionDelegate` が決定
-- 将来的に自動承認機能を追加可能
+スキルの `allowed-tools` フィールドは、スキル活性化時に自動的にパーミッションシステムと統合されます。
+
+**アーキテクチャ:**
+
+```
+スキル活性化
+    │
+    ▼
+SkillTool.call()
+    │
+    ├─→ SkillPermissions.add(rules, from: skillName)
+    │
+    ▼
+PermissionMiddleware.effectiveConfiguration()
+    │
+    ├─→ dynamicRulesProvider() ─→ SkillPermissions.rules
+    │
+    ▼
+Allow List に追加（Deny の後に評価）
+```
+
+**評価順序（重要）:**
+
+```
+1. Final Deny (絶対禁止 - スキルでもバイパス不可)
+2. Session Memory
+3. Override
+4. Deny (通常禁止)
+5. Allow (静的ルール + スキルからの動的ルール)  ← スキルはここに追加
+6. Default Action
+```
+
+**セキュリティ保証:**
+
+- スキルは `deny` や `finalDeny` ルールをバイパスできない
+- スキルは `defaultAction: .ask` の場合にユーザー確認をスキップできる
+- 複数スキルが同じパーミッションを付与した場合、参照カウントで管理
+
+**例:**
+
+```yaml
+# SKILL.md
+---
+name: git-workflow
+allowed-tools: Bash(git:*) Read
+---
+```
+
+```swift
+// スキル活性化時
+let skill = try await registry.activate("git-workflow")
+// → SkillPermissions に "Bash(git:*)" と "Read" が追加
+// → 以降の git コマンドと Read ツールはユーザー確認なしで実行可能
+// → ただし Deny("Bash(git push:*)") があれば、それは依然として拒否される
+```
+
+**SkillPermissions と PermissionMiddleware の連携:**
+
+```swift
+// セッション作成時
+let skillPermissions = SkillPermissions()
+
+// ToolPipeline に動的ルールプロバイダーを注入
+let pipeline = basePipeline.withDynamicPermissions {
+    skillPermissions.rules
+}
+
+// SkillTool に SkillPermissions を渡す
+let skillTool = SkillTool(registry: registry, permissions: skillPermissions)
+```
 
 ## 11. Future Enhancements
 

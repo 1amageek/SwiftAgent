@@ -231,15 +231,44 @@ extension SandboxExecutor.Configuration: Contextable {
 ## モジュール
 
 ### Skills
-エージェント機能を拡張するポータブルなスキルパッケージ。詳細: [docs/SKILLS_DESIGN.md](docs/SKILLS_DESIGN.md)
+エージェント機能を拡張するポータブルなスキルパッケージ。詳細: [docs/SKILLS_DESIGN.md](Docs/SKILLS_DESIGN.md)
 
 ```swift
-let config = AgentConfiguration(
+// スキル自動発見
+let config = CodingConfiguration(
     instructions: Instructions("..."),
-    modelProvider: provider,
     skills: .autoDiscover()
 )
+
+// スキル活性化時の allowed-tools
+// SKILL.md の allowed-tools フィールドが自動的に Permission に適用される
 ```
+
+**allowed-tools 連携:**
+
+スキルの SKILL.md で `allowed-tools` を指定すると、スキル活性化時に自動的に Permission の allow リストに追加される：
+
+```yaml
+---
+name: git-workflow
+description: Git操作のワークフロー
+allowed-tools: Bash(git:*) Read Write
+---
+```
+
+```swift
+// SkillTool と SkillPermissions の連携
+let permissions = SkillPermissions()
+let skillTool = SkillTool(registry: registry, permissions: permissions)
+
+// PermissionMiddleware に動的ルールを注入
+let pipeline = basePipeline.withDynamicPermissions { permissions.rules }
+```
+
+**セキュリティ:**
+- `allowed-tools` は `allow` リストに追加されるのみ
+- `deny` / `finalDeny` ルールはバイパスできない
+- 複数スキルが同じ権限を付与した場合、参照カウントで管理
 
 ### SwiftAgentMCP
 MCP統合モジュール。Claude Code互換。

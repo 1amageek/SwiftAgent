@@ -13,6 +13,9 @@ import SwiftAgent
 /// This tool allows the LLM to load a skill's full instructions
 /// when it determines a skill is relevant to the current task.
 ///
+/// When a skill is activated, its `allowed-tools` field (if present) is parsed
+/// and the corresponding permission rules are added to the session's allow list.
+///
 /// ## Usage
 ///
 /// The LLM sees available skills in `<available_skills>` XML and can
@@ -22,8 +25,12 @@ import SwiftAgent
 /// let registry = SkillRegistry()
 /// // ... register skills ...
 ///
+/// // Without skill permissions (allowed-tools ignored)
 /// let tool = SkillTool(registry: registry)
-/// // Add to agent's tool set
+///
+/// // With skill permissions (allowed-tools applied)
+/// let permissions = SkillPermissions()
+/// let tool = SkillTool(registry: registry, permissions: permissions)
 /// ```
 public struct SkillTool: Tool {
 
@@ -51,16 +58,40 @@ public struct SkillTool: Tool {
     }
 
     private let registry: SkillRegistry
+    private let permissions: SkillPermissions?
 
     /// Creates a skill activation tool.
     ///
     /// - Parameter registry: The skill registry to activate skills from.
     public init(registry: SkillRegistry) {
         self.registry = registry
+        self.permissions = nil
+    }
+
+    /// Creates a skill activation tool with permission integration.
+    ///
+    /// When a skill is activated, its `allowed-tools` field is parsed and
+    /// added to the `permissions` object, which is read by `PermissionMiddleware`.
+    ///
+    /// - Parameters:
+    ///   - registry: The skill registry to activate skills from.
+    ///   - permissions: The skill permissions container to add allowed tools to.
+    public init(registry: SkillRegistry, permissions: SkillPermissions?) {
+        self.registry = registry
+        self.permissions = permissions
     }
 
     public func call(arguments: SkillToolArguments) async throws -> SkillToolOutput {
         let skill = try await registry.activate(arguments.skillName)
+
+        // Parse and inject skill permissions if configured
+        if let allowedToolsString = skill.metadata.allowedTools,
+           let permissions = self.permissions {
+            let rules = PermissionRule.parse(allowedToolsString)
+            if !rules.isEmpty {
+                permissions.add(rules, from: skill.metadata.name)
+            }
+        }
 
         return SkillToolOutput(
             skillName: skill.metadata.name,
@@ -68,7 +99,8 @@ public struct SkillTool: Tool {
             hasScripts: skill.hasScripts,
             hasReferences: skill.hasReferences,
             hasAssets: skill.hasAssets,
-            skillPath: skill.directoryPath
+            skillPath: skill.directoryPath,
+            grantedPermissions: skill.metadata.allowedTools
         )
     }
 }
@@ -107,13 +139,20 @@ public struct SkillToolOutput: Sendable {
     /// The path to the skill directory.
     public let skillPath: String
 
+    /// The permission rules granted by this skill (if any).
+    ///
+    /// This is the raw `allowed-tools` string from the skill's SKILL.md.
+    /// Example: `"Bash(git:*) Read Write"`
+    public let grantedPermissions: String?
+
     public init(
         skillName: String,
         instructions: String,
         hasScripts: Bool,
         hasReferences: Bool,
         hasAssets: Bool,
-        skillPath: String
+        skillPath: String,
+        grantedPermissions: String? = nil
     ) {
         self.skillName = skillName
         self.instructions = instructions
@@ -121,6 +160,7 @@ public struct SkillToolOutput: Sendable {
         self.hasReferences = hasReferences
         self.hasAssets = hasAssets
         self.skillPath = skillPath
+        self.grantedPermissions = grantedPermissions
     }
 }
 
@@ -148,6 +188,12 @@ extension SkillToolOutput: PromptRepresentable {
             if hasAssets {
                 sections.append("- Assets: \(skillPath)/assets/")
             }
+        }
+
+        if let permissions = grantedPermissions, !permissions.isEmpty {
+            sections.append("")
+            sections.append("## Granted Permissions")
+            sections.append("The following tools are pre-approved for this skill: \(permissions)")
         }
 
         return Prompt(sections.joined(separator: "\n"))

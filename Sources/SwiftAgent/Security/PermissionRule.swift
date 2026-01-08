@@ -325,3 +325,52 @@ extension PermissionRule: Codable {
         try container.encode(pattern)
     }
 }
+
+// MARK: - Parsing
+
+extension PermissionRule {
+
+    /// Parses a space-delimited string of permission patterns.
+    ///
+    /// This is used to parse the `allowed-tools` field from SKILL.md frontmatter.
+    /// Patterns can include parentheses for argument patterns, and spaces inside
+    /// parentheses are preserved.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let rules = PermissionRule.parse("Bash(git:*) Read Write")
+    /// // Returns: [PermissionRule("Bash(git:*)"), PermissionRule("Read"), PermissionRule("Write")]
+    /// ```
+    ///
+    /// - Parameter string: Space-delimited patterns (e.g., "Bash(git:*) Read Write").
+    /// - Returns: Array of parsed PermissionRule objects.
+    public static func parse(_ string: String) -> [PermissionRule] {
+        var rules: [PermissionRule] = []
+        var current = ""
+        var parenDepth = 0
+
+        for char in string {
+            if char == "(" {
+                parenDepth += 1
+                current.append(char)
+            } else if char == ")" {
+                parenDepth -= 1
+                current.append(char)
+            } else if char.isWhitespace && parenDepth == 0 {
+                if !current.isEmpty {
+                    rules.append(PermissionRule(current))
+                    current = ""
+                }
+            } else {
+                current.append(char)
+            }
+        }
+
+        if !current.isEmpty {
+            rules.append(PermissionRule(current))
+        }
+
+        return rules
+    }
+}

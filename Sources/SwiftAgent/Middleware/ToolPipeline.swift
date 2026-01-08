@@ -90,6 +90,38 @@ public final class ToolPipeline: @unchecked Sendable {
         return self
     }
 
+    /// Creates a new pipeline with dynamic permission rules.
+    ///
+    /// This replaces any existing `PermissionMiddleware` with one that includes
+    /// the dynamic rules provider. Use this to inject skill-granted permissions.
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// let skillPermissions = SkillPermissions()
+    /// let pipeline = basePipeline.withDynamicPermissions { skillPermissions.rules }
+    /// ```
+    ///
+    /// - Parameter provider: A closure that returns dynamic permission rules.
+    /// - Returns: A new pipeline with the dynamic rules provider injected.
+    public func withDynamicPermissions(_ provider: @escaping DynamicPermissionRulesProvider) -> ToolPipeline {
+        let newPipeline = ToolPipeline()
+
+        for mw in self.middleware {
+            if let permissionMw = mw as? PermissionMiddleware {
+                // Replace PermissionMiddleware with one that has the dynamic rules provider
+                newPipeline.use(PermissionMiddleware(
+                    configuration: permissionMw.configuration,
+                    dynamicRulesProvider: provider
+                ))
+            } else {
+                newPipeline.use(mw)
+            }
+        }
+
+        return newPipeline
+    }
+
     /// Wraps a tool with this pipeline's middleware.
     ///
     /// - Parameter tool: The tool to wrap.

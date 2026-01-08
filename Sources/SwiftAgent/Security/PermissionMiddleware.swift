@@ -41,6 +41,12 @@ public struct PermissionDenied: Error, LocalizedError, Sendable {
     }
 }
 
+/// A provider of dynamic permission rules.
+///
+/// This type alias allows external modules (like SwiftAgentSkills) to
+/// inject permission rules that are evaluated at runtime.
+public typealias DynamicPermissionRulesProvider = @Sendable () -> [PermissionRule]
+
 /// Middleware that enforces permission rules for tool execution.
 ///
 /// This middleware evaluates the permission configuration, handles
@@ -59,21 +65,38 @@ public struct PermissionDenied: Error, LocalizedError, Sendable {
 ///     .use(middleware)
 /// ```
 ///
+/// ## Dynamic Permission Rules
+///
+/// External modules can inject dynamic rules via the `dynamicRulesProvider`:
+///
+/// ```swift
+/// let skillPermissions = SkillPermissions()
+/// let middleware = PermissionMiddleware(
+///     configuration: config,
+///     dynamicRulesProvider: { skillPermissions.rules }
+/// )
+/// ```
+///
 /// ## Rule Evaluation Order
 ///
 /// 1. Final deny rules (ALWAYS checked first, cannot be bypassed)
 /// 2. Session memory (alwaysAllow / blocked)
 /// 3. Override rules (skip regular deny if matched)
 /// 4. Deny rules (first match wins) - can be overridden
-/// 5. Allow rules (first match wins)
+/// 5. Allow rules (first match wins) - includes dynamic rules from skills
 /// 6. Default action (allow / deny / ask)
 ///
-/// **Security Note**: Final deny rules are checked before session memory
-/// to ensure security-critical restrictions cannot be bypassed by
-/// "Always Allow" decisions.
+/// **Security Note**: Dynamic rules (from skills) are added to the allow list,
+/// which is evaluated AFTER deny rules. This means skills cannot bypass
+/// deny or finalDeny rules - they can only pre-approve tools that would
+/// otherwise require user confirmation (default action = ask).
 public struct PermissionMiddleware: ToolMiddleware, Sendable {
 
-    private let configuration: PermissionConfiguration
+    /// The base permission configuration.
+    public let configuration: PermissionConfiguration
+
+    /// Provider for dynamic permission rules (e.g., from activated skills).
+    private let dynamicRulesProvider: DynamicPermissionRulesProvider?
 
     /// Session memory state container (reference type to hold Mutex).
     private final class StateContainer: @unchecked Sendable {
@@ -101,6 +124,24 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
     /// - Parameter configuration: The permission configuration.
     public init(configuration: PermissionConfiguration) {
         self.configuration = configuration
+        self.dynamicRulesProvider = nil
+        self.state = StateContainer()
+    }
+
+    /// Creates a permission middleware with dynamic rules support.
+    ///
+    /// Dynamic rules are added to the allow list and evaluated after deny rules
+    /// but before static allow rules. This is used for skill-granted permissions.
+    ///
+    /// - Parameters:
+    ///   - configuration: The permission configuration.
+    ///   - dynamicRulesProvider: A closure that returns dynamic permission rules.
+    public init(
+        configuration: PermissionConfiguration,
+        dynamicRulesProvider: DynamicPermissionRulesProvider?
+    ) {
+        self.configuration = configuration
+        self.dynamicRulesProvider = dynamicRulesProvider
         self.state = StateContainer()
     }
 
@@ -192,15 +233,34 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
 
     // MARK: - Guardrail Integration
 
-    /// Gets the effective permission configuration, merging with guardrail context if present.
+    /// Gets the effective permission configuration, merging with guardrail context
+    /// and dynamic rules if present.
     ///
-    /// Guardrail rules take precedence and are evaluated first.
+    /// Evaluation order:
+    /// 1. Guardrail rules (step-level) take precedence
+    /// 2. Dynamic rules (e.g., from skills) are added to allow list
+    /// 3. Base configuration rules
     private func effectiveConfiguration() -> PermissionConfiguration {
+        var config = configuration
+
+        // Merge guardrail context if present
         let guardrailConfig = GuardrailContext.current
-        guard guardrailConfig.hasPermissionRules else {
-            return configuration
+        if guardrailConfig.hasPermissionRules {
+            config = guardrailConfig.mergedPermissions(with: config)
         }
-        return guardrailConfig.mergedPermissions(with: configuration)
+
+        // Add dynamic rules to allow list (e.g., from activated skills)
+        if let provider = dynamicRulesProvider {
+            let dynamicRules = provider()
+            if !dynamicRules.isEmpty {
+                // Dynamic rules are prepended to allow list for priority
+                var updatedConfig = config
+                updatedConfig.allow = dynamicRules + config.allow
+                config = updatedConfig
+            }
+        }
+
+        return config
     }
 
     // MARK: - Private Methods

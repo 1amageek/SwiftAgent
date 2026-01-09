@@ -114,9 +114,23 @@ public actor AgentSession {
     /// Creates a new session with instructions.
     ///
     /// - Parameters:
-    ///   - model: The language model to use (defaults to system default).
+    ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
     ///   - instructions: Instructions builder for the session.
+#if USE_OTHER_MODELS
+    public init(
+        model: any LanguageModel,
+        tools: [any Tool] = [],
+        @InstructionsBuilder instructions: () -> Instructions
+    ) {
+        self.tools = tools
+        self.languageModelSession = LanguageModelSession(
+            model: model,
+            tools: tools,
+            instructions: instructions
+        )
+    }
+#else
     public init(
         model: SystemLanguageModel = .default,
         tools: [any Tool] = [],
@@ -129,6 +143,7 @@ public actor AgentSession {
             instructions: instructions
         )
     }
+#endif
 
     /// Creates a new session from an existing transcript.
     ///
@@ -136,8 +151,22 @@ public actor AgentSession {
     ///
     /// - Parameters:
     ///   - transcript: The transcript to restore from.
-    ///   - model: The language model to use (defaults to system default).
+    ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
+#if USE_OTHER_MODELS
+    public init(
+        transcript: Transcript,
+        model: any LanguageModel,
+        tools: [any Tool] = []
+    ) {
+        self.tools = tools
+        self.languageModelSession = LanguageModelSession(
+            model: model,
+            tools: tools,
+            transcript: transcript
+        )
+    }
+#else
     public init(
         transcript: Transcript,
         model: SystemLanguageModel = .default,
@@ -150,6 +179,7 @@ public actor AgentSession {
             transcript: transcript
         )
     }
+#endif
 
     // MARK: - Message Handling
 
@@ -245,6 +275,19 @@ public actor AgentSession {
     ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
     /// - Returns: A new session initialized with the snapshot's transcript.
+#if USE_OTHER_MODELS
+    public static func restore(
+        from snapshot: SessionSnapshot,
+        model: any LanguageModel,
+        tools: [any Tool] = []
+    ) -> AgentSession {
+        AgentSession(
+            transcript: snapshot.transcript,
+            model: model,
+            tools: tools
+        )
+    }
+#else
     public static func restore(
         from snapshot: SessionSnapshot,
         model: SystemLanguageModel = .default,
@@ -256,4 +299,5 @@ public actor AgentSession {
             tools: tools
         )
     }
+#endif
 }

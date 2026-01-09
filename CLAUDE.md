@@ -19,8 +19,8 @@ Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェ�
 
 | 種別 | Steps |
 |------|-------|
-| プリミティブ | `Transform`, `Generate`, `GenerateText`, `EmptyStep`, `Join` |
-| 合成 | `Chain2-8`, `Parallel`, `Race`, `Loop`, `Map`, `Reduce` |
+| プリミティブ | `Transform`, `Generate`, `GenerateText`, `EmptyStep`, `Join`, `Gate` |
+| 合成 | `Chain2-8`, `Pipeline`, `Parallel`, `Race`, `Loop`, `Map`, `Reduce` |
 | 修飾 | `Monitor`, `TracingStep`, `AnyStep` |
 
 ## 基本パターン
@@ -129,6 +129,99 @@ let readOnly = $counter.readOnly { $0 * 2 }
 
 // 定数 Relay
 let constant = Relay<Int>.constant(42)  // 書き込み無視
+```
+
+## Pipeline / Gate
+
+Stepの宣言的な合成とフロー制御を提供する。
+
+| 型 | 用途 |
+|---|------|
+| `Pipeline` | `@StepBuilder` でStepを順番に実行するコンテナ |
+| `Gate` | 入力を変換またはブロックするStep |
+| `GateResult` | `.pass(value)` で続行、`.block(reason:)` で中断 |
+
+```swift
+// 基本的な Pipeline + Gate
+Pipeline {
+    // 入口ゲート：検証・変換
+    Gate { input in
+        guard !input.isEmpty else {
+            return .block(reason: "Empty input")
+        }
+        return .pass(input.lowercased())
+    }
+
+    // メイン処理
+    MyAgent()
+
+    // 出口ゲート：後処理
+    Gate { output in
+        .pass(output.trimmingCharacters(in: .whitespaces))
+    }
+}
+
+// Agent 内での使用（body は既に @StepBuilder なので Pipeline 不要）
+struct SecureAgent: Agent {
+    @Session var session: LanguageModelSession
+
+    var body: some Step<String, String> {
+        Gate { input in .pass(sanitize(input)) }
+        GenerateText(session: session) { Prompt($0) }
+        Gate { output in .pass(filterSensitive(output)) }
+    }
+}
+
+// Pipeline が必要なケース：Agent の外で Step を合成
+let step = Pipeline {
+    Gate { .pass(validate($0)) }
+    MyAgent()
+}
+try await step.run(input)
+
+// Gate ファクトリメソッド
+Gate<String, String>.passthrough()           // 入力をそのまま通す
+Gate<String, String>.block(reason: "Blocked") // 常にブロック
+```
+
+**GateError:**
+- `GateError.blocked(reason:)` - ゲートがブロックした場合にスロー
+
+## Event
+
+型安全なイベント発火システム。`Notification.Name` 風の `EventName` と `@Context` で伝播する `EventBus` を使用。
+
+| 型 | 用途 |
+|---|------|
+| `EventName` | 型安全なイベント名（`Notification.Name` 風） |
+| `EventBus` | イベントの発火とリスナー管理（`@Contextable`） |
+| `EventTiming` | `.before` / `.after` - イベント発火タイミング |
+
+```swift
+// イベント名の定義（アプリ側）
+extension EventName {
+    static let sessionStarted = EventName("sessionStarted")
+    static let sessionEnded = EventName("sessionEnded")
+}
+
+// Step の .emit() モディファイア
+MyStep()
+    .emit(.sessionStarted, on: .before)  // 実行前に発火
+    .emit(.sessionEnded, on: .after)     // 実行後に発火（デフォルト）
+
+// ペイロード付き
+MyStep()
+    .emit(.completed) { output in output }  // output をペイロードに
+
+// EventBus のセットアップと使用
+let eventBus = EventBus()
+await eventBus.on(.sessionStarted) { payload in
+    print("Started: \(payload.value ?? "")")
+}
+
+try await MyAgent()
+    .context(eventBus)
+    .run(input)
 ```
 
 ## Context

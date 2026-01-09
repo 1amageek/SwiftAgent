@@ -304,6 +304,8 @@ Context is ideal for:
 | `Reduce` | Aggregate collection elements |
 | `Parallel` | Execute concurrently, collect all results |
 | `Race` | Execute concurrently, return first success |
+| `Pipeline` | Compose Steps sequentially (outside Agent) |
+| `Gate` | Transform or block execution |
 
 ### Transform
 
@@ -388,6 +390,80 @@ FetchStep()
     .timeout(.seconds(5))
     .retry(3)
     .mapError { MyError.fetchFailed($0) }
+```
+
+### Pipeline / Gate
+
+`Pipeline` composes Steps sequentially outside of an Agent. `Gate` transforms or blocks execution.
+
+```swift
+// Pipeline: compose Steps outside Agent body
+let step = Pipeline {
+    Gate { input in
+        guard !input.isEmpty else {
+            return .block(reason: "Empty input")
+        }
+        return .pass(input.lowercased())
+    }
+    MyAgent()
+    Gate { output in
+        .pass(output.trimmingCharacters(in: .whitespaces))
+    }
+}
+try await step.run("Hello")
+
+// Agent body already uses @StepBuilder, so Pipeline is unnecessary
+struct SecureAgent: Agent {
+    @Session var session: LanguageModelSession
+
+    var body: some Step<String, String> {
+        Gate { .pass(sanitize($0)) }
+        GenerateText(session: session) { Prompt($0) }
+        Gate { .pass(filterSensitive($0)) }
+    }
+}
+```
+
+**GateResult:**
+- `.pass(value)` - Continue with transformed value
+- `.block(reason:)` - Throw `GateError.blocked(reason:)`
+
+**Gate Factory Methods:**
+
+```swift
+Gate<String, String>.passthrough()           // Pass through unchanged
+Gate<String, String>.block(reason: "Blocked") // Always block
+```
+
+### Event
+
+Type-safe event emission using `EventName` (like `Notification.Name`) and `EventBus` propagated via `@Context`.
+
+```swift
+// Define event names (app-side)
+extension EventName {
+    static let sessionStarted = EventName("sessionStarted")
+    static let sessionEnded = EventName("sessionEnded")
+}
+
+// Use .emit() modifier on any Step
+MyStep()
+    .emit(.sessionStarted, on: .before)  // Emit before execution
+    .emit(.sessionEnded, on: .after)     // Emit after (default)
+
+// With payload
+MyStep()
+    .emit(.completed) { output in output }
+
+// Setup and listen
+let eventBus = EventBus()
+await eventBus.on(.sessionStarted) { payload in
+    print("Started: \(payload.value ?? "")")
+}
+
+try await MyAgent()
+    .context(eventBus)
+    .run(input)
 ```
 
 ## Structured Output

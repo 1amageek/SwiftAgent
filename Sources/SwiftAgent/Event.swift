@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // MARK: - EventName
 
@@ -31,6 +32,20 @@ public struct EventName: RawRepresentable, Hashable, Sendable {
     }
 }
 
+// MARK: - Standard Event Names
+
+extension EventName {
+    /// Emitted when a prompt is submitted to an AgentSession.
+    public static let promptSubmitted = EventName("promptSubmitted")
+
+    /// Emitted when a response is completed by an AgentSession.
+    public static let responseCompleted = EventName("responseCompleted")
+
+    /// Emitted for notifications, warnings, or errors that don't interrupt processing.
+    /// Value typically contains a descriptive message string.
+    public static let notification = EventName("notification")
+}
+
 // MARK: - EventTiming
 
 /// When to emit an event relative to Step execution.
@@ -41,9 +56,105 @@ public enum EventTiming: Sendable {
     case after
 }
 
+// MARK: - Event Protocol
+
+/// A type-safe event that can be emitted through EventBus.
+///
+/// Implement this protocol to create custom event types:
+///
+/// ```swift
+/// struct MyCustomEvent: Event {
+///     let name: EventName
+///     let timestamp: Date
+///     let customProperty: String
+/// }
+/// ```
+public protocol Event: Sendable {
+    /// The event name.
+    var name: EventName { get }
+    /// When the event was created.
+    var timestamp: Date { get }
+}
+
+// MARK: - SessionEvent
+
+/// An event emitted by AgentSession.
+///
+/// Use this for session lifecycle events like prompt submission and response completion.
+public struct SessionEvent: Event {
+    public let name: EventName
+    public let timestamp: Date
+    public let sessionID: String
+    public let value: (any Sendable)?
+
+    public init(
+        name: EventName,
+        sessionID: String,
+        value: (any Sendable)? = nil,
+        timestamp: Date = Date()
+    ) {
+        self.name = name
+        self.timestamp = timestamp
+        self.sessionID = sessionID
+        self.value = value
+    }
+}
+
+// MARK: - StepEvent
+
+/// An event emitted by Step execution.
+///
+/// Use this for Step lifecycle events like step started and completed.
+public struct StepEvent: Event {
+    public let name: EventName
+    public let timestamp: Date
+    public let stepName: String
+    public let value: (any Sendable)?
+
+    public init(
+        name: EventName,
+        stepName: String,
+        value: (any Sendable)? = nil,
+        timestamp: Date = Date()
+    ) {
+        self.name = name
+        self.timestamp = timestamp
+        self.stepName = stepName
+        self.value = value
+    }
+}
+
+// MARK: - AgentEvent
+
+/// An event emitted by distributed agents.
+///
+/// Use this for multi-agent coordination events.
+public struct AgentEvent: Event {
+    public let name: EventName
+    public let timestamp: Date
+    public let agentID: String
+    public let value: (any Sendable)?
+
+    public init(
+        name: EventName,
+        agentID: String,
+        value: (any Sendable)? = nil,
+        timestamp: Date = Date()
+    ) {
+        self.name = name
+        self.timestamp = timestamp
+        self.agentID = agentID
+        self.value = value
+    }
+}
+
 // MARK: - EventBus
 
-/// A context-propagated event bus for emitting and listening to events.
+/// A thread-safe event bus for emitting and listening to events.
+///
+/// EventBus is a class (not actor) using Mutex for thread safety,
+/// making it compatible with distributed actors and other contexts
+/// where actor isolation is problematic.
 ///
 /// Use `@Context` to access the event bus from any Step:
 ///
@@ -52,7 +163,7 @@ public enum EventTiming: Sendable {
 ///     @Context var events: EventBus
 ///
 ///     func run(_ input: String) async throws -> String {
-///         await events.emit(.processingStarted)
+///         await events.emit(StepEvent(name: .processingStarted, stepName: "MyStep"))
 ///         // ...
 ///         return result
 ///     }
@@ -67,39 +178,25 @@ public enum EventTiming: Sendable {
 ///     .emit(.completed, on: .after)
 /// ```
 @Contextable
-public actor EventBus {
+public final class EventBus: Sendable {
 
-    /// Payload delivered to event handlers.
-    public struct Payload: Sendable {
-        /// The event name.
-        public let name: EventName
-        /// Optional value associated with the event.
-        public let value: (any Sendable)?
+    public typealias Handler = @Sendable (any Event) async -> Void
 
-        public init(name: EventName, value: (any Sendable)? = nil) {
-            self.name = name
-            self.value = value
-        }
-    }
-
-    public typealias Handler = @Sendable (Payload) async -> Void
-
-    private var listeners: [EventName: [Handler]] = [:]
+    private let handlers: Mutex<[EventName: [Handler]]>
 
     public static var defaultValue: EventBus { EventBus() }
 
-    public init() {}
+    public init() {
+        self.handlers = Mutex([:])
+    }
 
     /// Emits an event to all registered listeners.
     ///
-    /// - Parameters:
-    ///   - name: The event name.
-    ///   - value: Optional value to include in the payload.
-    public func emit(_ name: EventName, value: (any Sendable)? = nil) async {
-        let handlers = listeners[name] ?? []
-        let payload = Payload(name: name, value: value)
-        for handler in handlers {
-            await handler(payload)
+    /// - Parameter event: The event to emit.
+    public func emit(_ event: any Event) async {
+        let eventHandlers = handlers.withLock { $0[event.name] ?? [] }
+        for handler in eventHandlers {
+            await handler(event)
         }
     }
 
@@ -109,19 +206,19 @@ public actor EventBus {
     ///   - name: The event name to listen for.
     ///   - handler: The handler to call when the event is emitted.
     public func on(_ name: EventName, handler: @escaping Handler) {
-        listeners[name, default: []].append(handler)
+        handlers.withLock { $0[name, default: []].append(handler) }
     }
 
     /// Removes all handlers for an event.
     ///
     /// - Parameter name: The event name.
     public func off(_ name: EventName) {
-        listeners[name] = nil
+        handlers.withLock { _ = $0.removeValue(forKey: name) }
     }
 
     /// Removes all handlers for all events.
     public func removeAllHandlers() {
-        listeners.removeAll()
+        handlers.withLock { $0.removeAll() }
     }
 }
 
@@ -133,15 +230,18 @@ public struct EmittingStep<Base: Step>: Step {
     public typealias Output = Base.Output
 
     private let base: Base
+    private let stepName: String
     private let beforeEvents: [(EventName, ((any Sendable)?) -> (any Sendable)?)]
     private let afterEvents: [(EventName, (Output) -> (any Sendable)?)]
 
     init(
         base: Base,
+        stepName: String? = nil,
         beforeEvents: [(EventName, ((any Sendable)?) -> (any Sendable)?)] = [],
         afterEvents: [(EventName, (Output) -> (any Sendable)?)] = []
     ) {
         self.base = base
+        self.stepName = stepName ?? String(describing: type(of: base))
         self.beforeEvents = beforeEvents
         self.afterEvents = afterEvents
     }
@@ -151,16 +251,26 @@ public struct EmittingStep<Base: Step>: Step {
         let eventBus = EventBusContext.current
 
         // Emit before events
-        for (name, payload) in beforeEvents {
-            await eventBus.emit(name, value: payload(nil))
+        for (name, payloadBuilder) in beforeEvents {
+            let event = StepEvent(
+                name: name,
+                stepName: stepName,
+                value: payloadBuilder(nil)
+            )
+            await eventBus.emit(event)
         }
 
         // Run the base step
         let output = try await base.run(input)
 
         // Emit after events
-        for (name, payload) in afterEvents {
-            await eventBus.emit(name, value: payload(output))
+        for (name, payloadBuilder) in afterEvents {
+            let event = StepEvent(
+                name: name,
+                stepName: stepName,
+                value: payloadBuilder(output)
+            )
+            await eventBus.emit(event)
         }
 
         return output
@@ -252,12 +362,14 @@ extension EmittingStep {
         case .before:
             return EmittingStep(
                 base: base,
+                stepName: stepName,
                 beforeEvents: beforeEvents + [(name, { _ in nil })],
                 afterEvents: afterEvents
             )
         case .after:
             return EmittingStep(
                 base: base,
+                stepName: stepName,
                 beforeEvents: beforeEvents,
                 afterEvents: afterEvents + [(name, { _ in nil })]
             )
@@ -274,12 +386,14 @@ extension EmittingStep {
         case .before:
             return EmittingStep(
                 base: base,
+                stepName: stepName,
                 beforeEvents: beforeEvents + [(name, { _ in nil })],
                 afterEvents: afterEvents
             )
         case .after:
             return EmittingStep(
                 base: base,
+                stepName: stepName,
                 beforeEvents: beforeEvents,
                 afterEvents: afterEvents + [(name, { payload($0) })]
             )

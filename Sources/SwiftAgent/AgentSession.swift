@@ -11,8 +11,8 @@ import Synchronization
 /// A thread-safe class that manages an interactive session with a language model.
 ///
 /// `AgentSession` provides a simple interface for sending messages to a language model
-/// and receiving responses. It supports queuing messages when the session is processing,
-/// with automatic queue draining for real-time steering of the agent.
+/// and receiving responses. It supports steering where additional context can be
+/// accumulated and included in subsequent prompts.
 ///
 /// This is implemented as a class with Mutex (not actor) for compatibility with
 /// distributed actors and other contexts where actor isolation is problematic.
@@ -28,13 +28,30 @@ import Synchronization
 /// print(response.content)
 /// ```
 ///
+/// ## Steering
+///
+/// Use `steer()` to add additional context to the **next** prompt:
+///
+/// ```swift
+/// // Add steering hints before sending
+/// session.steer("Make sure to use async/await")
+/// session.steer("Add error handling")
+///
+/// // Steering messages are combined with the next send()
+/// let response = try await session.send("Write a function...")
+/// print(response.content)
+/// ```
+///
+/// **Note:** Steering messages added while a prompt is being processed
+/// will be included in the *following* prompt, not the current one.
+///
 /// ## Event Integration
 ///
 /// AgentSession automatically emits events through its EventBus:
 ///
 /// ```swift
 /// let eventBus = EventBus()
-/// eventBus.on(.promptSubmitted) { event in
+/// await eventBus.on(.promptSubmitted) { event in
 ///     if let sessionEvent = event as? SessionEvent {
 ///         print("Session \(sessionEvent.sessionID) received prompt")
 ///     }
@@ -42,53 +59,6 @@ import Synchronization
 ///
 /// let session = AgentSession(eventBus: eventBus, tools: myTools) {
 ///     Instructions("You are a helpful assistant.")
-/// }
-/// ```
-///
-/// ## Real-time Steering and Auto-Draining
-///
-/// Messages can be sent at any time. If the session is currently processing,
-/// the message is queued and will be **automatically processed** when the current
-/// operation completes. The queue is drained in a loop until empty.
-///
-/// **Important**: `send()` returns only the response for the *initial* message.
-/// - `.completed`: The message was processed immediately.
-/// - `.queued`: The message was queued. Its response will be emitted via
-///   `.responseCompleted` event when processed.
-///
-/// ```swift
-/// Task {
-///     let response = try await session.send("Write a function...")
-///     // This returns the response for "Write a function..."
-/// }
-///
-/// // This message will be queued and auto-processed
-/// Task {
-///     let result = try await session.send("Make sure to use async/await")
-///     // result is .queued - response comes via event
-/// }
-///
-/// // Listen for queued message responses
-/// eventBus.on(.responseCompleted) { event in
-///     // Handle response for queued messages
-/// }
-/// ```
-///
-/// ## Queue Behavior
-///
-/// - **FIFO Order**: Messages are processed in the order they were received.
-/// - **Batching**: Queued messages are batched together in each processing cycle.
-/// - **Back-pressure**: Queue has a maximum size (default: 100). Exceeding it throws
-///   `SessionError.queueFull`.
-/// - **Error Handling**: Errors during queue processing are emitted via `.notification`
-///   event and don't stop the drain loop.
-///
-/// ## Configuration
-///
-/// ```swift
-/// let config = SessionConfiguration(maxQueueSize: 50)
-/// let session = AgentSession(configuration: config, tools: myTools) {
-///     Instructions("...")
 /// }
 /// ```
 ///
@@ -106,77 +76,58 @@ import Synchronization
 ///     let restored = AgentSession.restore(from: snapshot, tools: myTools)
 /// }
 /// ```
-/// Configuration for AgentSession behavior.
-public struct SessionConfiguration: Sendable {
-    /// Maximum number of messages that can be queued while processing.
-    /// When exceeded, `send()` throws `SessionError.queueFull`.
-    public let maxQueueSize: Int
 
-    /// Default configuration with reasonable limits.
-    public static let `default` = SessionConfiguration(maxQueueSize: 100)
-
-    /// Creates a new session configuration.
-    /// - Parameter maxQueueSize: Maximum queue size. Defaults to 100.
-    public init(maxQueueSize: Int = 100) {
-        self.maxQueueSize = maxQueueSize
-    }
+/// Delegate protocol for creating and managing LanguageModelSession instances.
+///
+/// This delegate allows AgentSession to recreate its underlying LanguageModelSession
+/// when needed (e.g., for transcript compaction) without knowing the specific
+/// model configuration details.
+public protocol LanguageModelSessionDelegate: Sendable {
+    /// Creates a new LanguageModelSession with the given transcript.
+    ///
+    /// - Parameter transcript: The transcript to initialize the session with.
+    /// - Returns: A new LanguageModelSession instance.
+    func createSession(with transcript: Transcript) -> LanguageModelSession
 }
 
-/// Errors that can occur during session operations.
-public enum SessionError: Error, Sendable {
-    /// The message queue is full. Try again later or increase maxQueueSize.
-    case queueFull(currentSize: Int, maxSize: Int)
+/// Default delegate implementation that uses a factory closure to create sessions.
+///
+/// This struct captures the model and tools configuration, allowing AgentSession
+/// to recreate its underlying LanguageModelSession when needed.
+public struct DefaultSessionDelegate: LanguageModelSessionDelegate {
+    private let factory: @Sendable (Transcript) -> LanguageModelSession
+
+    /// Creates a new delegate with the given factory closure.
+    ///
+    /// - Parameter factory: A closure that creates a LanguageModelSession from a Transcript.
+    public init(factory: @escaping @Sendable (Transcript) -> LanguageModelSession) {
+        self.factory = factory
+    }
+
+    public func createSession(with transcript: Transcript) -> LanguageModelSession {
+        factory(transcript)
+    }
 }
 
 public final class AgentSession: Sendable {
 
     // MARK: - Types
 
-    /// A message sent to the session.
-    public struct Message: Sendable, Identifiable, Codable {
-        /// Unique identifier for the message.
-        public let id: String
-
-        /// The content of the message.
+    /// The result of sending a message.
+    public struct Response: Sendable {
+        /// The generated text content.
         public let content: String
 
-        /// When the message was created.
-        public let timestamp: Date
+        /// All transcript entries added during this request (prompt, toolCalls, toolOutput, response).
+        public let entries: [Transcript.Entry]
 
-        /// Creates a new message.
-        public init(id: String = UUID().uuidString, content: String) {
-            self.id = id
+        /// Time taken to process the request.
+        public let duration: Duration
+
+        public init(content: String, entries: [Transcript.Entry], duration: Duration) {
             self.content = content
-            self.timestamp = Date()
-        }
-    }
-
-    /// The result of sending a message.
-    public enum Response: Sendable {
-        /// The message was processed and a response was generated.
-        /// - Parameters:
-        ///   - content: The generated text content.
-        ///   - entries: All transcript entries added during this request (prompt, toolCalls, toolOutput, response).
-        ///   - duration: Time taken to process the request.
-        case completed(String, entries: [Transcript.Entry], duration: Duration)
-
-        /// The message was queued because the session is currently processing.
-        case queued(Message)
-
-        /// The generated content (for completed responses).
-        public var content: String? {
-            switch self {
-            case .completed(let content, _, _):
-                return content
-            case .queued:
-                return nil
-            }
-        }
-
-        /// Whether the response is completed.
-        public var isCompleted: Bool {
-            if case .completed = self { return true }
-            return false
+            self.entries = entries
+            self.duration = duration
         }
     }
 
@@ -188,19 +139,23 @@ public final class AgentSession: Sendable {
     /// The event bus for emitting session events.
     public let eventBus: EventBus
 
-    /// The configuration for this session.
-    public let configuration: SessionConfiguration
-
     // MARK: - Private State
 
     private struct SessionState: Sendable {
-        var messageQueue: [Message] = []
+        var steeringMessages: [String] = []
         var isProcessing = false
+        var waitQueue: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
     }
 
     private let state: Mutex<SessionState>
-    private let languageModelSession: LanguageModelSession
-    private let tools: [any Tool]
+    private let languageModelSessionStorage: Mutex<LanguageModelSession>
+    private let delegate: any LanguageModelSessionDelegate
+
+    /// The underlying language model session.
+    private var languageModelSession: LanguageModelSession {
+        get { languageModelSessionStorage.withLock { $0 } }
+        set { languageModelSessionStorage.withLock { $0 = newValue } }
+    }
 
     // MARK: - Initialization
 
@@ -209,7 +164,6 @@ public final class AgentSession: Sendable {
     /// - Parameters:
     ///   - id: Unique identifier for this session. Defaults to a new UUID.
     ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - configuration: Session configuration. Defaults to `.default`.
     ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
     ///   - instructions: Instructions builder for the session.
@@ -217,41 +171,41 @@ public final class AgentSession: Sendable {
     public init(
         id: String = UUID().uuidString,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         model: any LanguageModel,
         tools: [any Tool] = [],
         @InstructionsBuilder instructions: () -> Instructions
     ) {
         self.id = id
         self.eventBus = eventBus
-        self.configuration = configuration
-        self.tools = tools
         self.state = Mutex(SessionState())
-        self.languageModelSession = LanguageModelSession(
+        self.languageModelSessionStorage = Mutex(LanguageModelSession(
             model: model,
             tools: tools,
             instructions: instructions
-        )
+        ))
+        self.delegate = DefaultSessionDelegate { transcript in
+            LanguageModelSession(model: model, tools: tools, transcript: transcript)
+        }
     }
 #else
     public init(
         id: String = UUID().uuidString,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         model: SystemLanguageModel = .default,
         tools: [any Tool] = [],
         @InstructionsBuilder instructions: () -> Instructions
     ) {
         self.id = id
         self.eventBus = eventBus
-        self.configuration = configuration
-        self.tools = tools
         self.state = Mutex(SessionState())
-        self.languageModelSession = LanguageModelSession(
+        self.languageModelSessionStorage = Mutex(LanguageModelSession(
             model: model,
             tools: tools,
             instructions: instructions
-        )
+        ))
+        self.delegate = DefaultSessionDelegate { transcript in
+            LanguageModelSession(model: model, tools: tools, transcript: transcript)
+        }
     }
 #endif
 
@@ -262,7 +216,6 @@ public final class AgentSession: Sendable {
     /// - Parameters:
     ///   - id: Unique identifier for this session.
     ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - configuration: Session configuration. Defaults to `.default`.
     ///   - transcript: The transcript to restore from.
     ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
@@ -270,145 +223,191 @@ public final class AgentSession: Sendable {
     public init(
         id: String = UUID().uuidString,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         transcript: Transcript,
         model: any LanguageModel,
         tools: [any Tool] = []
     ) {
         self.id = id
         self.eventBus = eventBus
-        self.configuration = configuration
-        self.tools = tools
         self.state = Mutex(SessionState())
-        self.languageModelSession = LanguageModelSession(
+        self.languageModelSessionStorage = Mutex(LanguageModelSession(
             model: model,
             tools: tools,
             transcript: transcript
-        )
+        ))
+        self.delegate = DefaultSessionDelegate { transcript in
+            LanguageModelSession(model: model, tools: tools, transcript: transcript)
+        }
     }
 #else
     public init(
         id: String = UUID().uuidString,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         transcript: Transcript,
         model: SystemLanguageModel = .default,
         tools: [any Tool] = []
     ) {
         self.id = id
         self.eventBus = eventBus
-        self.configuration = configuration
-        self.tools = tools
         self.state = Mutex(SessionState())
-        self.languageModelSession = LanguageModelSession(
+        self.languageModelSessionStorage = Mutex(LanguageModelSession(
             model: model,
             tools: tools,
             transcript: transcript
-        )
+        ))
+        self.delegate = DefaultSessionDelegate { transcript in
+            LanguageModelSession(model: model, tools: tools, transcript: transcript)
+        }
     }
 #endif
 
+    /// Creates a new session with an externally provided delegate.
+    ///
+    /// This initializer allows full control over how LanguageModelSession instances
+    /// are created, enabling custom model configurations, tool setups, or testing mocks.
+    ///
+    /// - Parameters:
+    ///   - id: Unique identifier for this session. Defaults to a new UUID.
+    ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
+    ///   - initialSession: The initial LanguageModelSession to use.
+    ///   - delegate: The delegate responsible for creating new sessions when needed.
+    public init(
+        id: String = UUID().uuidString,
+        eventBus: EventBus = EventBus(),
+        initialSession: LanguageModelSession,
+        delegate: any LanguageModelSessionDelegate
+    ) {
+        self.id = id
+        self.eventBus = eventBus
+        self.state = Mutex(SessionState())
+        self.languageModelSessionStorage = Mutex(initialSession)
+        self.delegate = delegate
+    }
+
     // MARK: - Message Handling
 
-    /// Sends a message to the session.
+    /// Sends a message to the session and waits for the response.
     ///
-    /// If the session is currently processing another message, this message
-    /// will be queued and automatically processed when the current operation completes.
+    /// If the session is currently processing another message, this method waits
+    /// for the current processing to complete before starting.
     ///
-    /// **Important**: The returned `Response` is only for the *initial* message.
-    /// - `.completed`: The message was processed immediately and this is the response.
-    /// - `.queued`: The message was queued during processing. It will be automatically
-    ///   processed, and the response will be emitted via `.responseCompleted` event.
-    ///
-    /// Messages are processed in FIFO order. Queued messages are batched together
-    /// with subsequent messages in the same processing cycle.
+    /// Any steering messages added via `steer()` will be included in the prompt.
     ///
     /// - Parameter content: The message content.
-    /// - Returns: The response (completed or queued).
-    /// - Throws: `SessionError.queueFull` if the queue exceeds `configuration.maxQueueSize`.
+    /// - Returns: The response containing the generated content and metadata.
+    /// - Throws: `CancellationError` if the task was cancelled while waiting.
     public func send(_ content: String) async throws -> Response {
-        let message = Message(content: content)
-
-        let result = state.withLock { state -> Result<Bool, SessionError> in
-            if state.isProcessing {
-                if state.messageQueue.count >= configuration.maxQueueSize {
-                    return .failure(.queueFull(
-                        currentSize: state.messageQueue.count,
-                        maxSize: configuration.maxQueueSize
-                    ))
-                }
-                state.messageQueue.append(message)
-                return .success(true)  // queued
-            }
-            return .success(false)  // process immediately
+        // Acquire exclusive processing slot (returns false if cancelled while waiting)
+        let acquired = await acquireProcessingSlot()
+        guard acquired else {
+            throw CancellationError()
         }
+        defer { releaseProcessingSlot() }
 
-        switch result {
-        case .failure(let error):
-            throw error
-        case .success(true):
-            return .queued(message)
-        case .success(false):
-            return try await process(message)
-        }
+        // Also check cancellation after acquiring in case cancelled during handoff
+        try Task.checkCancellation()
+
+        return try await processMessage(content)
     }
 
-    /// Processes a message and any queued messages.
+    /// Adds a steering message to be included in the **next** prompt.
     ///
-    /// This method processes the initial message, then drains any messages
-    /// that were queued during processing. Only the first response is returned;
-    /// subsequent responses are emitted via events.
-    private func process(_ message: Message) async throws -> Response {
-        state.withLock { $0.isProcessing = true }
-
-        // Process initial message and get the first response
-        let firstResponse: Response
-        do {
-            firstResponse = try await processMessages(initialMessage: message)
-        } catch {
-            // On error, drain queue and reset state before re-throwing
-            await drainRemainingQueue()
-            state.withLock { $0.isProcessing = false }
-            throw error
-        }
-
-        // Drain any messages that were queued during processing
-        await drainRemainingQueue()
-
-        state.withLock { $0.isProcessing = false }
-
-        return firstResponse
+    /// Steering messages are accumulated and combined with the next message
+    /// sent via `send()`. They are consumed when the prompt is built.
+    ///
+    /// **Note:** Steering messages added while a prompt is being processed
+    /// will be included in the *following* prompt, not the current one.
+    ///
+    /// - Parameter content: The steering message content.
+    public func steer(_ content: String) {
+        state.withLock { $0.steeringMessages.append(content) }
     }
 
-    /// Processes the initial message along with any currently queued messages.
-    private func processMessages(initialMessage: Message) async throws -> Response {
+    // MARK: - Processing
+
+    /// Acquires the exclusive processing slot, waiting if necessary.
+    ///
+    /// Uses a continuation queue for efficient FIFO waiting without CPU spinning.
+    /// Supports task cancellation - cancelled tasks are removed from the queue.
+    ///
+    /// - Returns: `true` if slot was acquired, `false` if cancelled while waiting.
+    private func acquireProcessingSlot() async -> Bool {
+        let waiterID = UUID()
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let shouldResumeImmediately = state.withLock { state -> Bool in
+                    if !state.isProcessing {
+                        state.isProcessing = true
+                        return true
+                    }
+                    state.waitQueue.append((id: waiterID, continuation: continuation))
+                    return false
+                }
+                if shouldResumeImmediately {
+                    continuation.resume(returning: true)
+                }
+            }
+        } onCancel: {
+            // Remove from queue and resume with false if still waiting
+            let continuation: CheckedContinuation<Bool, Never>? = state.withLock { state in
+                if let index = state.waitQueue.firstIndex(where: { $0.id == waiterID }) {
+                    let waiter = state.waitQueue.remove(at: index)
+                    return waiter.continuation
+                }
+                return nil
+            }
+            continuation?.resume(returning: false)
+        }
+    }
+
+    /// Releases the processing slot and resumes the next waiter if any.
+    ///
+    /// Resumes continuation outside the lock to prevent potential deadlocks.
+    private func releaseProcessingSlot() {
+        let nextWaiter: CheckedContinuation<Bool, Never>? = state.withLock { state in
+            if let next = state.waitQueue.first {
+                state.waitQueue.removeFirst()
+                return next.continuation  // isProcessing remains true for next waiter
+            }
+            state.isProcessing = false
+            return nil
+        }
+        nextWaiter?.resume(returning: true)
+    }
+
+    /// Processes a message with any accumulated steering messages.
+    ///
+    /// Captures the session reference at the start to handle mid-processing
+    /// session replacement correctly. If `replaceSession()` is called during
+    /// processing, current processing continues with the captured session,
+    /// and the next message uses the new session.
+    private func processMessage(_ content: String) async throws -> Response {
+        let startTime = ContinuousClock.now
+
+        // Capture session reference to handle mid-processing replacement
+        let currentSession = languageModelSession
+
+        // Record transcript count before processing to calculate diff later
+        let startIndex = currentSession.transcript.count
+
+        // Build prompt with steering messages
+        let prompt = buildPrompt(mainMessage: content)
+
         // Emit prompt submitted event
         await eventBus.emit(SessionEvent(
             name: .promptSubmitted,
             sessionID: id,
-            value: initialMessage.content
+            value: prompt
         ))
 
-        let startTime = ContinuousClock.now
-
-        // Record transcript count before processing to calculate diff later
-        let startIndex = languageModelSession.transcript.count
-
-        // Include any queued messages (FIFO: queued first, then initial)
-        let queuedMessages = state.withLock { state -> [Message] in
-            let messages = state.messageQueue
-            state.messageQueue.removeAll()
-            return messages
-        }
-        let allMessages = queuedMessages + [initialMessage]
-        let prompt = buildPrompt(from: allMessages)
-
-        let response = try await languageModelSession.respond(to: prompt)
+        // Use captured session for processing
+        let response = try await currentSession.respond(to: prompt)
 
         let duration = ContinuousClock.now - startTime
 
-        // Get all entries added during this request (prompt, toolCalls, toolOutput, response)
-        let newEntries = Array(languageModelSession.transcript.suffix(from: startIndex))
+        // Get all entries added during this request from captured session
+        let newEntries = Array(currentSession.transcript.suffix(from: startIndex))
 
         // Emit response completed event
         await eventBus.emit(SessionEvent(
@@ -417,65 +416,23 @@ public final class AgentSession: Sendable {
             value: response.content
         ))
 
-        return .completed(response.content, entries: newEntries, duration: duration)
+        return Response(content: response.content, entries: newEntries, duration: duration)
     }
 
-    /// Drains and processes any messages that were queued during processing.
-    ///
-    /// Since callers already received `.queued` response, results are emitted
-    /// via `.responseCompleted` events. Errors don't stop the drain loop;
-    /// they're emitted via `.notification` events.
-    ///
-    /// Messages are processed in FIFO order, batched together in each cycle.
-    private func drainRemainingQueue() async {
-        while true {
-            // Atomically get all pending messages
-            let pendingMessages = state.withLock { state -> [Message] in
-                let messages = state.messageQueue
-                state.messageQueue.removeAll()
-                return messages
-            }
-
-            if pendingMessages.isEmpty {
-                return
-            }
-
-            // Process the queued messages
-            do {
-                let prompt = buildPrompt(from: pendingMessages)
-
-                // Emit event for the batched prompt
-                await eventBus.emit(SessionEvent(
-                    name: .promptSubmitted,
-                    sessionID: id,
-                    value: prompt
-                ))
-
-                let response = try await languageModelSession.respond(to: prompt)
-
-                // Emit response completed event
-                await eventBus.emit(SessionEvent(
-                    name: .responseCompleted,
-                    sessionID: id,
-                    value: response.content
-                ))
-            } catch {
-                // Log error but continue draining - callers already have .queued response
-                await eventBus.emit(SessionEvent(
-                    name: .notification,
-                    sessionID: id,
-                    value: "Error processing queued messages: \(error.localizedDescription)"
-                ))
-            }
+    /// Builds a prompt from the main message and any steering messages.
+    private func buildPrompt(mainMessage: String) -> String {
+        let steering = state.withLock { state -> [String] in
+            let messages = state.steeringMessages
+            state.steeringMessages.removeAll()
+            return messages
         }
-    }
 
-    /// Builds a prompt from multiple messages.
-    private func buildPrompt(from messages: [Message]) -> String {
-        if messages.count == 1 {
-            return messages[0].content
+        if steering.isEmpty {
+            return mainMessage
         }
-        return messages.map { $0.content }.joined(separator: "\n\n")
+
+        // Combine main message with steering messages
+        return ([mainMessage] + steering).joined(separator: "\n\n")
     }
 
     // MARK: - Session State
@@ -485,14 +442,31 @@ public final class AgentSession: Sendable {
         languageModelSession.transcript
     }
 
-    /// The number of messages waiting to be processed.
-    public var pendingMessageCount: Int {
-        state.withLock { $0.messageQueue.count }
-    }
-
     /// Whether the session is currently generating a response.
     public var isResponding: Bool {
         state.withLock { $0.isProcessing }
+    }
+
+    /// The number of pending steering messages.
+    public var pendingSteeringCount: Int {
+        state.withLock { $0.steeringMessages.count }
+    }
+
+    // MARK: - Session Replacement
+
+    /// Replaces the underlying LanguageModelSession with a new one created from the given transcript.
+    ///
+    /// This can be called at any time, including while processing. If called while processing:
+    /// - Current processing continues with the previously captured session
+    /// - The next message uses the new session
+    ///
+    /// This is used for transcript compaction, where the conversation history is compressed
+    /// and a new session is created with the compacted transcript. The delegate is responsible
+    /// for creating the new session with the appropriate model and tools.
+    ///
+    /// - Parameter transcript: The transcript to use for the new session.
+    public func replaceSession(with transcript: Transcript) {
+        languageModelSession = delegate.createSession(with: transcript)
     }
 
     // MARK: - Persistence
@@ -514,7 +488,6 @@ public final class AgentSession: Sendable {
     /// - Parameters:
     ///   - snapshot: The snapshot to restore from.
     ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - configuration: Session configuration. Defaults to `.default`.
     ///   - model: The language model to use.
     ///   - tools: Tools available to the model.
     /// - Returns: A new session initialized with the snapshot's transcript.
@@ -522,14 +495,12 @@ public final class AgentSession: Sendable {
     public static func restore(
         from snapshot: SessionSnapshot,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         model: any LanguageModel,
         tools: [any Tool] = []
     ) -> AgentSession {
         AgentSession(
             id: snapshot.id,
             eventBus: eventBus,
-            configuration: configuration,
             transcript: snapshot.transcript,
             model: model,
             tools: tools
@@ -539,14 +510,12 @@ public final class AgentSession: Sendable {
     public static func restore(
         from snapshot: SessionSnapshot,
         eventBus: EventBus = EventBus(),
-        configuration: SessionConfiguration = .default,
         model: SystemLanguageModel = .default,
         tools: [any Tool] = []
     ) -> AgentSession {
         AgentSession(
             id: snapshot.id,
             eventBus: eventBus,
-            configuration: configuration,
             transcript: snapshot.transcript,
             model: model,
             tools: tools

@@ -1,8 +1,11 @@
 # SwiftAgent
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/1amageek/SwiftAgent)
+[![Documentation](https://img.shields.io/badge/Documentation-DocC-blue)](https://1amageek.github.io/SwiftAgent/documentation/swiftagent/)
 
 A type-safe, declarative framework for building AI agents in Swift.
+
+**[Documentation](https://1amageek.github.io/SwiftAgent/documentation/swiftagent/)**
 
 ## Features
 

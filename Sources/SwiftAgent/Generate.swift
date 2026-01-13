@@ -323,7 +323,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     // Streaming mode - use streamResponse
                     span.addEvent("streaming_started")
                     var lastContent: Out?
-                    
+
                     let responseStream = session.streamResponse(
                         generating: Out.self,
                         includeSchemaInPrompt: true,
@@ -331,20 +331,20 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                     ) {
                         prompt
                     }
-                    
+
                     for try await snapshot in responseStream {
                         // Pass the snapshot directly to the handler
                         await handler(snapshot)
-                        
+
                         // Try to get the full content from rawContent
                         // This is needed because snapshot.content is PartiallyGenerated
                         if let fullContent = try? Out(snapshot.rawContent) {
                             lastContent = fullContent
                         }
                     }
-                    
+
                     span.addEvent("streaming_completed")
-                    
+
                     guard let result = lastContent else {
                         throw ModelError.generationFailed("No content generated")
                     }

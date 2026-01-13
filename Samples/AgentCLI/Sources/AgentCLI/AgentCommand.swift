@@ -10,12 +10,13 @@ import ArgumentParser
 import SwiftAgent
 import AgentTools
 import OpenFoundationModelsOpenAI
+import OpenFoundationModelsClaude
 
 @main
 struct AgentCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent",
-        abstract: "SwiftAgent CLI - AI Agent powered by OpenAI",
+        abstract: "SwiftAgent CLI - AI Agent powered by OpenAI and Claude",
         version: "2.0.0",
         subcommands: [Chat.self, Code.self, Research.self],
         defaultSubcommand: Chat.self
@@ -129,16 +130,26 @@ extension AgentCommand {
     }
 }
 
-// MARK: - Research Command
+// MARK: - Research Command (Claude-powered)
 
 extension AgentCommand {
     struct Research: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "research",
-            abstract: "Research a topic with structured output"
+            abstract: "Research a topic with structured output (powered by Claude)"
         )
 
-        @OptionGroup var options: GlobalOptions
+        @Flag(name: .shortAndLong, help: "Enable verbose logging")
+        var verbose: Bool = false
+
+        @Option(name: .long, help: "Anthropic API key (or set ANTHROPIC_API_KEY)")
+        var apiKey: String?
+
+        @Option(name: .shortAndLong, help: "Claude model (claude-sonnet-4-5-20250929, claude-opus-4-5-20251101, claude-haiku-4-5-20251001)")
+        var model: String = ClaudeLanguageModel.sonnet4_5
+
+        @Option(name: .shortAndLong, help: "Working directory for file operations")
+        var workingDir: String?
 
         @Argument(help: "Research topic or question")
         var topic: String
@@ -147,10 +158,21 @@ extension AgentCommand {
         var json: Bool = false
 
         mutating func run() async throws {
-            let config = try options.createConfiguration()
+            let key = apiKey ?? ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
+            guard let anthropicKey = key, !anthropicKey.isEmpty else {
+                throw ValidationError("Anthropic API key required. Set ANTHROPIC_API_KEY or use --api-key")
+            }
 
-            if options.verbose {
-                print("Starting research with model: \(config.model)")
+            let config = ClaudeResearchConfiguration(
+                apiKey: anthropicKey,
+                modelName: model,
+                verbose: verbose,
+                workingDirectory: workingDir ?? FileManager.default.currentDirectoryPath
+            )
+
+            if verbose {
+                print("Starting research with Claude model: \(model)")
+                print("Working directory: \(config.workingDirectory)")
             }
 
             if json {

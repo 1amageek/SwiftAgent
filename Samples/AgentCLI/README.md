@@ -1,14 +1,22 @@
-# SwiftAgent CLI - OpenAI Sample
+# SwiftAgent CLI
 
-A command-line interface demonstrating SwiftAgent with OpenAI integration.
+A command-line interface demonstrating SwiftAgent with OpenAI and Claude integration.
 
 ## Features
 
-- **Multiple Agent Types**: Choose from different specialized agents
-- **OpenAI Integration**: Support for GPT-4o, o1-preview, o1-mini, and GPT-3.5-turbo
-- **Tool Integration**: Research agent with web browsing and file system access
-- **Structured Output**: Analysis agent with structured data generation
-- **Interactive Mode**: Chat-style conversations with AI agents
+- **Multiple Agent Types**: Chat, Coding, and Research agents
+- **Multi-Provider Support**: OpenAI (GPT-4.1, o3, o4) and Claude (Sonnet 4.5, Opus 4.5, Haiku 4.5)
+- **Tool Integration**: File operations, shell commands, Git, web fetching
+- **Structured Output**: Research agent with comprehensive structured results
+- **Interactive Mode**: Continuous chat sessions with conversation history
+- **Streaming Output**: Real-time response streaming for all agents
+
+## Requirements
+
+- macOS 26+ / iOS 26+
+- Swift 6.2+
+- OpenAI API key (for Chat and Code commands)
+- Anthropic API key (for Research command)
 
 ## Setup
 
@@ -19,24 +27,14 @@ cd Samples/AgentCLI
 swift package resolve
 ```
 
-### 2. Set OpenAI API Key
-
-Create a `.env` file (copy from `.env.example`):
+### 2. Set API Keys
 
 ```bash
-cp .env.example .env
-```
+# For Chat and Code commands
+export OPENAI_API_KEY="your_openai_api_key"
 
-Edit `.env` and add your OpenAI API key:
-
-```
-OPENAI_API_KEY=your_api_key_here
-```
-
-Or set it as an environment variable:
-
-```bash
-export OPENAI_API_KEY="your_api_key_here"
+# For Research command
+export ANTHROPIC_API_KEY="your_anthropic_api_key"
 ```
 
 ### 3. Build the CLI
@@ -47,192 +45,178 @@ swift build -c release
 
 ## Usage
 
-### Interactive Mode
+### Chat Command
 
-Start an interactive chat session:
+Interactive conversational AI:
 
 ```bash
-.build/release/agent
+# Interactive mode
+.build/release/agent chat
+
+# Single message
+.build/release/agent chat "What is SwiftUI?"
+
+# With specific model
+.build/release/agent chat --model gpt-4.1-mini "Hello"
 ```
 
-With specific model:
+### Code Command
+
+Coding assistant with file and command access:
 
 ```bash
-.build/release/agent --model gpt-4o
-```
+# Single task
+.build/release/agent code "Create a Swift function to parse JSON"
 
-### Ask Mode
+# Interactive mode
+.build/release/agent code
 
-Ask a single question:
-
-```bash
-.build/release/agent ask "What is quantum computing?"
-```
-
-With different agent types:
-
-```bash
-# Basic chat agent (default)
-.build/release/agent ask --agent-type basic "Hello, how are you?"
-
-# Research agent with tools
-.build/release/agent ask --agent-type research "Research the latest developments in AI"
-
-# Analysis agent with structured output
-.build/release/agent ask --agent-type analysis "Analyze the impact of remote work"
-
-# Reasoning agent (optimized for complex problems)
-.build/release/agent ask --agent-type reasoning --model o1-preview "Solve this complex math problem: ..."
-```
-
-### Command Options
-
-- `--model`: Choose AI model (`gpt-4o`, `o1-preview`, `o1-mini`, `gpt-3.5-turbo`)
-- `--api-key`: Specify OpenAI API key (overrides environment variable)
-- `--agent-type`: Choose agent type (`basic`, `research`, `analysis`, `reasoning`)
-- `--verbose`: Enable verbose logging
-- `--quiet`: Show only final answer (ask mode only)
-
-## Agent Types
-
-### Basic Chat Agent
-Simple conversational AI for general questions and chat.
-
-```bash
-.build/release/agent ask --agent-type basic "Tell me about SwiftUI"
-```
-
-### Research Agent
-Equipped with tools for web browsing, file operations, and command execution.
-
-```bash
-.build/release/agent ask --agent-type research "Research SwiftUI best practices and save findings to a file"
+# With working directory
+.build/release/agent code --working-dir /path/to/project "Refactor this code"
 ```
 
 **Available Tools:**
-- `WebFetch`: Fetch content from web URLs
-- `Read`/`Write`: Read/write files
-- `Bash`: Run command-line tools
+- `Read` / `Write` / `Edit`: File operations
+- `Glob` / `Grep`: File search
+- `Bash`: Shell command execution
+- `Git`: Git operations
 
-### Analysis Agent
-Provides structured analysis with key insights, recommendations, and confidence levels.
+### Research Command (Claude-powered)
 
-```bash
-.build/release/agent ask --agent-type analysis "Analyze the pros and cons of microservices architecture"
-```
-
-**Output Format:**
-- Summary
-- Key Insights (3-5 points)
-- Recommendations
-- Confidence Level
-
-### Reasoning Agent
-Optimized for complex problem-solving using OpenAI's o1 models.
+Comprehensive research with structured output:
 
 ```bash
-.build/release/agent ask --agent-type reasoning --model o1-preview "Design an algorithm to solve the traveling salesman problem"
+# Basic research
+.build/release/agent research "Latest developments in Swift concurrency"
+
+# JSON output
+.build/release/agent research --json "AI trends 2025"
+
+# With specific Claude model
+.build/release/agent research --model claude-opus-4-5-20251101 "Quantum computing applications"
 ```
 
-**Best Models:**
-- `o1-preview`: Most capable reasoning model
-- `o1-mini`: Faster reasoning model
+**Output Includes:**
+- Executive Summary
+- Key Findings with confidence levels
+- Sources with reliability assessment
+- Methodology
+- Limitations
+- Follow-up questions
 
-## Configuration
+## Command Options
 
-### Environment Variables
+### Global Options (Chat & Code)
 
-- `OPENAI_API_KEY`: Your OpenAI API key (required)
+| Option | Description |
+|--------|-------------|
+| `--model, -m` | Model to use (default: gpt-4.1) |
+| `--api-key` | OpenAI API key |
+| `--working-dir, -w` | Working directory for file operations |
+| `--verbose, -v` | Enable verbose logging |
 
-### Configuration Management
+### Research Options
 
-View current configuration:
+| Option | Description |
+|--------|-------------|
+| `--model, -m` | Claude model (default: claude-sonnet-4-5-20250929) |
+| `--api-key` | Anthropic API key |
+| `--working-dir, -w` | Working directory for file operations |
+| `--verbose, -v` | Enable verbose logging |
+| `--json` | Output raw JSON instead of formatted text |
 
-```bash
-.build/release/agent config show
-```
+## Supported Models
 
-Set configuration values:
+### OpenAI Models (Chat & Code)
 
-```bash
-.build/release/agent config set instructions "You are a helpful assistant"
-.build/release/agent config set loglevel debug
-```
+| Model | Best For |
+|-------|----------|
+| `gpt-4.1` | General use, balanced performance (default) |
+| `gpt-4.1-mini` | Faster, cost-effective |
+| `gpt-4.1-nano` | Lightweight tasks |
+| `o3` | Complex reasoning |
+| `o3-mini` | Reasoning with better speed/cost |
+| `o4-mini` | Efficient reasoning |
 
-Reset to defaults:
+### Claude Models (Research)
 
-```bash
-.build/release/agent config reset
-```
-
-Export/import configuration:
-
-```bash
-.build/release/agent config export config.json
-.build/release/agent config import config.json
-```
+| Model | Best For |
+|-------|----------|
+| `claude-sonnet-4-5-20250929` | Balanced research (default) |
+| `claude-opus-4-5-20251101` | Comprehensive analysis |
+| `claude-haiku-4-5-20251001` | Quick research |
 
 ## Examples
 
-### Basic Usage
+### Chat Examples
 
 ```bash
 # Quick question
-.build/release/agent ask "What is SwiftUI?"
+.build/release/agent chat "Explain async/await in Swift"
 
-# Interactive session
-.build/release/agent
+# Start interactive session
+.build/release/agent chat
 ```
 
-### Research Tasks
+### Coding Examples
 
 ```bash
-# Research with web access
-.build/release/agent ask --agent-type research "Research the latest Swift 6 features and summarize them"
+# Code generation
+.build/release/agent code "Write a unit test for a User model"
 
-# Save research to file
-.build/release/agent ask --agent-type research "Research AI trends and save summary to ai_trends.md"
+# Code review
+.build/release/agent code "Review the code in src/main.swift and suggest improvements"
+
+# Refactoring
+.build/release/agent code --working-dir ./myproject "Refactor the API client to use async/await"
 ```
 
-### Analysis Tasks
+### Research Examples
 
 ```bash
-# Structured business analysis
-.build/release/agent ask --agent-type analysis "Analyze the market opportunity for a new iOS app"
+# Technical research
+.build/release/agent research "Compare SwiftUI vs UIKit performance"
 
-# Technical analysis
-.build/release/agent ask --agent-type analysis "Analyze the performance implications of SwiftUI vs UIKit"
+# Market analysis
+.build/release/agent research "Mobile app development trends in 2025"
+
+# With JSON output for processing
+.build/release/agent research --json "Swift Package Manager best practices" > research.json
 ```
 
-### Complex Reasoning
+## Architecture
 
-```bash
-# Mathematical problems
-.build/release/agent ask --agent-type reasoning --model o1-preview "Prove that the sum of angles in a triangle is 180 degrees"
+This CLI demonstrates key SwiftAgent patterns:
 
-# Algorithm design
-.build/release/agent ask --agent-type reasoning "Design an efficient algorithm for finding the shortest path in a weighted graph"
-```
+### ChatAgent
+- `@Session` for TaskLocal session propagation
+- `GenerateText` with streaming handler
+- Simple step composition
 
-## Model Comparison
+### CodingAgent
+- `@Memory` for state sharing (completedTasks, modifiedFiles)
+- `Pipeline` and `Gate` for flow control
+- `AgentTools` integration
+- Streaming output
 
-| Model | Best For | Speed | Cost | Reasoning |
-|-------|----------|-------|------|-----------|
-| `gpt-4o` | General use, balanced performance | Fast | Medium | Good |
-| `gpt-3.5-turbo` | Simple tasks, cost-effective | Very Fast | Low | Basic |
-| `o1-preview` | Complex reasoning, mathematics | Slow | High | Excellent |
-| `o1-mini` | Reasoning tasks, better speed/cost | Medium | Medium | Very Good |
+### ResearchAgent
+- Claude-powered with structured output
+- `@Generable` for type-safe results (ResearchResult, KeyFinding, Source)
+- `@Guide` annotations for field descriptions
+- Multi-phase pipeline with validation
 
 ## Troubleshooting
 
 ### API Key Issues
 
 ```bash
-# Check if API key is set
+# Check if keys are set
 echo $OPENAI_API_KEY
+echo $ANTHROPIC_API_KEY
 
-# Test with explicit API key
-.build/release/agent ask --api-key "your_key" "Hello"
+# Use explicit key
+.build/release/agent chat --api-key "sk-..." "Hello"
+.build/release/agent research --api-key "sk-ant-..." "Topic"
 ```
 
 ### Build Issues
@@ -240,26 +224,30 @@ echo $OPENAI_API_KEY
 ```bash
 # Clean and rebuild
 swift package clean
-swift build
+swift package resolve
+swift build -c release
 ```
 
 ### Verbose Mode
 
-Enable verbose logging to debug issues:
-
 ```bash
-.build/release/agent --verbose ask "Test question"
+.build/release/agent --verbose chat "Test"
+.build/release/agent research --verbose "Topic"
 ```
 
 ## Development
 
-This sample demonstrates:
+See the source code in `Sources/AgentCLI/Agents/` for implementation details:
 
-- SwiftAgent framework integration
-- OpenFoundationModels-OpenAI usage
-- Multiple agent architectures
-- Tool integration patterns
-- Structured output generation
-- Command-line interface design
+- `ChatAgent.swift`: Simple conversational agent
+- `CodingAgent.swift`: Tool-equipped coding assistant
+- `ResearchAgent.swift`: Claude-powered structured research
 
-See the source code for implementation details and extend with your own agent types.
+Key SwiftAgent features demonstrated:
+- Step protocol and composition
+- Session management with TaskLocal
+- Memory/Relay for state sharing
+- Pipeline and Gate for flow control
+- Generate/GenerateText for LLM interaction
+- Tool integration with AgentTools
+- Structured output with @Generable

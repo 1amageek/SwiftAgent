@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="SwiftAgent.png" alt="SwiftAgent" width="100%">
+</p>
+
 # SwiftAgent
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/1amageek/SwiftAgent)

@@ -27,7 +27,8 @@
       "Bash(USE_FOUNDATION_MODELS=1 swift test:*)",
       "Bash(USE_OTHER_MODELS=1 swift build:*)",
       "Bash(USE_OTHER_MODELS=1 swift test:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "WebFetch(domain:platform.openai.com)"
     ],
     "deny": []
   }

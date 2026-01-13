@@ -1,154 +1,168 @@
 //
-//  main.swift
+//  AgentCommand.swift
 //  AgentCLI
 //
-//  Created by SwiftAgent Generator on 2025/01/17.
+//  Created by SwiftAgent on 2025/01/17.
 //
 
 import Foundation
 import ArgumentParser
 import SwiftAgent
 import AgentTools
-
-/// A command-line interface for interacting with AI agents.
-///
-/// `AgentCommand` serves as the main entry point for the CLI application, providing
-/// commands to interact with AI agents through the terminal.
-///
-/// Example usage:
-/// ```bash
-/// # Basic query
-/// agent ask "What is the weather today?"
-///
-/// # Query with specific model
-/// agent ask --model gpt-4o "Plan my vacation"
-///
-/// # Interactive session
-/// agent
-/// ```
+import OpenFoundationModelsOpenAI
 
 @main
 struct AgentCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent",
-        abstract: "AI Agent Command Line Tool with OpenAI Support",
+        abstract: "SwiftAgent CLI - AI Agent powered by OpenAI",
         version: "2.0.0",
-        subcommands: [Ask.self]
+        subcommands: [Chat.self, Code.self, Research.self],
+        defaultSubcommand: Chat.self
     )
-    
+}
+
+// MARK: - Shared Options
+
+struct GlobalOptions: ParsableArguments {
     @Flag(name: .shortAndLong, help: "Enable verbose logging")
     var verbose: Bool = false
-    
-    @Option(name: .long, help: "OpenAI API key (can also use OPENAI_API_KEY env var)")
+
+    @Option(name: .long, help: "OpenAI API key (or set OPENAI_API_KEY)")
     var apiKey: String?
-    
-    @Option(name: .long, help: "Model to use (gpt-4o, o1-preview, o1-mini, gpt-3.5-turbo)")
-    var model: String = "gpt-4o"
-    
-    // メインコマンドの実装（サブコマンドなしの場合）
-    mutating func run() async throws {
-        let config = try loadConfiguration()
-        
-        if verbose {
-            print("Starting interactive session with model: \(config.model)")
+
+    @Option(name: .shortAndLong, help: "Model to use (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o3-mini, o4-mini)")
+    var model: String = "gpt-4.1"
+
+    @Option(name: .shortAndLong, help: "Working directory for file operations")
+    var workingDir: String?
+
+    func createConfiguration() throws -> AgentConfiguration {
+        let key = apiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+        guard let apiKey = key, !apiKey.isEmpty else {
+            throw ValidationError("OpenAI API key required. Set OPENAI_API_KEY or use --api-key")
         }
-        
-        print("Starting interactive AI agent session. Type 'exit' to quit.\n")
-        _ = try await MainAgent(configuration: config).run("")
-    }
-    
-    private func loadConfiguration() throws -> AgentConfiguration {
-        let apiKey = self.apiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
-        
-        guard let apiKey = apiKey, !apiKey.isEmpty else {
-            throw ValidationError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or use --api-key option.")
-        }
-        
+
         return AgentConfiguration(
             apiKey: apiKey,
-            model: model,
-            verbose: verbose
+            model: OpenAIModel(model),
+            verbose: verbose,
+            workingDirectory: workingDir ?? FileManager.default.currentDirectoryPath
         )
     }
-    
-    // Askサブコマンドの実装
-    struct Ask: AsyncParsableCommand {
+}
+
+// MARK: - Chat Command
+
+extension AgentCommand {
+    struct Chat: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
-            commandName: "ask",
-            abstract: "Send a specific question to the agent for detailed analysis"
+            commandName: "chat",
+            abstract: "Start an interactive chat session"
         )
-        
-        @Argument(help: "The question to analyze")
-        var prompt: String
-        
-        @Flag(name: .shortAndLong, help: "Show only the final answer")
-        var quiet: Bool = false
-        
-        @Flag(name: .shortAndLong, help: "Enable verbose logging")
-        var verbose: Bool = false
-        
-        @Option(name: .long, help: "OpenAI API key (can also use OPENAI_API_KEY env var)")
-        var apiKey: String?
-        
-        @Option(name: .long, help: "Model to use (gpt-4o, o1-preview, o1-mini, gpt-3.5-turbo)")
-        var model: String = "gpt-4o"
-        
-        @Option(name: .long, help: "Agent type (basic, research, analysis, reasoning)")
-        var agentType: String = "basic"
-        
+
+        @OptionGroup var options: GlobalOptions
+
+        @Argument(help: "Initial message (optional, starts interactive mode if omitted)")
+        var message: String?
+
         mutating func run() async throws {
-            guard !prompt.isEmpty else {
-                throw ValidationError("Question cannot be empty")
+            let config = try options.createConfiguration()
+
+            if options.verbose {
+                print("Starting chat with model: \(config.model)")
             }
-            
-            let apiKey = self.apiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
-            
-            guard let apiKey = apiKey, !apiKey.isEmpty else {
-                throw ValidationError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or use --api-key option.")
-            }
-            
-            let config = AgentConfiguration(
-                apiKey: apiKey,
-                model: model,
-                verbose: verbose
-            )
-            
-            if verbose && !quiet {
-                print("Processing query with \(model): \(prompt)")
-            }
-            
-            let agent = try createAgent(type: agentType, configuration: config)
-            let output = try await agent.run(prompt)
-            
-            if quiet {
-                print(output)
+
+            if let message = message {
+                // Single message mode
+                print("Assistant: ", terminator: "")
+                let session = ChatSessionFactory.createSession(configuration: config)
+                _ = try await ChatAgent()
+                    .session(session)
+                    .run(message)
             } else {
-                print("\n--- Agent Response ---")
-                print(output)
-                print("--- End Response ---\n")
-            }
-        }
-        
-        private func createAgent(type: String, configuration: AgentConfiguration) throws -> any Step<String, String> {
-            switch type.lowercased() {
-            case "basic":
-                return BasicChatAgent(configuration: configuration)
-            case "research":
-                return ResearchAgent(configuration: configuration)
-            case "analysis":
-                return AnalysisAgent(configuration: configuration)
-            case "reasoning":
-                return ReasoningAgent(configuration: configuration)
-            default:
-                throw ValidationError("Unknown agent type: \(type). Available types: basic, research, analysis, reasoning")
+                // Interactive mode
+                print("SwiftAgent Chat (type 'exit' to quit)")
+                print("Model: \(config.model)")
+                print("---")
+                _ = try await InteractiveChatAgent(configuration: config).run("")
             }
         }
     }
 }
 
-/// Configuration structure for agent setup
-public struct AgentConfiguration {
-    let apiKey: String
-    let model: String
-    let verbose: Bool
+// MARK: - Code Command
+
+extension AgentCommand {
+    struct Code: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "code",
+            abstract: "Coding assistant with file and command access"
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        @Argument(help: "Coding task or question")
+        var task: String?
+
+        mutating func run() async throws {
+            let config = try options.createConfiguration()
+
+            if options.verbose {
+                print("Starting coding assistant with model: \(config.model)")
+                print("Working directory: \(config.workingDirectory)")
+            }
+
+            if let task = task {
+                // Single task mode
+                print("---")
+                _ = try await CodingAgent(configuration: config).run(task)
+            } else {
+                // Interactive mode
+                print("SwiftAgent Coding Assistant (type 'exit' to quit)")
+                print("Model: \(config.model)")
+                print("Working directory: \(config.workingDirectory)")
+                print("---")
+                _ = try await InteractiveCodingAgent(configuration: config).run("")
+            }
+        }
+    }
+}
+
+// MARK: - Research Command
+
+extension AgentCommand {
+    struct Research: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "research",
+            abstract: "Research a topic with structured output"
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        @Argument(help: "Research topic or question")
+        var topic: String
+
+        @Flag(name: .long, help: "Output raw JSON instead of formatted text")
+        var json: Bool = false
+
+        mutating func run() async throws {
+            let config = try options.createConfiguration()
+
+            if options.verbose {
+                print("Starting research with model: \(config.model)")
+            }
+
+            if json {
+                let result = try await ResearchAgent(configuration: config).run(topic)
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(result)
+                print(String(data: data, encoding: .utf8)!)
+            } else {
+                let output = try await ResearchAgentText(configuration: config).run(topic)
+                print(output)
+            }
+        }
+    }
 }

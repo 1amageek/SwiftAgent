@@ -67,7 +67,7 @@ struct RaceTests {
         let startTime = Date()
 
         let race = Race<Int, Int> {
-            TimedStep(delay: .milliseconds(200), result: 200)
+            TimedStep(delay: .milliseconds(500), result: 500)
             ImmediateStep(result: 1)
         }
 
@@ -75,9 +75,9 @@ struct RaceTests {
         let elapsed = Date().timeIntervalSince(startTime)
 
         #expect(result == 1)
-        // Should complete much faster than the slow step (200ms)
-        // Allow 100ms for system overhead
-        #expect(elapsed < 0.1)
+        // Should complete much faster than the slow step (500ms)
+        // Allow up to 200ms for system overhead
+        #expect(elapsed < 0.2)
     }
 
     @Test("Race succeeds if at least one step succeeds")
@@ -171,16 +171,16 @@ struct RaceCancellationTests {
 
         let race = Race<Int, Int> {
             ImmediateStep(result: 1)
-            TimedStep(delay: .milliseconds(100), result: 100)
+            TimedStep(delay: .milliseconds(500), result: 500)
         }
 
         let result = try await race.run(0)
         let elapsed = Date().timeIntervalSince(startTime)
 
         #expect(result == 1)
-        // Should complete much faster than the slow step (100ms)
-        // Allow 80ms for system overhead
-        #expect(elapsed < 0.08)
+        // Should complete much faster than the slow step (500ms)
+        // Allow up to 200ms for system overhead
+        #expect(elapsed < 0.2)
 
         // Give some time for cancellation to propagate
         try await Task.sleep(for: .milliseconds(50))

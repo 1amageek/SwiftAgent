@@ -153,18 +153,18 @@ struct ParallelTests {
         let startTime = Date()
 
         let parallel = Parallel<Int, Int> {
-            DelayedStep(delay: .milliseconds(50), result: 1)
-            DelayedStep(delay: .milliseconds(50), result: 2)
-            DelayedStep(delay: .milliseconds(50), result: 3)
+            DelayedStep(delay: .milliseconds(100), result: 1)
+            DelayedStep(delay: .milliseconds(100), result: 2)
+            DelayedStep(delay: .milliseconds(100), result: 3)
         }
 
         let results = try await parallel.run(0)
 
         let elapsed = Date().timeIntervalSince(startTime)
 
-        // If sequential, would take ~150ms
-        // If parallel, should take ~50ms (plus some overhead)
-        #expect(elapsed < 0.12) // Allow some overhead
+        // If sequential, would take ~300ms
+        // If parallel, should take ~100ms (plus some overhead)
+        #expect(elapsed < 0.25) // Allow up to 250ms for system overhead
         #expect(results.count == 3)
     }
 }

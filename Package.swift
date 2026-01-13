@@ -27,7 +27,8 @@ let package = Package(
             .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
             .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
             .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
-            .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main")
+            .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
+            .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3")
         ]
         if useOtherModels {
             deps.append(.package(url: "https://github.com/1amageek/OpenFoundationModels.git", branch: "main"))

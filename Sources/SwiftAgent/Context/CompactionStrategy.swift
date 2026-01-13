@@ -13,7 +13,6 @@ import Foundation
 /// The framework provides several built-in strategies:
 ///
 /// - ``TruncationCompactionStrategy``: Removes oldest entries
-/// - ``SummarizationCompactionStrategy``: Summarizes older entries using LLM
 /// - ``PriorityCompactionStrategy``: Removes entries based on priority scores
 /// - ``HybridCompactionStrategy``: Combines multiple strategies
 ///

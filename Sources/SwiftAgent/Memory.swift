@@ -80,8 +80,8 @@ public struct Memory<Value: Sendable>: Sendable {
     ///
     /// - Parameter wrappedValue: The initial value to store.
     @inlinable
-    public init(wrappedValue value: Value) {
-        self._storage = Storage(value)
+    public init(wrappedValue: Value) {
+        self._storage = Storage(wrappedValue)
     }
 
     /// The stored value.

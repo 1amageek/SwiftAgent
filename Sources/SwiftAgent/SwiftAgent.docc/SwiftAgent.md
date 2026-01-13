@@ -108,8 +108,10 @@ Type erasure and debugging.
 
 ### Security
 
+- <doc:SecurityGuide>
+- ``SecurityConfiguration``
 - ``PermissionConfiguration``
-- ``PermissionMiddleware``
+- ``PermissionRule``
 - ``SandboxExecutor``
 
 ### Errors

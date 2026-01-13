@@ -978,7 +978,7 @@ let session = LanguageModelSession(
 
 Available providers:
 - [OpenFoundationModels-OpenAI](https://github.com/1amageek/OpenFoundationModels-OpenAI)
-- [OpenFoundationModels-Anthropic](https://github.com/1amageek/OpenFoundationModels-Anthropic)
+- [OpenFoundationModels-Claude](https://github.com/1amageek/OpenFoundationModels-Claude)
 - [OpenFoundationModels-Ollama](https://github.com/1amageek/OpenFoundationModels-Ollama)
 
 ## License

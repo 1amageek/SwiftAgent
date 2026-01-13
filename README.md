@@ -4,8 +4,12 @@
 
 # SwiftAgent
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/1amageek/SwiftAgent)
+[![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
+[![Platforms](https://img.shields.io/badge/Platforms-iOS%2026%20|%20macOS%2026%20|%20watchOS%2026%20|%20tvOS%2026-blue.svg)](https://developer.apple.com)
+[![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/Documentation-DocC-blue)](https://1amageek.github.io/SwiftAgent/documentation/swiftagent/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/1amageek/SwiftAgent)
 
 A type-safe, declarative framework for building AI agents in Swift.
 

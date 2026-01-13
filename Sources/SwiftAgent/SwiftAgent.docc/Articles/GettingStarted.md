@@ -17,6 +17,8 @@ public protocol Step<Input, Output> {
     associatedtype Body = Never
 
     @StepBuilder var body: Body { get }
+
+    @discardableResult
     func run(_ input: Input) async throws -> Output
 }
 ```

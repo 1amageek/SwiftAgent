@@ -78,11 +78,18 @@ The fundamental building block. Transforms input to output asynchronously.
 public protocol Step<Input, Output> {
     associatedtype Input: Sendable
     associatedtype Output: Sendable
+    associatedtype Body = Never
+
+    @StepBuilder var body: Body { get }
+
+    @discardableResult
     func run(_ input: Input) async throws -> Output
 }
 ```
 
-Use `Step` when you need custom control flow:
+Steps can be implemented in two ways:
+
+**1. Direct implementation** - Implement `run(_:)` for custom control flow:
 
 ```swift
 struct CustomStep: Step {
@@ -93,12 +100,10 @@ struct CustomStep: Step {
 }
 ```
 
-### Declarative Composition
-
-Steps can define their behavior through a `body` property for declarative composition. The framework handles execution automatically.
+**2. Declarative composition** - Define `body` to compose steps (framework implements `run(_:)` automatically):
 
 ```swift
-struct Pipeline: Step {
+struct TextPipeline: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, String> {

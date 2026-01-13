@@ -8,8 +8,7 @@ Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェ�
 
 | 概念 | 説明 |
 |------|------|
-| **Step** | `Input -> Output` の非同期変換単位 |
-| **Agent** | `body` を定義するだけで `run` が自動実装される宣言的Step |
+| **Step** | `Input -> Output` の非同期変換単位。`run(_:)` を直接実装するか、`body` を定義して宣言的に合成 |
 | **Session** | TaskLocalベースのセッション伝播（`@Session`, `.session()`） |
 | **Memory/Relay** | Step間の状態共有（`@Memory` で保持、`$` で `Relay` を取得） |
 | **Context** | 汎用TaskLocal伝播（`@Contextable`, `@Context`, `.context()`） |
@@ -68,8 +67,8 @@ struct MyStep: Step {
 }
 try await MyStep().context(AppConfig(maxRetries: 5)).run("input")
 
-// Agent による宣言的な合成
-struct Pipeline: Agent {
+// Step による宣言的な合成（body を定義すると run が自動実装）
+struct TextPipeline: Step {
     @Session var session: LanguageModelSession
     var body: some Step<String, String> {
         Transform { $0.trimmingCharacters(in: .whitespaces) }
@@ -161,8 +160,8 @@ Pipeline {
     }
 }
 
-// Agent 内での使用（body は既に @StepBuilder なので Pipeline 不要）
-struct SecureAgent: Agent {
+// 宣言的Step内での使用（body は既に @StepBuilder なので Pipeline 不要）
+struct SecurePipeline: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, String> {
@@ -172,10 +171,10 @@ struct SecureAgent: Agent {
     }
 }
 
-// Pipeline が必要なケース：Agent の外で Step を合成
+// Pipeline が必要なケース：宣言的Stepの外で Step を合成
 let step = Pipeline {
     Gate { .pass(validate($0)) }
-    MyAgent()
+    MyProcessingStep()
 }
 try await step.run(input)
 
@@ -240,8 +239,8 @@ class Library {
     static var defaultValue: Library { Library() }  // 必須
 }
 
-// 2. Agent（持つ側）で .context() モディファイアで渡す
-struct BookReaderAgent: Agent {
+// 2. 宣言的Step（持つ側）で .context() モディファイアで渡す
+struct BookReaderPipeline: Step {
     let library = Library()
 
     var body: some Step<Query, Response> {
@@ -314,6 +313,105 @@ extension SandboxExecutor.Configuration: Contextable {
 
 // これで @Context var config: SandboxExecutor.Configuration が使える
 ```
+
+## AgentSession
+
+スレッドセーフな対話型セッション管理クラス。FIFOメッセージキューとsteering機能を提供。
+
+### 基本的な使い方
+
+```swift
+// シンプルな初期化（内部で DefaultSessionDelegate を生成）
+let session = AgentSession(tools: myTools) {
+    Instructions("You are a helpful assistant.")
+}
+
+let response = try await session.send("Hello!")
+print(response.content)
+```
+
+### カスタムデリゲート
+
+セッション置換時のカスタムロジックが必要な場合:
+
+```swift
+struct MyDelegate: LanguageModelSessionDelegate {
+    let model: SystemLanguageModel
+    let tools: [any Tool]
+
+    func createSession(with transcript: Transcript) -> LanguageModelSession {
+        LanguageModelSession(model: model, tools: tools, transcript: transcript) {
+            Instructions("You are a helpful assistant.")
+        }
+    }
+}
+
+let initialSession = LanguageModelSession(model: .default, tools: myTools) {
+    Instructions("You are a helpful assistant.")
+}
+let session = AgentSession(initialSession: initialSession, delegate: MyDelegate(model: .default, tools: myTools))
+```
+
+### メッセージキュー
+
+複数の `send()` 呼び出しは FIFO で処理される。キャンセルされたタスクは自動的にキューから除去。
+
+```swift
+// 順番に処理される
+Task { try await session.send("First") }
+Task { try await session.send("Second") }
+
+// キャンセル対応
+let task = Task { try await session.send("Will be cancelled") }
+task.cancel()  // キューから除去され、スロットを消費しない
+```
+
+### Steering
+
+`steer()` は **次の** プロンプトにコンテキストを追加する。処理中に追加した場合は「次の次」に反映。
+
+```swift
+// send() の前に追加
+session.steer("Use async/await")
+session.steer("Add error handling")
+
+let response = try await session.send("Write a function...")
+// → steering メッセージと "Write a function..." が結合されて送信
+```
+
+### セッション置換
+
+`replaceSession()` はいつでも呼び出し可能。処理中でも安全。
+
+```swift
+// コンテキスト圧縮後に置換
+let compactedTranscript = ...
+session.replaceSession(with: compactedTranscript)
+// 現在処理中のメッセージ → 古いセッションで継続
+// 次のメッセージ → 新しいセッションを使用
+```
+
+### プロパティ
+
+| プロパティ | 型 | 説明 |
+|-----------|-----|------|
+| `transcript` | `Transcript` | 現在の会話履歴 |
+| `isResponding` | `Bool` | 処理中かどうか |
+| `pendingSteeringCount` | `Int` | 未消費の steering メッセージ数 |
+
+### 内部実装
+
+```
+send(content)
+  └─ acquireProcessingSlot()
+       ├─ idle → resume(true) → processMessage() → releaseProcessingSlot()
+       └─ busy → waitQueue.append(waiter)
+                  ├─ 順番が来た → resume(true) → processMessage()
+                  └─ キャンセル → remove(waiter) → resume(false) → throw CancellationError
+```
+
+- **Continuation Queue**: `CheckedContinuation<Bool, Never>` ベースの FIFO 待機
+- **セッション参照キャプチャ**: `processMessage()` 開始時にセッションをキャプチャし、mid-processing 置換に対応
 
 ## @Generable の制限
 
@@ -841,8 +939,8 @@ HandleSensitive()
 **階層的適用:**
 
 ```swift
-// Agent内での階層的ガードレール
-struct SecurePipeline: Agent {
+// 宣言的Step内での階層的ガードレール
+struct SecureWorkflow: Step {
     var body: some Step<String, String> {
         // 親のガードレール付きStep
         ProcessStep()

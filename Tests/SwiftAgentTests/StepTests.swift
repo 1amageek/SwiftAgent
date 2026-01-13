@@ -269,20 +269,20 @@ struct ConditionalStepTests {
     }
 }
 
-// MARK: - Agent Tests
+// MARK: - Declarative Step Tests
 
-@Suite("Agent Tests")
-struct AgentTests {
+@Suite("Declarative Step Tests")
+struct DeclarativeStepTests {
 
-    /// A simple agent that doubles input using declarative body
-    struct DoubleAgent: Agent, Sendable {
+    /// A simple step that doubles input using declarative body
+    struct DoubleStep: Step, Sendable {
         var body: some Step<Int, Int> {
             Transform { $0 * 2 }
         }
     }
 
-    /// An agent that chains multiple steps
-    struct PipelineAgent: Agent, Sendable {
+    /// A step that chains multiple transforms
+    struct PipelineStep: Step, Sendable {
         var body: some Step<Int, Int> {
             Transform { $0 + 1 }
             Transform { $0 * 2 }
@@ -290,54 +290,54 @@ struct AgentTests {
         }
     }
 
-    /// An agent with type conversion
-    struct ConvertAgent: Agent, Sendable {
+    /// A step with type conversion
+    struct ConvertStep: Step, Sendable {
         var body: some Step<Int, String> {
             Transform<Int, Int> { $0 * 10 }
             Transform<Int, String> { "Result: \($0)" }
         }
     }
 
-    @Test("Agent executes body automatically without implementing run")
-    func agentExecutesBody() async throws {
-        let agent = DoubleAgent()
-        let result = try await agent.run(5)
+    @Test("Declarative step executes body automatically without implementing run")
+    func declarativeStepExecutesBody() async throws {
+        let step = DoubleStep()
+        let result = try await step.run(5)
         #expect(result == 10)
     }
 
-    @Test("Agent chains multiple steps in body")
-    func agentChainsSteps() async throws {
-        let agent = PipelineAgent()
-        let result = try await agent.run(5)
+    @Test("Declarative step chains multiple steps in body")
+    func declarativeStepChainsSteps() async throws {
+        let step = PipelineStep()
+        let result = try await step.run(5)
         // (5 + 1) = 6, 6 * 2 = 12, 12 + 3 = 15
         #expect(result == 15)
     }
 
-    @Test("Agent handles type conversion in pipeline")
-    func agentTypeConversion() async throws {
-        let agent = ConvertAgent()
-        let result = try await agent.run(5)
+    @Test("Declarative step handles type conversion in pipeline")
+    func declarativeStepTypeConversion() async throws {
+        let step = ConvertStep()
+        let result = try await step.run(5)
         #expect(result == "Result: 50")
     }
 
-    @Test("Agent can be nested in other agents")
-    func nestedAgents() async throws {
-        struct InnerAgent: Agent, Sendable {
+    @Test("Declarative steps can be nested")
+    func nestedDeclarativeSteps() async throws {
+        struct InnerStep: Step, Sendable {
             var body: some Step<Int, Int> {
                 Transform { $0 * 2 }
             }
         }
 
-        struct OuterAgent: Agent, Sendable {
+        struct OuterStep: Step, Sendable {
             var body: some Step<Int, Int> {
                 Transform { $0 + 1 }
-                InnerAgent()
+                InnerStep()
                 Transform { $0 + 10 }
             }
         }
 
-        let agent = OuterAgent()
-        let result = try await agent.run(5)
+        let step = OuterStep()
+        let result = try await step.run(5)
         // (5 + 1) = 6, 6 * 2 = 12, 12 + 10 = 22
         #expect(result == 22)
     }

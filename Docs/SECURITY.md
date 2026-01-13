@@ -482,8 +482,8 @@ FetchUserData()
 ### 階層的適用
 
 ```swift
-// Agent内での階層的ガードレール
-struct SecurePipeline: Agent {
+// 宣言的Step内での階層的ガードレール
+struct SecureWorkflow: Step {
     var body: some Step<String, String> {
         // 親のガードレール
         ProcessStep()

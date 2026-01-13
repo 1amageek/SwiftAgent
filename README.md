@@ -45,7 +45,7 @@ dependencies: [
 import SwiftAgent
 import FoundationModels
 
-struct Translator: Agent {
+struct Translator: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, String> {
@@ -90,12 +90,12 @@ struct CustomStep: Step {
 }
 ```
 
-### Agent
+### Declarative Composition
 
-A declarative `Step` that defines its behavior through a `body` property. The framework handles execution automatically.
+Steps can define their behavior through a `body` property for declarative composition. The framework handles execution automatically.
 
 ```swift
-struct Pipeline: Agent {
+struct Pipeline: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, String> {
@@ -143,7 +143,7 @@ struct OuterStep: Step {
 
 ### AgentSession
 
-An actor for managing interactive sessions with message queuing and real-time steering.
+A thread-safe class for managing interactive sessions with FIFO message queuing and steering.
 
 ```swift
 let session = AgentSession(tools: myTools) {
@@ -154,19 +154,40 @@ let response = try await session.send("Hello!")
 print(response.content)
 ```
 
-**Real-time Steering:**
+**FIFO Message Queuing:**
 
-Messages can be sent while processing. Queued messages are included in the next response cycle.
+Multiple concurrent `send()` calls are queued and processed in order. Cancelled tasks are cleanly removed from the queue.
 
 ```swift
-Task {
-    let response = try await session.send("Write a function...")
-}
+// These will be processed in order
+Task { try await session.send("First message") }
+Task { try await session.send("Second message") }
+```
 
-// This message will be queued and included in processing
-Task {
-    _ = try await session.send("Make sure to use async/await")
-}
+**Steering:**
+
+Use `steer()` to add context to the **next** prompt:
+
+```swift
+// Add steering hints before sending
+session.steer("Use async/await")
+session.steer("Add error handling")
+
+// Steering messages are combined with the next send()
+let response = try await session.send("Write a function...")
+```
+
+> **Note:** Steering messages added while processing will be included in the *following* prompt, not the current one.
+
+**Session Replacement:**
+
+Replace the underlying session at any time (e.g., for context compaction):
+
+```swift
+// Can be called even while processing
+// Current processing continues with the old session
+// Next message uses the new session
+session.replaceSession(with: compactedTranscript)
 ```
 
 **Persistence:**
@@ -175,7 +196,7 @@ Save and restore sessions using `SessionSnapshot`:
 
 ```swift
 // Save
-let snapshot = await session.snapshot()
+let snapshot = session.snapshot()
 try await store.save(snapshot)
 
 // Restore
@@ -189,8 +210,8 @@ if let snapshot = try await store.load(id: sessionID) {
 | Property | Type | Description |
 |----------|------|-------------|
 | `transcript` | `Transcript` | Current conversation transcript |
-| `pendingMessageCount` | `Int` | Messages waiting to be processed |
 | `isResponding` | `Bool` | Whether currently generating |
+| `pendingSteeringCount` | `Int` | Steering messages waiting |
 
 ### Memory / Relay
 
@@ -304,7 +325,7 @@ Context is ideal for:
 | `Reduce` | Aggregate collection elements |
 | `Parallel` | Execute concurrently, collect all results |
 | `Race` | Execute concurrently, return first success |
-| `Pipeline` | Compose Steps sequentially (outside Agent) |
+| `Pipeline` | Compose Steps sequentially (outside declarative Step) |
 | `Gate` | Transform or block execution |
 
 ### Transform
@@ -394,10 +415,10 @@ FetchStep()
 
 ### Pipeline / Gate
 
-`Pipeline` composes Steps sequentially outside of an Agent. `Gate` transforms or blocks execution.
+`Pipeline` composes Steps sequentially outside of a declarative Step body. `Gate` transforms or blocks execution.
 
 ```swift
-// Pipeline: compose Steps outside Agent body
+// Pipeline: compose Steps outside declarative body
 let step = Pipeline {
     Gate { input in
         guard !input.isEmpty else {
@@ -405,15 +426,15 @@ let step = Pipeline {
         }
         return .pass(input.lowercased())
     }
-    MyAgent()
+    MyProcessingStep()
     Gate { output in
         .pass(output.trimmingCharacters(in: .whitespaces))
     }
 }
 try await step.run("Hello")
 
-// Agent body already uses @StepBuilder, so Pipeline is unnecessary
-struct SecureAgent: Agent {
+// Declarative Step body already uses @StepBuilder, so Pipeline is unnecessary
+struct SecurePipeline: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, String> {
@@ -461,7 +482,7 @@ await eventBus.on(.sessionStarted) { payload in
     print("Started: \(payload.value ?? "")")
 }
 
-try await MyAgent()
+try await MyStep()
     .context(eventBus)
     .run(input)
 ```
@@ -483,7 +504,7 @@ struct Analysis {
     let recommendations: String
 }
 
-struct Analyzer: Agent {
+struct Analyzer: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, Analysis> {
@@ -668,7 +689,7 @@ FetchUserData()
 Guardrails inherit from parent to child. Use `Override` to selectively relax restrictions.
 
 ```swift
-struct SecurePipeline: Agent {
+struct SecureWorkflow: Step {
     var body: some Step<String, String> {
         ProcessStep()
             .guardrail {
@@ -862,7 +883,7 @@ struct CodeReview {
     let suggestions: String
 }
 
-struct CodeAnalyzer: Agent {
+struct CodeAnalyzer: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, CodeReview> {
@@ -893,7 +914,7 @@ let review = try await CodeAnalyzer()
 ### Multi-Step Pipeline with Error Handling
 
 ```swift
-struct ResearchPipeline: Agent {
+struct ResearchPipeline: Step {
     @Session var session: LanguageModelSession
 
     var body: some Step<String, Report> {

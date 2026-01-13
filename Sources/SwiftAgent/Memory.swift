@@ -8,26 +8,51 @@
 import Foundation
 import Synchronization
 
-/// A property wrapper that stores a value in memory with reference semantics.
+/// A property wrapper that stores a value with reference semantics for state sharing.
 ///
-/// `Memory` allows encapsulation of a value while providing
-/// a `Relay` projection for sharing state across Steps.
+/// `Memory` provides mutable state that can be shared across multiple ``Step`` instances.
+/// Use the `$` prefix to get a ``Relay`` for passing state to child steps.
 ///
-/// ## Usage
+/// ## Overview
+///
+/// Memory wraps a value in a thread-safe container using `Mutex`. When you copy a struct
+/// containing `@Memory`, both copies share the same underlying storage.
 ///
 /// ```swift
-/// struct SearchOrchestratorStep: Step {
+/// @Memory var counter: Int = 0
+/// counter += 1  // Modifies the shared storage
+/// ```
+///
+/// ## Sharing State with Relay
+///
+/// Use the `$` prefix to get a ``Relay`` for passing to other steps:
+///
+/// ```swift
+/// struct Orchestrator: Step {
 ///     @Memory var visitedURLs: Set<URL> = []
 ///
-///     var body: some Step<SearchQuery, Result> {
-///         SearchStep(visitedURLs: $visitedURLs)
-///         DeepCrawlStep(visitedURLs: $visitedURLs)
+///     func run(_ input: URL) async throws -> [Data] {
+///         // Pass relay to child steps
+///         try await CrawlStep(visited: $visitedURLs).run(input)
+///     }
+/// }
+///
+/// struct CrawlStep: Step {
+///     let visited: Relay<Set<URL>>
+///
+///     func run(_ input: URL) async throws -> Data {
+///         guard !visited.contains(input) else { throw AlreadyVisited() }
+///         visited.insert(input)
+///         // ... fetch data
 ///     }
 /// }
 /// ```
 ///
-/// The `$` prefix provides a `Relay` that can be passed to child Steps
-/// for shared mutable access.
+/// ## Thread Safety
+///
+/// Memory uses `Mutex` internally, making it safe to access from multiple tasks.
+/// However, compound operations (read-modify-write) are not atomic. For atomic
+/// updates, access the value directly rather than through Relay's convenience methods.
 @frozen @propertyWrapper
 public struct Memory<Value: Sendable>: Sendable {
 
@@ -84,26 +109,57 @@ public struct Memory<Value: Sendable>: Sendable {
 
 // MARK: - Relay
 
-/// A property wrapper that provides indirect access to a value through closures.
+/// A property wrapper providing indirect access to a value through getter/setter closures.
 ///
-/// `Relay` enables shared mutable state between Steps by wrapping
-/// getter and setter closures. It's typically obtained from `Memory`'s
-/// projected value (`$memory`).
+/// `Relay` enables shared mutable state between steps without direct storage ownership.
+/// It's typically obtained from ``Memory``'s projected value using `$`.
 ///
-/// ## Usage
+/// ## Overview
+///
+/// Relay wraps getter and setter closures, allowing multiple steps to read and write
+/// to the same underlying storage:
 ///
 /// ```swift
 /// struct ChildStep: Step {
-///     @Relay var visitedURLs: Set<URL>
+///     let counter: Relay<Int>
 ///
-///     func run(_ input: URL) async throws -> Bool {
-///         if visitedURLs.contains(input) {
-///             return false  // Already visited
-///         }
-///         visitedURLs.insert(input)
-///         return true
+///     func run(_ input: String) async throws -> String {
+///         counter.wrappedValue += 1
+///         return "\(input) #\(counter.wrappedValue)"
 ///     }
 /// }
+/// ```
+///
+/// ## Creating Relays
+///
+/// - From Memory: `$myMemory` returns a Relay
+/// - Constant: `Relay.constant(value)` creates a read-only relay
+/// - Custom: `Relay(get: { ... }, set: { ... })`
+///
+/// ## Collection Extensions
+///
+/// Relay provides convenience methods for common collection operations:
+///
+/// ```swift
+/// @Memory var items: Set<Int> = []
+/// $items.insert(1)       // Insert into set
+/// $items.contains(1)     // Check membership
+/// $items.formUnion([2])  // Union with another set
+///
+/// @Memory var list: [String] = []
+/// $list.append("item")   // Append to array
+/// ```
+///
+/// ## Transformations
+///
+/// Transform relay values with `map` and `readOnly`:
+///
+/// ```swift
+/// @Memory var celsius: Double = 0
+/// let fahrenheit = $celsius.map(
+///     { $0 * 9/5 + 32 },
+///     reverse: { ($0 - 32) * 5/9 }
+/// )
 /// ```
 @frozen @propertyWrapper
 public struct Relay<Value: Sendable>: Sendable {

@@ -244,22 +244,22 @@ struct PipelineTests {
     }
 }
 
-// MARK: - Pipeline + Agent Integration Tests
+// MARK: - Pipeline + Declarative Step Integration Tests
 
-@Suite("Pipeline Agent Integration Tests")
-struct PipelineAgentIntegrationTests {
+@Suite("Pipeline Declarative Step Integration Tests")
+struct PipelineDeclarativeStepIntegrationTests {
 
-    struct ProcessingAgent: Agent, Sendable {
+    struct ProcessingStep: Step, Sendable {
         var body: some Step<String, String> {
             Transform<String, String> { "[\($0)]" }
         }
     }
 
-    @Test("Pipeline can contain Agent")
-    func pipelineContainsAgent() async throws {
+    @Test("Pipeline can contain declarative Step")
+    func pipelineContainsDeclarativeStep() async throws {
         let pipeline = Pipeline {
             Gate<String, String> { .pass($0.lowercased()) }
-            ProcessingAgent()
+            ProcessingStep()
             Gate<String, String> { .pass($0.uppercased()) }
         }
         let result = try await pipeline.run("Hello")
@@ -267,9 +267,9 @@ struct PipelineAgentIntegrationTests {
         #expect(result == "[HELLO]")
     }
 
-    @Test("Agent can use Pipeline in body")
-    func agentUsesPipeline() async throws {
-        struct PipelineAgent: Agent, Sendable {
+    @Test("Step can use Pipeline in body")
+    func stepUsesPipeline() async throws {
+        struct PipelineStep: Step, Sendable {
             var body: some Step<Int, String> {
                 Pipeline {
                     Gate<Int, Int> { input in
@@ -284,13 +284,13 @@ struct PipelineAgentIntegrationTests {
             }
         }
 
-        let agent = PipelineAgent()
+        let step = PipelineStep()
 
-        let result = try await agent.run(5)
+        let result = try await step.run(5)
         #expect(result == "Result: 10")
 
         await #expect(throws: GateError.self) {
-            try await agent.run(-1)
+            try await step.run(-1)
         }
     }
 }

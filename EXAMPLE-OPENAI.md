@@ -19,16 +19,16 @@ import OpenFoundationModels
 import OpenFoundationModelsOpenAI
 ```
 
-## Example: Creating an Agent with OpenAI
+## Example: Creating a Step with OpenAI
 
 ```swift
 import SwiftAgent
 import OpenFoundationModels
 import OpenFoundationModelsOpenAI
 
-struct MyOpenAIAgent: Agent {
+struct MyOpenAIStep: Step {
     let apiKey: String
-    
+
     public var body: some Step<String, String> {
         StringModelStep<String>(
             session: LanguageModelSession(
@@ -42,17 +42,17 @@ struct MyOpenAIAgent: Agent {
 }
 
 // Usage
-let agent = MyOpenAIAgent(apiKey: "your-api-key")
-let response = try await agent.run("What is quantum computing?")
+let step = MyOpenAIStep(apiKey: "your-api-key")
+let response = try await step.run("What is quantum computing?")
 print(response)
 ```
 
 ## Example: Using Tools with OpenAI
 
 ```swift
-struct ResearchAgent: Agent {
+struct ResearchStep: Step {
     let apiKey: String
-    
+
     public var body: some Step<String, String> {
         StringModelStep<String>(
             session: LanguageModelSession(
@@ -83,9 +83,9 @@ struct Analysis {
     let confidence: Double
 }
 
-struct AnalysisAgent: Agent {
+struct AnalysisStep: Step {
     let apiKey: String
-    
+
     public var body: some Step<String, Analysis> {
         ModelStep<String, Analysis>(
             session: LanguageModelSession(
@@ -102,9 +102,9 @@ struct AnalysisAgent: Agent {
 ## Example: Reasoning Model (o1)
 
 ```swift
-struct ReasoningAgent: Agent {
+struct ReasoningStep: Step {
     let apiKey: String
-    
+
     public var body: some Step<String, String> {
         StringModelStep<String>(
             session: LanguageModelSession(

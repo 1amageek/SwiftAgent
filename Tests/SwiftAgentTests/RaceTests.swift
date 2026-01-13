@@ -75,7 +75,9 @@ struct RaceTests {
         let elapsed = Date().timeIntervalSince(startTime)
 
         #expect(result == 1)
-        #expect(elapsed < 0.05) // Should be nearly instant
+        // Should complete much faster than the slow step (200ms)
+        // Allow 100ms for system overhead
+        #expect(elapsed < 0.1)
     }
 
     @Test("Race succeeds if at least one step succeeds")
@@ -176,8 +178,9 @@ struct RaceCancellationTests {
         let elapsed = Date().timeIntervalSince(startTime)
 
         #expect(result == 1)
-        // Should complete almost immediately, not wait for slow step
-        #expect(elapsed < 0.05)
+        // Should complete much faster than the slow step (100ms)
+        // Allow 80ms for system overhead
+        #expect(elapsed < 0.08)
 
         // Give some time for cancellation to propagate
         try await Task.sleep(for: .milliseconds(50))

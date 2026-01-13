@@ -34,7 +34,7 @@ struct MemoryTests {
             @Memory var value: Int = 0
         }
 
-        var container1 = Container()
+        let container1 = Container()
         let container2 = container1
 
         // Both containers share the same storage
@@ -118,7 +118,7 @@ struct RelayTests {
     @Test("Relay from projectedValue initializer")
     func relayFromProjectedValue() {
         @Memory var value: Int = 5
-        var relay = Relay(projectedValue: $value)
+        let relay = Relay(projectedValue: $value)
 
         relay.wrappedValue = 15
         #expect(value == 15)

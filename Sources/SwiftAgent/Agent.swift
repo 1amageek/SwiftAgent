@@ -7,20 +7,77 @@
 
 import Foundation
 
-/// A protocol representing a single step in a process.
+/// A protocol representing an async transformation from input to output.
 ///
-/// `Step` takes an input of a specific type and produces an output of another type asynchronously.
+/// `Step` is the fundamental building block of SwiftAgent's pipeline architecture.
+/// It represents a single transformation that takes an input and produces an output asynchronously.
 ///
-/// - Note: The input and output types must conform to both  `Sendable` to ensure
-///   compatibility with serialization and concurrency.
+/// ## Overview
+///
+/// Steps can be composed together to form processing pipelines. The output of one step
+/// becomes the input of the next, similar to function composition or Unix pipes.
+///
+/// ## Primitive Steps
+///
+/// For simple transformations, implement `run(_:)` directly:
+///
+/// ```swift
+/// struct FetchData: Step {
+///     func run(_ input: URL) async throws -> Data {
+///         let (data, _) = try await URLSession.shared.data(from: input)
+///         return data
+///     }
+/// }
+/// ```
+///
+/// ## Declarative Composition
+///
+/// For composing multiple steps, define a `body` property instead:
+///
+/// ```swift
+/// struct TextProcessor: Step {
+///     var body: some Step<String, String> {
+///         Transform { $0.trimmingCharacters(in: .whitespaces) }
+///         Transform { $0.lowercased() }
+///     }
+/// }
+/// ```
+///
+/// When `body` is defined, `run(_:)` is automatically implemented to delegate to the body.
+///
+/// ## With Language Model Integration
+///
+/// ```swift
+/// struct Summarizer: Step {
+///     @Session var session: LanguageModelSession
+///
+///     var body: some Step<String, String> {
+///         Transform { "Summarize:\n\($0)" }
+///         GenerateText(session: session) { Prompt($0) }
+///     }
+/// }
+/// ```
+///
+/// - Note: Input and Output types must conform to `Sendable` for concurrency safety.
 public protocol Step<Input, Output> {
-    
+
     /// The type of input required by the step.
     associatedtype Input: Sendable
-    
+
     /// The type of output produced by the step.
     associatedtype Output: Sendable
-    
+
+    /// The type of the body step, used for declarative composition.
+    ///
+    /// Defaults to `Never` for primitive steps that implement `run(_:)` directly.
+    associatedtype Body = Never
+
+    /// The body of the step, defining its behavior declaratively.
+    ///
+    /// Implement this property to compose multiple steps together.
+    /// When `body` is defined, `run(_:)` is automatically implemented.
+    @StepBuilder var body: Body { get }
+
     /// Executes the step with the given input and produces an output asynchronously.
     ///
     /// - Parameter input: The input for the step.
@@ -28,6 +85,43 @@ public protocol Step<Input, Output> {
     /// - Throws: An error if the step fails to execute or the input is invalid.
     @discardableResult
     func run(_ input: Input) async throws -> Output
+}
+
+// MARK: - Never as Step
+
+/// `Never` conforms to `Step` to serve as the default `Body` type for primitive steps.
+///
+/// This conformance allows primitive steps to use `Body = Never` as a marker,
+/// indicating they implement `run(_:)` directly rather than through composition.
+extension Never: Step {
+    public typealias Input = Never
+    public typealias Output = Never
+    public typealias Body = Never
+
+    public var body: Never { self }
+
+    public func run(_ input: Never) async throws -> Never {}
+}
+
+// MARK: - Default Implementations
+
+extension Step where Body == Never {
+    /// Default body for primitive steps.
+    ///
+    /// Primitive steps implement `run(_:)` directly and do not use `body`.
+    public var body: Never {
+        fatalError("Primitive steps must implement run(_:) directly")
+    }
+}
+
+extension Step where Body: Step, Body.Input == Input, Body.Output == Output {
+    /// Default run implementation for declarative steps.
+    ///
+    /// Delegates execution to the step's body.
+    @discardableResult
+    public func run(_ input: Input) async throws -> Output {
+        try await body.run(input)
+    }
 }
 
 /// Errors that can occur during tool execution.
@@ -55,43 +149,13 @@ public enum ToolError: Error {
     }
 }
 
-/// A protocol representing an agent, which acts as a composite step by combining multiple steps.
-///
-/// `Agent` is composed of a body that defines its behavior and operates as a higher-level abstraction
-/// over individual steps.
-///
-/// - Note: The `Input` and `Output` types of the `Agent` match those of its `Body`.
-public protocol Agent: Step where Input == Body.Input, Output == Body.Output {
-
-    /// The type of the body, which must conform to `Step`.
-    associatedtype Body: Step
-
-    /// A builder property that defines the body of the agent.
-    ///
-    /// - Note: The body determines how the agent processes its input and generates its output.
-    @StepBuilder var body: Self.Body { get }
-}
-
-extension Agent {
-
-    /// Executes the agent's operation by delegating to its body.
-    ///
-    /// - Parameter input: The input for the agent.
-    /// - Returns: The output produced by the agent's body.
-    /// - Throws: An error if the agent's body fails to execute.
-    @discardableResult
-    public func run(_ input: Input) async throws -> Output {
-        try await body.run(input)
-    }
-}
-
-
 /// A step that does nothing and simply passes the input as the output.
 public struct EmptyStep<Input: Sendable>: Step {
     public typealias Output = Input
-    
+    public typealias Body = Never
+
     @inlinable public init() {}
-    
+
     @discardableResult
     public func run(_ input: Input) async throws -> Output {
         input
@@ -138,15 +202,16 @@ public struct StepBuilder {
 public struct Chain2<S1: Step, S2: Step>: Step where S1.Output == S2.Input {
     public typealias Input = S1.Input
     public typealias Output = S2.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
-    
+
     @inlinable public init(_ step1: S1, _ step2: S2) {
         self.step1 = step1
         self.step2 = step2
     }
-    
+
     @discardableResult
     public func run(_ input: Input) async throws -> Output {
         let intermediate = try await step1.run(input)
@@ -158,7 +223,8 @@ public struct Chain2<S1: Step, S2: Step>: Step where S1.Output == S2.Input {
 public struct Chain3<S1: Step, S2: Step, S3: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input {
     public typealias Input = S1.Input
     public typealias Output = S3.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -181,7 +247,8 @@ public struct Chain3<S1: Step, S2: Step, S3: Step>: Step where S1.Output == S2.I
 public struct Chain4<S1: Step, S2: Step, S3: Step, S4: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input {
     public typealias Input = S1.Input
     public typealias Output = S4.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -207,7 +274,8 @@ public struct Chain4<S1: Step, S2: Step, S3: Step, S4: Step>: Step where S1.Outp
 public struct Chain5<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input {
     public typealias Input = S1.Input
     public typealias Output = S5.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -236,7 +304,8 @@ public struct Chain5<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step>: Step whe
 public struct Chain6<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input {
     public typealias Input = S1.Input
     public typealias Output = S6.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -268,7 +337,8 @@ public struct Chain6<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step>
 public struct Chain7<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step, S7: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input, S6.Output == S7.Input {
     public typealias Input = S1.Input
     public typealias Output = S7.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -303,7 +373,8 @@ public struct Chain7<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step,
 public struct Chain8<S1: Step, S2: Step, S3: Step, S4: Step, S5: Step, S6: Step, S7: Step, S8: Step>: Step where S1.Output == S2.Input, S2.Output == S3.Input, S3.Output == S4.Input, S4.Output == S5.Input, S5.Output == S6.Input, S6.Output == S7.Input, S7.Output == S8.Input {
     public typealias Input = S1.Input
     public typealias Output = S8.Output
-    
+    public typealias Body = Never
+
     public let step1: S1
     public let step2: S2
     public let step3: S3
@@ -359,7 +430,8 @@ extension StepBuilder {
 public struct OptionalStep<S: Step>: Step {
     public typealias Input = S.Input
     public typealias Output = S.Output
-    
+    public typealias Body = Never
+
     private let step: S?
     
     public init(_ step: S?) {
@@ -382,7 +454,8 @@ public enum OptionalStepError: Error {
 public struct ConditionalStep<TrueStep: Step, FalseStep: Step>: Step where TrueStep.Input == FalseStep.Input, TrueStep.Output == FalseStep.Output {
     public typealias Input = TrueStep.Input
     public typealias Output = TrueStep.Output
-    
+    public typealias Body = Never
+
     private let condition: Bool
     private let first: TrueStep?
     private let second: FalseStep?

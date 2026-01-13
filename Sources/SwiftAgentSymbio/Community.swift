@@ -239,6 +239,11 @@ public actor Community {
         await connector.register(transport)
     }
 
+    /// Register the default local network transport (mDNS/DNS-SD + TCP).
+    public func registerLocalNetworkTransport() async {
+        await connector.registerLocalNetworkTransport()
+    }
+
     // MARK: - Member Search
 
     /// Find members who can receive a specific signal type

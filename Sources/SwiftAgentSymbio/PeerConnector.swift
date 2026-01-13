@@ -170,6 +170,11 @@ public actor PeerConnector {
         await coordinator.register(transport)
     }
 
+    /// Register the default local network transport (mDNS/DNS-SD + TCP).
+    public func registerLocalNetworkTransport() async {
+        await coordinator.register(LocalNetworkTransport(localPeer: localPeer))
+    }
+
     /// Unregister a transport
     public func unregister(_ transportID: String) async {
         await coordinator.unregister(transportID)

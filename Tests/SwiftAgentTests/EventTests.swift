@@ -412,9 +412,9 @@ struct EmittingStepTests {
 @Suite("Event Integration Tests")
 struct EventIntegrationTests {
 
-    @Test("Event in Agent body")
-    func eventInAgentBody() async throws {
-        struct TestAgent: Agent {
+    @Test("Event in declarative Step body")
+    func eventInDeclarativeStepBody() async throws {
+        struct TestStep: Step {
             var body: some Step<String, String> {
                 Transform<String, String> { $0.lowercased() }
                     .emit(.testStarted, on: .before)
@@ -430,7 +430,7 @@ struct EventIntegrationTests {
         eventBus.on(.testCompleted) { event in await collector.append(event) }
 
         let result = try await EventBusContext.withValue(eventBus) {
-            try await TestAgent().run("HELLO")
+            try await TestStep().run("HELLO")
         }
 
         #expect(result == "[hello]")

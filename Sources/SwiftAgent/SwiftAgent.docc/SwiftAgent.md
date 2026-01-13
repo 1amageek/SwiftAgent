@@ -36,14 +36,15 @@ struct MyPipeline: Step {
 
 - <doc:GettingStarted>
 - <doc:CoreConcepts>
-- <doc:AgentSessionGuide>
 
-### Core Protocols
+### Steps
 
 - ``Step``
 - ``StepBuilder``
 
-### Primitive Steps
+### Steps - Primitives
+
+Basic building blocks for data transformation and generation.
 
 - ``Transform``
 - ``Generate``
@@ -52,7 +53,9 @@ struct MyPipeline: Step {
 - ``Join``
 - ``EmptyStep``
 
-### Composite Steps
+### Steps - Composition
+
+Combine multiple steps into complex workflows.
 
 - ``Pipeline``
 - ``Parallel``
@@ -61,7 +64,18 @@ struct MyPipeline: Step {
 - ``Map``
 - ``Reduce``
 
-### Step Utilities
+### Steps - Error Handling
+
+Handle errors, retries, and timeouts.
+
+- ``TryCatch``
+- ``RetryStep``
+- ``TimedStep``
+- ``MapErrorStep``
+
+### Steps - Utilities
+
+Type erasure and debugging.
 
 - ``Monitor``
 - ``AnyStep``
@@ -81,6 +95,7 @@ struct MyPipeline: Step {
 
 ### Session Management
 
+- <doc:AgentSessionGuide>
 - ``Session``
 - ``AgentSession``
 - ``LanguageModelSessionDelegate``
@@ -97,10 +112,11 @@ struct MyPipeline: Step {
 - ``PermissionMiddleware``
 - ``SandboxExecutor``
 
-### Error Handling
+### Errors
 
 - ``GateError``
 - ``ToolError``
 - ``RaceError``
 - ``ParallelError``
 - ``LoopError``
+- ``StepTimeoutError``

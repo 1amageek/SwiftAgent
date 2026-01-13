@@ -68,7 +68,7 @@ Combine multiple steps into complex workflows.
 
 Handle errors, retries, and timeouts.
 
-- ``TryCatch``
+- ``Try``
 - ``RetryStep``
 - ``TimedStep``
 - ``MapErrorStep``

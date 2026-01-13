@@ -1,5 +1,5 @@
 //
-//  TryCatch.swift
+//  Try.swift
 //  SwiftAgent
 //
 //  Created by SwiftAgent on 2025/01/07.
@@ -9,7 +9,7 @@ import Foundation
 
 /// A step that provides declarative try-catch error handling.
 ///
-/// `TryCatch` allows you to handle errors declaratively, specifying both
+/// `Try` allows you to handle errors declaratively, specifying both
 /// the primary step and a fallback step to execute on error.
 ///
 /// ## Usage
@@ -40,7 +40,7 @@ import Foundation
 ///     FetchFromBackup()
 /// }
 /// ```
-public struct TryCatch<TryStep: Step, CatchStep: Step>: Step
+public struct Try<TryStep: Step, CatchStep: Step>: Step
 where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
 
     public typealias Input = TryStep.Input
@@ -49,7 +49,7 @@ where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
     private let tryStep: TryStep
     private let catchStepBuilder: @Sendable (Error) -> CatchStep
 
-    /// Creates a try-catch step.
+    /// Creates a try-catch step with error parameter.
     ///
     /// - Parameters:
     ///   - tryBuilder: A builder that produces the primary step.
@@ -80,65 +80,21 @@ where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
 
 // MARK: - Sendable Conformance
 
-extension TryCatch: Sendable where TryStep: Sendable, CatchStep: Sendable {}
+extension Try: Sendable where TryStep: Sendable, CatchStep: Sendable {}
 
-// MARK: - Global Function (with error parameter)
+// MARK: - Error-Ignoring Initializer
 
-/// Creates a try-catch step for declarative error handling.
-///
-/// ## Usage
-///
-/// ```swift
-/// var body: some Step<Query, Report> {
-///     Try {
-///         FetchStep()
-///             .timeout(.seconds(10))
-///     } catch: { error in
-///         FallbackStep()
-///     }
-///
-///     ProcessStep()
-/// }
-/// ```
-///
-/// The same input is passed to both the try step and catch step.
-///
-/// - Parameters:
-///   - tryBuilder: A builder that produces the primary step.
-///   - catchBuilder: A closure that receives an error and returns a fallback step.
-/// - Returns: A `TryCatch` step.
-public func Try<TryStep: Step, CatchStep: Step>(
-    @StepBuilder _ tryBuilder: () -> TryStep,
-    `catch` catchBuilder: @escaping @Sendable (Error) -> CatchStep
-) -> TryCatch<TryStep, CatchStep>
-where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
-    TryCatch(tryBuilder, catch: catchBuilder)
-}
-
-// MARK: - Global Function (without error parameter)
-
-/// Creates a try-catch step with a fallback that ignores the error.
-///
-/// ## Usage
-///
-/// ```swift
-/// Try {
-///     FetchFromPrimary()
-/// } catch: {
-///     FetchFromBackup()
-/// }
-/// ```
-///
-/// - Parameters:
-///   - tryBuilder: A builder that produces the primary step.
-///   - catchBuilder: A closure that returns a fallback step.
-/// - Returns: A `TryCatch` step.
-public func Try<TryStep: Step, CatchStep: Step & Sendable>(
-    @StepBuilder _ tryBuilder: () -> TryStep,
-    `catch` catchBuilder: @escaping @Sendable () -> CatchStep
-) -> TryCatch<TryStep, CatchStep>
-where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
-    TryCatch(tryBuilder) { @Sendable _ in
-        catchBuilder()
+extension Try where CatchStep: Sendable {
+    /// Creates a try-catch step that ignores the error.
+    ///
+    /// - Parameters:
+    ///   - tryBuilder: A builder that produces the primary step.
+    ///   - catchBuilder: A closure that returns a fallback step.
+    public init(
+        @StepBuilder _ tryBuilder: () -> TryStep,
+        `catch` catchBuilder: @escaping @Sendable () -> CatchStep
+    ) {
+        self.tryStep = tryBuilder()
+        self.catchStepBuilder = { @Sendable _ in catchBuilder() }
     }
 }

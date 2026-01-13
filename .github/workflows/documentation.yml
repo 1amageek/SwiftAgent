@@ -45,6 +45,9 @@ jobs:
             --transform-for-static-hosting \
             --hosting-base-path SwiftAgent
 
+          # Disable Jekyll processing
+          touch ./docs/.nojekyll
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

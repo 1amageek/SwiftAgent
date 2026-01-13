@@ -36,6 +36,7 @@ struct MyPipeline: Step {
 
 - <doc:GettingStarted>
 - <doc:CoreConcepts>
+- <doc:AgentSessionGuide>
 
 ### Core Protocols
 
@@ -67,11 +68,13 @@ struct MyPipeline: Step {
 
 ### State Management
 
+- <doc:StateManagementGuide>
 - ``Memory``
 - ``Relay``
 
 ### Context System
 
+- <doc:ContextGuide>
 - ``Context``
 - ``ContextKey``
 - ``Contextable``

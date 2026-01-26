@@ -28,7 +28,11 @@
       "Bash(USE_OTHER_MODELS=1 swift build:*)",
       "Bash(USE_OTHER_MODELS=1 swift test:*)",
       "Bash(wc:*)",
-      "WebFetch(domain:platform.openai.com)"
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:blog.promptlayer.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.zenml.io)",
+      "WebFetch(domain:simonwillison.net)"
     ],
     "deny": []
   },

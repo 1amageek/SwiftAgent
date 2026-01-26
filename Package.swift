@@ -31,7 +31,7 @@ let package = Package(
             .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3")
         ]
         if useOtherModels {
-            deps.append(.package(url: "https://github.com/1amageek/OpenFoundationModels.git", branch: "main"))
+            deps.append(.package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.1.1"))
         }
         return deps
     }(),

@@ -20,11 +20,12 @@ import Synchronization
 /// ## Usage
 ///
 /// ```swift
-/// let session = AgentSession(tools: myTools) {
+/// let languageModelSession = LanguageModelSession(model: model, tools: myTools) {
 ///     Instructions("You are a helpful assistant.")
 /// }
+/// let agentSession = AgentSession(languageModelSession: languageModelSession)
 ///
-/// let response = try await session.send("Hello!")
+/// let response = try await agentSession.send("Hello!")
 /// print(response.content)
 /// ```
 ///
@@ -34,80 +35,16 @@ import Synchronization
 ///
 /// ```swift
 /// // Add steering hints before sending
-/// session.steer("Make sure to use async/await")
-/// session.steer("Add error handling")
+/// agentSession.steer("Make sure to use async/await")
+/// agentSession.steer("Add error handling")
 ///
 /// // Steering messages are combined with the next send()
-/// let response = try await session.send("Write a function...")
+/// let response = try await agentSession.send("Write a function...")
 /// print(response.content)
 /// ```
 ///
 /// **Note:** Steering messages added while a prompt is being processed
 /// will be included in the *following* prompt, not the current one.
-///
-/// ## Event Integration
-///
-/// AgentSession automatically emits events through its EventBus:
-///
-/// ```swift
-/// let eventBus = EventBus()
-/// await eventBus.on(.promptSubmitted) { event in
-///     if let sessionEvent = event as? SessionEvent {
-///         print("Session \(sessionEvent.sessionID) received prompt")
-///     }
-/// }
-///
-/// let session = AgentSession(eventBus: eventBus, tools: myTools) {
-///     Instructions("You are a helpful assistant.")
-/// }
-/// ```
-///
-/// ## Persistence
-///
-/// Sessions can be saved and restored using `SessionSnapshot`:
-///
-/// ```swift
-/// // Save
-/// let snapshot = session.snapshot()
-/// try await store.save(snapshot)
-///
-/// // Restore
-/// if let snapshot = try await store.load(id: sessionID) {
-///     let restored = AgentSession.restore(from: snapshot, tools: myTools)
-/// }
-/// ```
-
-/// Delegate protocol for creating and managing LanguageModelSession instances.
-///
-/// This delegate allows AgentSession to recreate its underlying LanguageModelSession
-/// when needed (e.g., for transcript compaction) without knowing the specific
-/// model configuration details.
-public protocol LanguageModelSessionDelegate: Sendable {
-    /// Creates a new LanguageModelSession with the given transcript.
-    ///
-    /// - Parameter transcript: The transcript to initialize the session with.
-    /// - Returns: A new LanguageModelSession instance.
-    func createSession(with transcript: Transcript) -> LanguageModelSession
-}
-
-/// Default delegate implementation that uses a factory closure to create sessions.
-///
-/// This struct captures the model and tools configuration, allowing AgentSession
-/// to recreate its underlying LanguageModelSession when needed.
-public struct DefaultSessionDelegate: LanguageModelSessionDelegate {
-    private let factory: @Sendable (Transcript) -> LanguageModelSession
-
-    /// Creates a new delegate with the given factory closure.
-    ///
-    /// - Parameter factory: A closure that creates a LanguageModelSession from a Transcript.
-    public init(factory: @escaping @Sendable (Transcript) -> LanguageModelSession) {
-        self.factory = factory
-    }
-
-    public func createSession(with transcript: Transcript) -> LanguageModelSession {
-        factory(transcript)
-    }
-}
 
 public final class AgentSession: Sendable {
 
@@ -145,143 +82,35 @@ public final class AgentSession: Sendable {
         var steeringMessages: [String] = []
         var isProcessing = false
         var waitQueue: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+        var inputContinuation: AsyncStream<String>.Continuation?
     }
 
     private let state: Mutex<SessionState>
-    private let languageModelSessionStorage: Mutex<LanguageModelSession>
-    private let delegate: any LanguageModelSessionDelegate
-
-    /// The underlying language model session.
-    private var languageModelSession: LanguageModelSession {
-        get { languageModelSessionStorage.withLock { $0 } }
-        set { languageModelSessionStorage.withLock { $0 = newValue } }
-    }
+    private let languageModelSession: LanguageModelSession
+    private let inputStreamStorage: Mutex<AsyncStream<String>>
 
     // MARK: - Initialization
 
-    /// Creates a new session with instructions.
+    /// Creates a new session with a pre-configured LanguageModelSession.
     ///
     /// - Parameters:
     ///   - id: Unique identifier for this session. Defaults to a new UUID.
     ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - model: The language model to use.
-    ///   - tools: Tools available to the model.
-    ///   - instructions: Instructions builder for the session.
-#if USE_OTHER_MODELS
+    ///   - languageModelSession: The LanguageModelSession to use.
     public init(
         id: String = UUID().uuidString,
         eventBus: EventBus = EventBus(),
-        model: any LanguageModel,
-        tools: [any Tool] = [],
-        @InstructionsBuilder instructions: () -> Instructions
+        languageModelSession: LanguageModelSession
     ) {
         self.id = id
         self.eventBus = eventBus
-        self.state = Mutex(SessionState())
-        self.languageModelSessionStorage = Mutex(LanguageModelSession(
-            model: model,
-            tools: tools,
-            instructions: instructions
-        ))
-        self.delegate = DefaultSessionDelegate { transcript in
-            LanguageModelSession(model: model, tools: tools, transcript: transcript)
+        var inputContinuation: AsyncStream<String>.Continuation?
+        let inputStream = AsyncStream<String> { continuation in
+            inputContinuation = continuation
         }
-    }
-#else
-    public init(
-        id: String = UUID().uuidString,
-        eventBus: EventBus = EventBus(),
-        model: SystemLanguageModel = .default,
-        tools: [any Tool] = [],
-        @InstructionsBuilder instructions: () -> Instructions
-    ) {
-        self.id = id
-        self.eventBus = eventBus
-        self.state = Mutex(SessionState())
-        self.languageModelSessionStorage = Mutex(LanguageModelSession(
-            model: model,
-            tools: tools,
-            instructions: instructions
-        ))
-        self.delegate = DefaultSessionDelegate { transcript in
-            LanguageModelSession(model: model, tools: tools, transcript: transcript)
-        }
-    }
-#endif
-
-    /// Creates a new session from an existing transcript.
-    ///
-    /// Use this initializer to restore a session from a saved state.
-    ///
-    /// - Parameters:
-    ///   - id: Unique identifier for this session.
-    ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - transcript: The transcript to restore from.
-    ///   - model: The language model to use.
-    ///   - tools: Tools available to the model.
-#if USE_OTHER_MODELS
-    public init(
-        id: String = UUID().uuidString,
-        eventBus: EventBus = EventBus(),
-        transcript: Transcript,
-        model: any LanguageModel,
-        tools: [any Tool] = []
-    ) {
-        self.id = id
-        self.eventBus = eventBus
-        self.state = Mutex(SessionState())
-        self.languageModelSessionStorage = Mutex(LanguageModelSession(
-            model: model,
-            tools: tools,
-            transcript: transcript
-        ))
-        self.delegate = DefaultSessionDelegate { transcript in
-            LanguageModelSession(model: model, tools: tools, transcript: transcript)
-        }
-    }
-#else
-    public init(
-        id: String = UUID().uuidString,
-        eventBus: EventBus = EventBus(),
-        transcript: Transcript,
-        model: SystemLanguageModel = .default,
-        tools: [any Tool] = []
-    ) {
-        self.id = id
-        self.eventBus = eventBus
-        self.state = Mutex(SessionState())
-        self.languageModelSessionStorage = Mutex(LanguageModelSession(
-            model: model,
-            tools: tools,
-            transcript: transcript
-        ))
-        self.delegate = DefaultSessionDelegate { transcript in
-            LanguageModelSession(model: model, tools: tools, transcript: transcript)
-        }
-    }
-#endif
-
-    /// Creates a new session with an externally provided delegate.
-    ///
-    /// This initializer allows full control over how LanguageModelSession instances
-    /// are created, enabling custom model configurations, tool setups, or testing mocks.
-    ///
-    /// - Parameters:
-    ///   - id: Unique identifier for this session. Defaults to a new UUID.
-    ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - initialSession: The initial LanguageModelSession to use.
-    ///   - delegate: The delegate responsible for creating new sessions when needed.
-    public init(
-        id: String = UUID().uuidString,
-        eventBus: EventBus = EventBus(),
-        initialSession: LanguageModelSession,
-        delegate: any LanguageModelSessionDelegate
-    ) {
-        self.id = id
-        self.eventBus = eventBus
-        self.state = Mutex(SessionState())
-        self.languageModelSessionStorage = Mutex(initialSession)
-        self.delegate = delegate
+        self.inputStreamStorage = Mutex(inputStream)
+        self.state = Mutex(SessionState(inputContinuation: inputContinuation))
+        self.languageModelSession = languageModelSession
     }
 
     // MARK: - Message Handling
@@ -321,6 +150,36 @@ public final class AgentSession: Sendable {
     /// - Parameter content: The steering message content.
     public func steer(_ content: String) {
         state.withLock { $0.steeringMessages.append(content) }
+    }
+
+    // MARK: - Input Queue
+
+    /// Adds a message to the input queue.
+    ///
+    /// Messages added via this method are processed in FIFO order by the agent loop.
+    /// If the agent is currently processing another message, this message will be
+    /// queued and processed after the current message completes.
+    ///
+    /// - Parameter message: The message to add to the input queue.
+    public func input(_ message: String) {
+        _ = state.withLock { state in
+            state.inputContinuation?.yield(message)
+        }
+    }
+
+    /// Waits for the next input from the queue.
+    ///
+    /// This method suspends until input is available in the queue.
+    /// It is typically called in a loop by the agent to process incoming messages.
+    ///
+    /// - Returns: The next input message from the queue.
+    /// - Throws: `CancellationError` if the task is cancelled or the stream ends.
+    public func waitForInput() async throws -> String {
+        let stream = inputStreamStorage.withLock { $0 }
+        for await input in stream {
+            return input
+        }
+        throw CancellationError()
     }
 
     // MARK: - Processing
@@ -452,23 +311,6 @@ public final class AgentSession: Sendable {
         state.withLock { $0.steeringMessages.count }
     }
 
-    // MARK: - Session Replacement
-
-    /// Replaces the underlying LanguageModelSession with a new one created from the given transcript.
-    ///
-    /// This can be called at any time, including while processing. If called while processing:
-    /// - Current processing continues with the previously captured session
-    /// - The next message uses the new session
-    ///
-    /// This is used for transcript compaction, where the conversation history is compressed
-    /// and a new session is created with the compacted transcript. The delegate is responsible
-    /// for creating the new session with the appropriate model and tools.
-    ///
-    /// - Parameter transcript: The transcript to use for the new session.
-    public func replaceSession(with transcript: Transcript) {
-        languageModelSession = delegate.createSession(with: transcript)
-    }
-
     // MARK: - Persistence
 
     /// Creates a snapshot of the current session state.
@@ -482,44 +324,4 @@ public final class AgentSession: Sendable {
             updatedAt: Date()
         )
     }
-
-    /// Restores a session from a snapshot.
-    ///
-    /// - Parameters:
-    ///   - snapshot: The snapshot to restore from.
-    ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
-    ///   - model: The language model to use.
-    ///   - tools: Tools available to the model.
-    /// - Returns: A new session initialized with the snapshot's transcript.
-#if USE_OTHER_MODELS
-    public static func restore(
-        from snapshot: SessionSnapshot,
-        eventBus: EventBus = EventBus(),
-        model: any LanguageModel,
-        tools: [any Tool] = []
-    ) -> AgentSession {
-        AgentSession(
-            id: snapshot.id,
-            eventBus: eventBus,
-            transcript: snapshot.transcript,
-            model: model,
-            tools: tools
-        )
-    }
-#else
-    public static func restore(
-        from snapshot: SessionSnapshot,
-        eventBus: EventBus = EventBus(),
-        model: SystemLanguageModel = .default,
-        tools: [any Tool] = []
-    ) -> AgentSession {
-        AgentSession(
-            id: snapshot.id,
-            eventBus: eventBus,
-            transcript: snapshot.transcript,
-            model: model,
-            tools: tools
-        )
-    }
-#endif
 }

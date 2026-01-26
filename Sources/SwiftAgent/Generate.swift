@@ -94,6 +94,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 
     private let sessionSource: SessionSource
     private let options: GenerationOptions
+    private let maxRetries: Int
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Out>) async -> Void)?
 
@@ -117,16 +118,19 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -135,14 +139,17 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -151,14 +158,17 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         transform: @escaping (In) -> String
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
@@ -168,12 +178,15 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     public init(
         session: LanguageModelSession,
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -183,14 +196,17 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) where In: PromptRepresentable {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
     }
@@ -201,14 +217,17 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -217,16 +236,19 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -235,28 +257,35 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         transform: @escaping (In) -> String
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
 
     /// Creates a new Generate step with a shared session via Relay
     /// When Input conforms to PromptRepresentable, no prompt builder is needed
-    /// - Parameter session: A Relay to a shared LanguageModelSession
-    /// - Parameter options: Generation options for controlling output
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     public init(
         session: Relay<LanguageModelSession>,
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -266,13 +295,16 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// Creates a new Generate step that uses the session from TaskLocal context
     /// - Parameters:
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -280,27 +312,34 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
     /// Creates a new Generate step that uses the session from TaskLocal context with streaming
     /// - Parameters:
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Out>) async -> Void
     ) {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
 
     /// Creates a new Generate step that uses the session from TaskLocal context
     /// When Input conforms to PromptRepresentable
-    /// - Parameter options: Generation options for controlling output
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 0)
     public init(
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -313,63 +352,86 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
         ) { span in
             // Set basic attributes for LLM call
             span.attributes[SwiftAgentSpanAttributes.stepType] = "LLMGeneration"
-            
+
             // Build prompt
             let prompt = promptBuilder(input)
             span.addEvent("prompt_generated")
-            
-            do {
-                if let handler = streamHandler {
-                    // Streaming mode - use streamResponse
-                    span.addEvent("streaming_started")
-                    var lastContent: Out?
 
-                    let responseStream = session.streamResponse(
-                        generating: Out.self,
-                        includeSchemaInPrompt: true,
-                        options: options
-                    ) {
-                        prompt
-                    }
+            let maxAttempts = maxRetries + 1
+            var lastError: Error?
 
-                    for try await snapshot in responseStream {
-                        // Pass the snapshot directly to the handler
-                        await handler(snapshot)
+            for attempt in 1...maxAttempts {
+                // Check for cancellation before each attempt
+                try Task.checkCancellation()
 
-                        // Try to get the full content from rawContent
-                        // This is needed because snapshot.content is PartiallyGenerated
-                        if let fullContent = try? Out(snapshot.rawContent) {
-                            lastContent = fullContent
+                do {
+                    if let handler = streamHandler {
+                        // Streaming mode - use streamResponse
+                        span.addEvent("streaming_started")
+                        var lastContent: Out?
+
+                        let responseStream = session.streamResponse(
+                            generating: Out.self,
+                            includeSchemaInPrompt: true,
+                            options: options
+                        ) {
+                            prompt
                         }
-                    }
 
-                    span.addEvent("streaming_completed")
+                        for try await snapshot in responseStream {
+                            // Pass the snapshot directly to the handler
+                            await handler(snapshot)
 
-                    guard let result = lastContent else {
-                        throw ModelError.generationFailed("No content generated")
+                            // Try to get the full content from rawContent
+                            // This is needed because snapshot.content is PartiallyGenerated
+                            if let fullContent = try? Out(snapshot.rawContent) {
+                                lastContent = fullContent
+                            }
+                        }
+
+                        span.addEvent("streaming_completed")
+
+                        guard let result = lastContent else {
+                            throw ModelError.generationFailed("No content generated")
+                        }
+                        return result
+
+                    } else {
+                        // Non-streaming mode - use respond
+                        // Note: Tool execution happens internally in the LanguageModel implementation
+                        // if tools are registered in the session. The model will handle tool calls
+                        // automatically based on its implementation (e.g., OpenAI, Anthropic).
+                        let response = try await session.respond(
+                            generating: Out.self,
+                            includeSchemaInPrompt: true,
+                            options: options
+                        ) {
+                            prompt
+                        }
+
+                        // Span is successful by default
+                        return response.content
                     }
-                    return result
-                    
-                } else {
-                    // Non-streaming mode - use respond
-                    // Note: Tool execution happens internally in the LanguageModel implementation
-                    // if tools are registered in the session. The model will handle tool calls
-                    // automatically based on its implementation (e.g., OpenAI, Anthropic).
-                    let response = try await session.respond(
-                        generating: Out.self,
-                        includeSchemaInPrompt: true,
-                        options: options
-                    ) {
-                        prompt
+                } catch is CancellationError {
+                    // Don't retry on cancellation
+                    throw CancellationError()
+                } catch {
+                    lastError = error
+
+                    if attempt < maxAttempts {
+                        span.addEvent(SpanEvent(name: "retry_attempt_\(attempt)"))
                     }
-                    
-                    // Span is successful by default
-                    return response.content
                 }
-            } catch {
+            }
+
+            // All attempts failed
+            if let error = lastError {
                 span.recordError(error)
                 throw ModelError.generationFailed(error.localizedDescription)
             }
+
+            // This should never happen, but satisfy the compiler
+            throw ModelError.generationFailed("Unknown error")
         }
     }
 }
@@ -469,6 +531,7 @@ public struct GenerateText<In: Sendable>: Step {
 
     private let sessionSource: SessionSource
     private let options: GenerationOptions
+    private let maxRetries: Int
     private let promptBuilder: (In) -> Prompt
     private let streamHandler: ((GenerateSnapshot<Output>) async -> Void)?
 
@@ -492,16 +555,19 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -510,14 +576,17 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -526,14 +595,17 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         transform: @escaping (In) -> String
     ) {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
@@ -543,12 +615,15 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     public init(
         session: LanguageModelSession,
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -558,14 +633,17 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: The LanguageModelSession to use
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: LanguageModelSession,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) where In: PromptRepresentable {
         self.sessionSource = .direct(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = onStream
     }
@@ -576,14 +654,17 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -592,16 +673,19 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
@@ -610,28 +694,35 @@ public struct GenerateText<In: Sendable>: Step {
     /// - Parameters:
     ///   - session: A Relay to a shared LanguageModelSession
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - transform: A closure to transform the input to a string prompt
     public init(
         session: Relay<LanguageModelSession>,
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         transform: @escaping (In) -> String
     ) {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in Prompt(transform(input)) }
         self.streamHandler = nil
     }
 
     /// Creates a new GenerateText step with a shared session via Relay
     /// When Input conforms to PromptRepresentable, no prompt builder is needed
-    /// - Parameter session: A Relay to a shared LanguageModelSession
-    /// - Parameter options: Generation options for controlling output
+    /// - Parameters:
+    ///   - session: A Relay to a shared LanguageModelSession
+    ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     public init(
         session: Relay<LanguageModelSession>,
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .relay(session)
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -641,13 +732,16 @@ public struct GenerateText<In: Sendable>: Step {
     /// Creates a new GenerateText step that uses the session from TaskLocal context
     /// - Parameters:
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     public init(
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt
     ) {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = nil
     }
@@ -655,27 +749,34 @@ public struct GenerateText<In: Sendable>: Step {
     /// Creates a new GenerateText step that uses the session from TaskLocal context with streaming
     /// - Parameters:
     ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     ///   - prompt: A closure that builds a Prompt using PromptBuilder
     ///   - onStream: A closure that handles each ResponseStream.Snapshot
     public init(
         options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3,
         @PromptBuilder prompt: @escaping (In) -> Prompt,
         onStream: @escaping (GenerateSnapshot<Output>) async -> Void
     ) {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = prompt
         self.streamHandler = onStream
     }
 
     /// Creates a new GenerateText step that uses the session from TaskLocal context
     /// When Input conforms to PromptRepresentable
-    /// - Parameter options: Generation options for controlling output
+    /// - Parameters:
+    ///   - options: Generation options for controlling output
+    ///   - maxRetries: Maximum number of retries on generation failure (default: 3)
     public init(
-        options: GenerationOptions = GenerationOptions()
+        options: GenerationOptions = GenerationOptions(),
+        maxRetries: Int = 3
     ) where In: PromptRepresentable {
         self.sessionSource = .context
         self.options = options
+        self.maxRetries = maxRetries
         self.promptBuilder = { input in input.promptRepresentation }
         self.streamHandler = nil
     }
@@ -688,52 +789,75 @@ public struct GenerateText<In: Sendable>: Step {
         ) { span in
             // Set basic attributes for LLM call
             span.attributes[SwiftAgentSpanAttributes.stepType] = "LLMTextGeneration"
-            
+
             // Build prompt
             let prompt = promptBuilder(input)
             span.addEvent("prompt_generated")
-            
-            do {
-                if let handler = streamHandler {
-                    // Streaming mode - use streamResponse
-                    span.addEvent("streaming_started")
-                    var lastContent: String = ""
-                    
-                    let responseStream = session.streamResponse(
-                        options: options
-                    ) {
-                        prompt
+
+            let maxAttempts = maxRetries + 1
+            var lastError: Error?
+
+            for attempt in 1...maxAttempts {
+                // Check for cancellation before each attempt
+                try Task.checkCancellation()
+
+                do {
+                    if let handler = streamHandler {
+                        // Streaming mode - use streamResponse
+                        span.addEvent("streaming_started")
+                        var lastContent: String = ""
+
+                        let responseStream = session.streamResponse(
+                            options: options
+                        ) {
+                            prompt
+                        }
+
+                        for try await snapshot in responseStream {
+                            // Pass the snapshot directly to the handler
+                            await handler(snapshot)
+
+                            // For String, PartiallyGenerated == String
+                            lastContent = snapshot.content
+                        }
+
+                        span.addEvent("streaming_completed")
+                        return lastContent
+
+                    } else {
+                        // Non-streaming mode - use respond
+                        // Note: Tool execution happens internally in the LanguageModel implementation
+                        // if tools are registered in the session. The model will handle tool calls
+                        // automatically based on its implementation (e.g., OpenAI, Anthropic).
+                        let response = try await session.respond(
+                            options: options
+                        ) {
+                            prompt
+                        }
+
+                        // Span is successful by default
+                        return response.content
                     }
-                    
-                    for try await snapshot in responseStream {
-                        // Pass the snapshot directly to the handler
-                        await handler(snapshot)
-                        
-                        // For String, PartiallyGenerated == String
-                        lastContent = snapshot.content
+                } catch is CancellationError {
+                    // Don't retry on cancellation
+                    throw CancellationError()
+                } catch {
+                    lastError = error
+
+                    if attempt < maxAttempts {
+                        span.addEvent(SpanEvent(name: "retry_attempt_\(attempt)"))
                     }
-                    
-                    span.addEvent("streaming_completed")
-                    return lastContent
-                    
-                } else {
-                    // Non-streaming mode - use respond
-                    // Note: Tool execution happens internally in the LanguageModel implementation
-                    // if tools are registered in the session. The model will handle tool calls
-                    // automatically based on its implementation (e.g., OpenAI, Anthropic).
-                    let response = try await session.respond(
-                        options: options
-                    ) {
-                        prompt
-                    }
-                    
-                    // Span is successful by default
-                    return response.content
                 }
-            } catch {
+            }
+
+            // All attempts failed
+            if let error = lastError {
                 span.recordError(error)
                 throw ModelError.generationFailed(error.localizedDescription)
             }
+
+            // This should never happen, but satisfy the compiler
+            throw ModelError.generationFailed("Unknown error")
         }
     }
 }

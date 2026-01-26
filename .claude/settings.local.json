@@ -31,5 +31,8 @@
       "WebFetch(domain:platform.openai.com)"
     ],
     "deny": []
-  }
+  },
+  "enabledMcpjsonServers": [
+    "chrome-devtools"
+  ]
 }

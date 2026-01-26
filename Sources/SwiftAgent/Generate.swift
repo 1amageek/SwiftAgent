@@ -870,17 +870,12 @@ func shouldRetryGenerationError(_ error: Error) -> Bool {
              .unsupportedLanguageOrLocale,
              .rateLimited,        // Would need delay, not immediate retry
              .concurrentRequests, // Would need delay, not immediate retry
-             .refusal,
-             .toolNotFound,
-             .toolExecutionFailed,
-             .unexpectedEntryType:
+             .refusal:
+            return false
+
+        @unknown default:
             return false
         }
-    }
-
-    // Check for GeneratedContentError (parsing errors)
-    if let _ = error as? GeneratedContentError {
-        return true
     }
 
     // Check for DecodingError (JSON parsing errors)

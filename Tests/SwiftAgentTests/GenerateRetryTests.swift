@@ -33,48 +33,6 @@ struct ShouldRetryGenerationErrorTests {
         #expect(shouldRetryGenerationError(error) == true)
     }
 
-    @Test("GeneratedContentError.invalidSchema should be retryable")
-    func generatedContentErrorInvalidSchemaIsRetryable() {
-        let error = GeneratedContentError.invalidSchema
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.typeMismatch should be retryable")
-    func generatedContentErrorTypeMismatchIsRetryable() {
-        let error = GeneratedContentError.typeMismatch(expected: "String", actual: "Int")
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.missingProperty should be retryable")
-    func generatedContentErrorMissingPropertyIsRetryable() {
-        let error = GeneratedContentError.missingProperty("name")
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.invalidJSON should be retryable")
-    func generatedContentErrorInvalidJSONIsRetryable() {
-        let error = GeneratedContentError.invalidJSON("malformed json")
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.arrayExpected should be retryable")
-    func generatedContentErrorArrayExpectedIsRetryable() {
-        let error = GeneratedContentError.arrayExpected
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.dictionaryExpected should be retryable")
-    func generatedContentErrorDictionaryExpectedIsRetryable() {
-        let error = GeneratedContentError.dictionaryExpected
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
-    @Test("GeneratedContentError.partialContent should be retryable")
-    func generatedContentErrorPartialContentIsRetryable() {
-        let error = GeneratedContentError.partialContent
-        #expect(shouldRetryGenerationError(error) == true)
-    }
-
     @Test("DecodingError.dataCorrupted should be retryable")
     func decodingErrorDataCorruptedIsRetryable() {
         let context = DecodingError.Context(codingPath: [], debugDescription: "corrupted")
@@ -157,25 +115,6 @@ struct ShouldRetryGenerationErrorTests {
     func refusalNotRetryable() {
         let refusal = LanguageModelSession.GenerationError.Refusal(transcriptEntries: [])
         let error = LanguageModelSession.GenerationError.refusal(refusal, makeContext())
-        #expect(shouldRetryGenerationError(error) == false)
-    }
-
-    @Test("toolNotFound should not be retryable")
-    func toolNotFoundNotRetryable() {
-        let error = LanguageModelSession.GenerationError.toolNotFound("unknown_tool", makeContext())
-        #expect(shouldRetryGenerationError(error) == false)
-    }
-
-    @Test("toolExecutionFailed should not be retryable")
-    func toolExecutionFailedNotRetryable() {
-        struct TestError: Error {}
-        let error = LanguageModelSession.GenerationError.toolExecutionFailed("test_tool", TestError(), makeContext())
-        #expect(shouldRetryGenerationError(error) == false)
-    }
-
-    @Test("unexpectedEntryType should not be retryable")
-    func unexpectedEntryTypeNotRetryable() {
-        let error = LanguageModelSession.GenerationError.unexpectedEntryType(makeContext())
         #expect(shouldRetryGenerationError(error) == false)
     }
 

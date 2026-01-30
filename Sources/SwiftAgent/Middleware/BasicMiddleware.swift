@@ -14,6 +14,15 @@ import Foundation
 /// ## Example
 ///
 /// ```swift
+/// // Basic usage
+/// let pipeline = ToolPipeline()
+///     .use(LoggingMiddleware())
+///
+/// // Verbose mode: logs tool arguments
+/// let pipeline = ToolPipeline()
+///     .use(LoggingMiddleware(verbose: true))
+///
+/// // Custom logger
 /// let pipeline = ToolPipeline()
 ///     .use(LoggingMiddleware { print($0) })
 /// ```
@@ -31,14 +40,51 @@ public struct LoggingMiddleware: ToolMiddleware {
         public let toolName: String
         public let message: String
         public let duration: Duration?
+        /// Tool arguments JSON string. Populated when verbose is enabled.
+        public let arguments: String?
+
+        public init(
+            timestamp: Date,
+            level: LogLevel,
+            toolName: String,
+            message: String,
+            duration: Duration?,
+            arguments: String? = nil
+        ) {
+            self.timestamp = timestamp
+            self.level = level
+            self.toolName = toolName
+            self.message = message
+            self.duration = duration
+            self.arguments = arguments
+        }
     }
 
     private let logger: @Sendable (LogEntry) -> Void
+    private let verbose: Bool
 
-    public init(logger: @escaping @Sendable (LogEntry) -> Void = { entry in
-        print("[\(entry.level)] \(entry.toolName): \(entry.message)")
-    }) {
-        self.logger = logger
+    /// Creates a logging middleware.
+    ///
+    /// - Parameters:
+    ///   - verbose: When `true`, `LogEntry.arguments` is populated and
+    ///     the default logger prints tool arguments. Defaults to `false`.
+    ///   - logger: Custom log handler. When `nil`, uses the default logger.
+    public init(
+        verbose: Bool = false,
+        logger: (@Sendable (LogEntry) -> Void)? = nil
+    ) {
+        self.verbose = verbose
+        if let logger {
+            self.logger = logger
+        } else {
+            let verbose = verbose
+            self.logger = { entry in
+                print("[\(entry.level)] \(entry.toolName): \(entry.message)")
+                if verbose, let arguments = entry.arguments {
+                    print("[\(entry.level)] \(entry.toolName): arguments = \(arguments)")
+                }
+            }
+        }
     }
 
     public func handle(_ context: ToolContext, next: @escaping Next) async throws -> ToolResult {
@@ -47,7 +93,8 @@ public struct LoggingMiddleware: ToolMiddleware {
             level: .info,
             toolName: context.toolName,
             message: "Starting execution",
-            duration: nil
+            duration: nil,
+            arguments: verbose ? context.arguments : nil
         ))
 
         do {

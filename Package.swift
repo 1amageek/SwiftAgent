@@ -3,12 +3,6 @@
 
 import PackageDescription
 import CompilerPluginSupport
-import Foundation
-
-// By default, SwiftAgent uses Apple's FoundationModels framework.
-// Set USE_OTHER_MODELS=1 to use OpenFoundationModels for development/testing with other LLM providers.
-// Example: USE_OTHER_MODELS=1 swift build
-let useOtherModels = ProcessInfo.processInfo.environment["USE_OTHER_MODELS"] != nil
 
 let package = Package(
     name: "SwiftAgent",
@@ -20,21 +14,20 @@ let package = Package(
         .library(name: "SwiftAgentMCP", targets: ["SwiftAgentMCP"]),
         .library(name: "AgentTools", targets: ["AgentTools"]),
     ],
-    dependencies: {
-        var deps: [Package.Dependency] = [
-            .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
-            .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
-            .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
-            .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
-            .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
-            .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
-            .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3")
-        ]
-        if useOtherModels {
-            deps.append(.package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.1.1"))
-        }
-        return deps
-    }(),
+    traits: [
+        .trait(name: "OpenFoundationModels"),
+        .default(enabledTraits: []),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
+        .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
+        .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
+        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.1.1"),
+    ],
     targets: [
         .macro(
             name: "SwiftAgentMacros",
@@ -46,89 +39,90 @@ let package = Package(
         ),
         .target(
             name: "SwiftAgent",
-            dependencies: useOtherModels ? [
+            dependencies: [
                 "SwiftAgentMacros",
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime"),
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels"),
-                .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels")
-            ] : [
-                "SwiftAgentMacros",
-                .product(name: "Tracing", package: "swift-distributed-tracing"),
-                .product(name: "Instrumentation", package: "swift-distributed-tracing"),
-                .product(name: "ActorRuntime", package: "swift-actor-runtime")
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
+                .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .target(
             name: "SwiftAgentSkills",
-            dependencies: useOtherModels ? [
+            dependencies: [
                 "SwiftAgent",
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
-            ] : [
-                "SwiftAgent"
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .target(
             name: "SwiftAgentSymbio",
             dependencies: [
                 "SwiftAgent",
                 .product(name: "Discovery", package: "swift-discovery"),
-                .product(name: "ActorRuntime", package: "swift-actor-runtime")
+                .product(name: "ActorRuntime", package: "swift-actor-runtime"),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .target(
             name: "SwiftAgentMCP",
             dependencies: [
                 "SwiftAgent",
-                .product(name: "MCP", package: "swift-sdk")
+                .product(name: "MCP", package: "swift-sdk"),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .target(
             name: "AgentTools",
-            dependencies: useOtherModels ? [
+            dependencies: [
                 "SwiftAgent",
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
-            ] : [
-                "SwiftAgent"
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .testTarget(
             name: "SwiftAgentTests",
-            dependencies: useOtherModels ? [
+            dependencies: [
                 "SwiftAgent",
                 "AgentTools",
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
-            ] : [
-                "SwiftAgent",
-                "AgentTools"
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .testTarget(
             name: "AgentsTests",
-            dependencies: useOtherModels ? [
+            dependencies: [
                 "SwiftAgent",
                 "AgentTools",
-                .product(name: "OpenFoundationModels", package: "OpenFoundationModels")
-            ] : [
-                "SwiftAgent",
-                "AgentTools"
+                .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
         .testTarget(
             name: "SwiftAgentSymbioTests",
             dependencies: [
                 "SwiftAgent",
-                "SwiftAgentSymbio"
+                "SwiftAgentSymbio",
             ],
-            swiftSettings: useOtherModels ? [.define("USE_OTHER_MODELS")] : []
+            swiftSettings: [
+                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+            ]
         ),
     ]
 )

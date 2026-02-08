@@ -2,7 +2,7 @@
 
 Apple FoundationModelsを基盤とした型安全で宣言的なAIエージェントフレームワーク。
 
-> **Note**: デフォルトはApple FoundationModelsを使用。`USE_OTHER_MODELS=1` で OpenFoundationModels に切り替え可能。
+> **Note**: デフォルトはApple FoundationModelsを使用。`--traits OpenFoundationModels` で OpenFoundationModels に切り替え可能。
 
 ## コア概念
 
@@ -1059,8 +1059,8 @@ let parallel = Parallel<URL, ResizedImage> {
 swift build
 
 # OpenFoundationModels を使用（開発/テスト用）
-USE_OTHER_MODELS=1 swift build
-USE_OTHER_MODELS=1 swift test
+swift build --traits OpenFoundationModels
+swift test --traits OpenFoundationModels
 ```
 
 ## 参考リンク

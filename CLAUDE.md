@@ -1041,7 +1041,7 @@ let parallel = Parallel<URL, ResizedImage> {
 
 ```
                     FoundationModels (default)
-                    OpenFoundationModels (USE_OTHER_MODELS=1)
+                    OpenFoundationModels (--traits OpenFoundationModels)
                            ↓
                        SwiftAgent
                       ↙    ↓    ↘

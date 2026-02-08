@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import SwiftAgent
 
-#if USE_OTHER_MODELS
+#if OpenFoundationModels
 import OpenFoundationModels
 
 // MARK: - Test Helpers

@@ -5,7 +5,7 @@
 //  Created by Norikazu Muramoto on 2025/01/12.
 //
 
-#if USE_OTHER_MODELS
+#if OpenFoundationModels
 @_exported import OpenFoundationModels
 @_exported import OpenFoundationModelsExtra
 public typealias Tool = OpenFoundationModels.Tool

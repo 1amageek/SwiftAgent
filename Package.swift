@@ -48,7 +48,7 @@ let package = Package(
                 .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .target(
@@ -58,7 +58,7 @@ let package = Package(
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .target(
@@ -69,7 +69,7 @@ let package = Package(
                 .product(name: "ActorRuntime", package: "swift-actor-runtime"),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .target(
@@ -79,7 +79,7 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .target(
@@ -89,7 +89,7 @@ let package = Package(
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .testTarget(
@@ -100,7 +100,7 @@ let package = Package(
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .testTarget(
@@ -111,7 +111,7 @@ let package = Package(
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
         .testTarget(
@@ -121,7 +121,7 @@ let package = Package(
                 "SwiftAgentSymbio",
             ],
             swiftSettings: [
-                .define("USE_OTHER_MODELS", .when(traits: ["OpenFoundationModels"])),
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
             ]
         ),
     ]

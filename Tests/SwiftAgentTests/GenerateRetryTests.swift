@@ -9,7 +9,7 @@ import Testing
 import Foundation
 @testable import SwiftAgent
 
-#if USE_OTHER_MODELS
+#if OpenFoundationModels
 import OpenFoundationModels
 #else
 import FoundationModels
@@ -151,7 +151,7 @@ struct ShouldRetryGenerationErrorTests {
 @Suite("Generate maxRetries Parameter Tests")
 struct GenerateMaxRetriesParameterTests {
 
-    #if !USE_OTHER_MODELS
+    #if !OpenFoundationModels
     @Test("Generate default maxRetries is 3")
     func generateDefaultMaxRetries() {
         let session = LanguageModelSession(model: SystemLanguageModel.default)

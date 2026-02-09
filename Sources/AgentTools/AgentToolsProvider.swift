@@ -8,6 +8,10 @@
 import Foundation
 import SwiftAgent
 
+#if OpenFoundationModels
+import OpenFoundationModels
+#endif
+
 /// A tool provider that creates AgentTools instances.
 ///
 /// `AgentToolsProvider` is the default implementation of `ToolProvider`
@@ -40,18 +44,48 @@ public struct AgentToolsProvider: ToolProvider {
     /// Optional web search provider for WebSearchTool.
     private let searchProvider: WebSearchProvider?
 
+    /// Shared notebook storage instance.
+    private let notebookStorage: NotebookStorage
+
+    #if OpenFoundationModels
+    /// Language model for DispatchTool.
+    private let languageModel: (any LanguageModel)?
+
     /// Creates a new AgentTools provider.
     ///
     /// - Parameters:
     ///   - workingDirectory: The working directory for file operations.
     ///   - searchProvider: Optional search provider for web search functionality.
+    ///   - notebookStorage: Shared notebook storage instance. Defaults to a new instance.
+    ///   - languageModel: Language model for DispatchTool. If `nil`, Dispatch tool is not available.
     public init(
         workingDirectory: String = FileManager.default.currentDirectoryPath,
-        searchProvider: WebSearchProvider? = nil
+        searchProvider: WebSearchProvider? = nil,
+        notebookStorage: NotebookStorage = NotebookStorage(),
+        languageModel: (any LanguageModel)? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.searchProvider = searchProvider
+        self.notebookStorage = notebookStorage
+        self.languageModel = languageModel
     }
+    #else
+    /// Creates a new AgentTools provider.
+    ///
+    /// - Parameters:
+    ///   - workingDirectory: The working directory for file operations.
+    ///   - searchProvider: Optional search provider for web search functionality.
+    ///   - notebookStorage: Shared notebook storage instance. Defaults to a new instance.
+    public init(
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        searchProvider: WebSearchProvider? = nil,
+        notebookStorage: NotebookStorage = NotebookStorage()
+    ) {
+        self.workingDirectory = workingDirectory
+        self.searchProvider = searchProvider
+        self.notebookStorage = notebookStorage
+    }
+    #endif
 
     // MARK: - ToolProvider
 
@@ -95,6 +129,22 @@ public struct AgentToolsProvider: ToolProvider {
             // Return mock provider for testing if no provider configured
             return WebSearchTool(provider: MockSearchProvider())
 
+        case "Notebook":
+            return NotebookTool(storage: notebookStorage)
+
+        case "Dispatch":
+            #if OpenFoundationModels
+            if let model = languageModel {
+                return DispatchTool(
+                    languageModel: model,
+                    notebookStorage: notebookStorage
+                )
+            }
+            return nil
+            #else
+            return DispatchTool(notebookStorage: notebookStorage)
+            #endif
+
         default:
             return nil
         }
@@ -118,7 +168,9 @@ public struct AgentToolsProvider: ToolProvider {
         "Bash",       // ExecuteCommandTool
         "Git",        // GitTool
         "WebFetch",   // URLFetchTool
-        "WebSearch"   // WebSearchTool
+        "WebSearch",  // WebSearchTool
+        "Notebook",   // NotebookTool
+        "Dispatch"    // DispatchTool
     ]
 }
 

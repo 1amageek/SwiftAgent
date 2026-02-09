@@ -103,7 +103,9 @@ extension ToolConfiguration {
                     "Glob",
                     "Bash",
                     "Git",
-                    "WebFetch"
+                    "WebFetch",
+                    "Notebook",
+                    "Dispatch"
                 ]
             case .fileOnly:
                 return [

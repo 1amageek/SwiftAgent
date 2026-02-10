@@ -496,6 +496,8 @@ Claude Code-style tool naming for file system and web operations.
 | `Git` | Git operations |
 | `WebFetch` | Fetch URL content |
 | `WebSearch` | Web search |
+| `Notebook` | In-memory key-value scratchpad |
+| `Dispatch` | Sub-LLM session delegation |
 
 ```swift
 let session = LanguageModelSession(
@@ -505,6 +507,19 @@ let session = LanguageModelSession(
     Instructions("You are a code assistant with file system access")
 }
 ```
+
+### Nested Agents (RLM-inspired)
+
+AgentTools supports nested agent patterns inspired by [Recursive Language Models (RLM)](https://arxiv.org/abs/2512.24601). RLM demonstrates that LLMs can overcome context window limitations by storing data in an external environment and recursively delegating sub-tasks to fresh LLM sessions.
+
+SwiftAgent makes this straightforward with two built-in tools:
+
+- **`Notebook`** — An in-memory scratchpad where agents store and retrieve data outside their context window
+- **`Dispatch`** — Spawns child LLM sessions that share the parent's Notebook and can recursively dispatch further sub-agents
+
+Child sessions are depth-limited and operate independently from the parent's conversation history, enabling an agent to decompose complex problems into focused sub-tasks — each handled by a nested agent with its own reasoning scope.
+
+> Zhang, A. L., Krasta, T., & Khattab, O. (2025). *Recursive Language Models.* arXiv:2512.24601.
 
 ## Security
 

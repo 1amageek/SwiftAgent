@@ -26,7 +26,7 @@ let package = Package(
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
         .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.1.1"),
+        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.2.0"),
     ],
     targets: [
         .macro(

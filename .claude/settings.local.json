@@ -32,9 +32,18 @@
       "WebFetch(domain:blog.promptlayer.com)",
       "WebFetch(domain:medium.com)",
       "WebFetch(domain:www.zenml.io)",
-      "WebFetch(domain:simonwillison.net)"
+      "WebFetch(domain:simonwillison.net)",
+      "Bash(gh api:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:discuss.google.dev)",
+      "WebFetch(domain:alexzhang13.github.io)",
+      "Bash(git push:*)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "/Users/1amageek/Desktop/jardis"
+    ]
   },
   "enabledMcpjsonServers": [
     "chrome-devtools"

@@ -164,6 +164,9 @@ public struct ExecuteCommandTool: Tool {
     }
     
     public func call(arguments: ExecuteCommandInput) async throws -> ExecuteCommandOutput {
+        try Task.checkCancellation()
+        try TurnCancellationContext.current?.checkCancellation()
+
         // Validate command
         guard !arguments.command.isEmpty else {
             throw FileSystemError.operationFailed(reason: "Command cannot be empty")
@@ -465,6 +468,28 @@ private extension ExecuteCommandTool {
                     }
                 }
                 throw FileSystemError.operationFailed(reason: "Command timed out after \(Int(timeout)) seconds")
+            }
+
+            // Turn cancellation monitor task
+            group.addTask {
+                while !Task.isCancelled {
+                    if let token = TurnCancellationContext.current, token.isCancelled {
+                        if process.isRunning {
+                            process.terminate()
+                            try await Task.sleep(for: .milliseconds(500))
+                            if process.isRunning {
+                                process.interrupt()
+                                try await Task.sleep(for: .milliseconds(500))
+                                if process.isRunning {
+                                    kill(process.processIdentifier, SIGKILL)
+                                }
+                            }
+                        }
+                        throw CancellationError()
+                    }
+                    try await Task.sleep(for: .milliseconds(250))
+                }
+                throw CancellationError()
             }
 
             // Add execution task

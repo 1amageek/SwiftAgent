@@ -82,11 +82,15 @@ extension AgentCommand {
                     .session(session)
                     .run(message)
             } else {
-                // Interactive mode
+                // Interactive mode via AgentRuntime + StdioTransport
                 print("SwiftAgent Chat (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("---")
-                _ = try await InteractiveChatAgent(configuration: config).run("")
+                let agent = InteractiveChatAgent()
+                let session = ChatSessionFactory.createSession(configuration: config)
+                let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
+                let runtime = AgentRuntime(transport: transport, approvalHandler: LegacyApprovalAdapter(CLIPermissionHandler()))
+                try await runtime.run(agent: agent, session: session)
             }
         }
     }
@@ -119,12 +123,20 @@ extension AgentCommand {
                 print("---")
                 _ = try await CodingAgent(configuration: config).run(task)
             } else {
-                // Interactive mode
+                // Interactive mode via AgentRuntime + StdioTransport
                 print("SwiftAgent Coding Assistant (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("Working directory: \(config.workingDirectory)")
                 print("---")
-                _ = try await InteractiveCodingAgent(configuration: config).run("")
+                let agent = InteractiveCodingAgent(configuration: config)
+                let session = config.createSession(
+                    instructions: Instructions {
+                        "You are an expert coding assistant."
+                    }
+                )
+                let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
+                let runtime = AgentRuntime(transport: transport, approvalHandler: LegacyApprovalAdapter(CLIPermissionHandler()))
+                try await runtime.run(agent: agent, session: session)
             }
         }
     }

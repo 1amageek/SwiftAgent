@@ -34,7 +34,7 @@ actor TestEventCollector {
             if let value = sessionEvent.value as? String {
                 values.append(value)
             }
-        } else if let agentEvent = event as? AgentEvent {
+        } else if let agentEvent = event as? CommunityEvent {
             if let value = agentEvent.value as? String {
                 values.append(value)
             }
@@ -121,9 +121,9 @@ struct EventProtocolTests {
         #expect(event.timestamp <= Date())
     }
 
-    @Test("AgentEvent conforms to Event")
+    @Test("CommunityEvent conforms to Event")
     func agentEventConforms() {
-        let event = AgentEvent(
+        let event = CommunityEvent(
             name: .testFailed,
             agentID: "agent-456",
             value: "error message"
@@ -260,13 +260,13 @@ struct EventBusTests {
         // Emit different event types with same name
         await eventBus.emit(SessionEvent(name: .testStarted, sessionID: "session-1"))
         await eventBus.emit(StepEvent(name: .testStarted, stepName: "MyStep"))
-        await eventBus.emit(AgentEvent(name: .testStarted, agentID: "agent-1"))
+        await eventBus.emit(CommunityEvent(name: .testStarted, agentID: "agent-1"))
 
         let events = await collector.events
         #expect(events.count == 3)
         #expect(events[0] is SessionEvent)
         #expect(events[1] is StepEvent)
-        #expect(events[2] is AgentEvent)
+        #expect(events[2] is CommunityEvent)
     }
 }
 

@@ -7,74 +7,52 @@
 
 import Foundation
 
-/// A protocol representing an interactive AI agent that processes inputs and produces outputs.
+/// A protocol representing an AI agent that processes a single turn of input and produces a result.
 ///
-/// `Agent` extends `Step` with additional capabilities for managing tools, instructions,
-/// and bidirectional communication through an AgentSession.
+/// `Agent` extends `Step` with additional capabilities for managing tools and instructions.
+/// Each invocation of `run(_:)` processes exactly one turn (one `RunRequest` → one `RunResult`).
+/// The infinite loop for interactive sessions is managed by `AgentRuntime`.
 ///
 /// ## Overview
 ///
-/// Agents are long-running entities that:
-/// - Maintain an `AgentSession` for LLM interactions
+/// Agents:
 /// - Define `tools` available to the LLM
 /// - Define `instructions` that guide the LLM's behavior
-/// - Process inputs from a queue and emit outputs to a stream
-///
-/// The `Output` type is `Never` because agents run indefinitely. Actual outputs are
-/// emitted through the `outputs` continuation.
+/// - Use `@Session` to access the injected `LanguageModelSession`
+/// - Process a `RunRequest` and return a `RunResult`
 ///
 /// ## Usage
 ///
 /// ```swift
-/// struct EchoAgent: Agent {
-///     let session: AgentSession
-///     let outputs: AsyncStream<String>.Continuation
+/// struct ChatAgent: Agent {
+///     @Session var session: LanguageModelSession
 ///
 ///     var instructions: Instructions {
-///         Instructions("Echo everything back")
+///         Instructions("You are a helpful assistant")
 ///     }
 ///
-///     var body: some Step<AgentSession.Response, String> {
-///         Transform { response in
-///             "Echo: \(response.content)"
-///         }
+///     var body: some Step<String, String> {
+///         GenerateText(session: session) { Prompt($0) }
 ///     }
 /// }
 ///
-/// // Usage
-/// let languageModelSession = LanguageModelSession(model: model) {
-///     Instructions("Test")
-/// }
-/// let (stream, continuation) = AsyncStream<String>.makeStream()
-/// let session = AgentSession(languageModelSession: languageModelSession)
-/// let agent = EchoAgent(session: session, outputs: continuation)
+/// // Single turn
+/// let request = RunRequest(input: .text("Hello"))
+/// let result = try await ChatAgent()
+///     .session(mySession)
+///     .run(request)
 ///
-/// // Run in background
-/// Task {
-///     try await agent.run("Hello")
-/// }
-///
-/// // Add more inputs
-/// session.input("World")
-///
-/// // Receive outputs
-/// for await output in stream {
-///     print(output)
-/// }
+/// // Multi-turn via runtime
+/// let runtime = AgentRuntime(transport: myTransport, approvalHandler: myHandler)
+/// try await runtime.run(agent: ChatAgent(), session: mySession)
 /// ```
-public protocol Agent: Step where Input == String, Output == Never {
+public protocol Agent: Step where Input == RunRequest, Output == RunResult {
     /// The tools available to this agent.
     var tools: [any Tool] { get }
 
     /// The instructions that guide the agent's behavior.
     @InstructionsBuilder
     var instructions: Instructions { get }
-
-    /// The session managing the agent's conversation state.
-    var session: AgentSession { get }
-
-    /// The continuation for emitting outputs to consumers.
-    var outputs: AsyncStream<String>.Continuation { get }
 }
 
 // MARK: - Agent Default Implementations
@@ -85,32 +63,117 @@ extension Agent {
 }
 
 extension Agent where Body: Step,
-                      Body.Input == AgentSession.Response,
+                      Body.Input == String,
                       Body.Output == String {
 
-    /// Default run implementation that enters an infinite processing loop.
+    /// Default run implementation that processes a single turn.
     ///
     /// This implementation:
-    /// 1. Queues the initial input
-    /// 2. Enters an infinite loop that:
-    ///    - Waits for input from the queue
-    ///    - Sends the input to the session
-    ///    - Processes the response through the body
-    ///    - Yields the output to the outputs stream
+    /// 1. Extracts the text input from the `RunRequest`
+    /// 2. Applies steering from the request context
+    /// 3. Runs the text through the `body`
+    /// 4. Wraps the result in a `RunResult`
     ///
-    /// The loop continues until the task is cancelled.
+    /// Non-text inputs (approvalResponse, cancel) return appropriate error results.
     ///
-    /// - Parameter initial: The initial input to start the agent.
-    /// - Returns: Never returns (runs indefinitely until cancelled).
-    /// - Throws: `CancellationError` if the task is cancelled.
-    public func run(_ initial: String) async throws -> Never {
-        session.input(initial)
-        while true {
-            try Task.checkCancellation()
-            let input = try await session.waitForInput()
-            let response = try await session.send(input)
-            let output = try await body.run(response)
-            outputs.yield(output)
+    /// - Parameter request: The run request to process.
+    /// - Returns: The result of the run.
+    public func run(_ request: RunRequest) async throws -> RunResult {
+        let startTime = ContinuousClock.now
+
+        guard case .text(let text) = request.input else {
+            let duration = ContinuousClock.now - startTime
+            return RunResult(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .failed,
+                error: RunEvent.RunError(
+                    message: "Agent expected text input but received \(request.input)",
+                    sessionID: request.sessionID,
+                    turnID: request.turnID
+                ),
+                duration: duration
+            )
         }
+
+        let eventSink = EventSinkContext.current
+
+        // Emit run started
+        await eventSink.emit(.runStarted(RunEvent.RunStarted(
+            sessionID: request.sessionID,
+            turnID: request.turnID
+        )))
+
+        do {
+            // Build input with steering
+            let input = buildInput(text: text, context: request.context)
+
+            // Check for turn-level cancellation before processing
+            try TurnCancellationContext.current?.checkCancellation()
+
+            // Process through body
+            let output = try await body.run(input)
+            let duration = ContinuousClock.now - startTime
+
+            // Emit run completed
+            await eventSink.emit(.runCompleted(RunEvent.RunCompleted(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .completed
+            )))
+
+            return RunResult(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .completed,
+                finalOutput: output,
+                duration: duration
+            )
+
+        } catch is CancellationError {
+            let duration = ContinuousClock.now - startTime
+            await eventSink.emit(.runCompleted(RunEvent.RunCompleted(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .cancelled
+            )))
+            return RunResult(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .cancelled,
+                duration: duration
+            )
+
+        } catch {
+            let duration = ContinuousClock.now - startTime
+            let runError = RunEvent.RunError(
+                message: error.localizedDescription,
+                isFatal: true,
+                underlyingError: error,
+                sessionID: request.sessionID,
+                turnID: request.turnID
+            )
+            await eventSink.emit(.error(runError))
+            await eventSink.emit(.runCompleted(RunEvent.RunCompleted(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .failed
+            )))
+            return RunResult(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .failed,
+                error: runError,
+                duration: duration
+            )
+        }
+    }
+
+    /// Builds the input text by combining the main text with steering messages.
+    private func buildInput(text: String, context: ContextPayload?) -> String {
+        guard let steering = context?.steering, !steering.isEmpty else {
+            return text
+        }
+        return ([text] + steering).joined(separator: "\n\n")
     }
 }

@@ -123,23 +123,41 @@ private struct CodingStep: Step {
 
 // MARK: - Interactive Mode
 
-/// Interactive coding session with continuous input
-public struct InteractiveCodingAgent: Step {
-    public typealias Input = String
-    public typealias Output = String
+/// Interactive coding agent using the Agent protocol + StdioTransport pattern.
+///
+/// Replaces the old `Loop + WaitForInput` pattern with transport-agnostic I/O.
+///
+/// Usage:
+/// ```swift
+/// let config = try options.createConfiguration()
+/// let agent = InteractiveCodingAgent(configuration: config)
+/// let session = config.createSession(instructions: Instructions { "Coding assistant" })
+/// let transport = StdioTransport(prompt: "You: ")
+/// let runtime = AgentRuntime(
+///     transport: transport,
+///     approvalHandler: AutoDenyApprovalHandler()
+/// )
+/// try await runtime.run(agent: agent, session: session)
+/// ```
+public struct InteractiveCodingAgent: Agent {
 
     private let configuration: AgentConfiguration
-
-    @Memory var history: [String] = []
 
     public init(configuration: AgentConfiguration) {
         self.configuration = configuration
     }
 
-    public var body: some Step<String, String> {
-        Loop { _ in
-            WaitForInput(prompt: "You: ")
-            CodingAgent(configuration: configuration)
+    public var instructions: Instructions {
+        Instructions {
+            """
+            You are an expert coding assistant with access to file system and command execution tools.
+            Always read files before editing them. Use Edit for small changes, Write for new files.
+            Explain your changes clearly and follow best practices.
+            """
         }
+    }
+
+    public var body: some Step<String, String> {
+        CodingAgent(configuration: configuration)
     }
 }

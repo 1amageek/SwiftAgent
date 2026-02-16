@@ -121,7 +121,8 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
             for iteration in 0..<max {
                 // Check for task cancellation
                 try Task.checkCancellation()
-                
+                try TurnCancellationContext.current?.checkCancellation()
+
                 // Execute the step
                 let output = try await step(current).run(current)
                 
@@ -145,7 +146,8 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
             while true {
                 // Check for task cancellation
                 try Task.checkCancellation()
-                
+                try TurnCancellationContext.current?.checkCancellation()
+
                 // Execute the step
                 let output = try await step(current).run(current)
                 

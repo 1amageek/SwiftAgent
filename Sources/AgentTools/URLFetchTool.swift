@@ -64,6 +64,9 @@ public struct URLFetchTool: Tool {
     public init() {}
     
     public func call(arguments: FetchInput) async throws -> URLFetchOutput {
+        try Task.checkCancellation()
+        try TurnCancellationContext.current?.checkCancellation()
+
         // Upgrade HTTP to HTTPS
         var urlString = arguments.url
         if urlString.hasPrefix("http://") {
@@ -157,7 +160,23 @@ public struct URLFetchTool: Tool {
 
         do {
             let startTime = Date()
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+                group.addTask {
+                    try await session.data(from: url)
+                }
+                group.addTask {
+                    while !Task.isCancelled {
+                        if let token = TurnCancellationContext.current, token.isCancelled {
+                            throw CancellationError()
+                        }
+                        try await Task.sleep(for: .milliseconds(250))
+                    }
+                    throw CancellationError()
+                }
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            }
             let fetchTime = Date().timeIntervalSince(startTime)
 
             guard let httpResponse = response as? HTTPURLResponse else {

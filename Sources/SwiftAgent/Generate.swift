@@ -363,6 +363,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
             for attempt in 1...maxAttempts {
                 // Check for cancellation before each attempt
                 try Task.checkCancellation()
+                try TurnCancellationContext.current?.checkCancellation()
 
                 do {
                     if let handler = streamHandler {
@@ -379,6 +380,9 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
                         }
 
                         for try await snapshot in responseStream {
+                            try Task.checkCancellation()
+                            try TurnCancellationContext.current?.checkCancellation()
+
                             // Pass the snapshot directly to the handler
                             await handler(snapshot)
 
@@ -765,6 +769,7 @@ public struct GenerateText<In: Sendable>: Step {
 
             // Check for cancellation
             try Task.checkCancellation()
+            try TurnCancellationContext.current?.checkCancellation()
 
             do {
                 if let handler = streamHandler {
@@ -779,6 +784,9 @@ public struct GenerateText<In: Sendable>: Step {
                     }
 
                     for try await snapshot in responseStream {
+                        try Task.checkCancellation()
+                        try TurnCancellationContext.current?.checkCancellation()
+
                         // Pass the snapshot directly to the handler
                         await handler(snapshot)
 
@@ -803,6 +811,8 @@ public struct GenerateText<In: Sendable>: Step {
                     // Span is successful by default
                     return response.content
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 span.recordError(error)
                 throw ModelError.generationFailed(error.localizedDescription)

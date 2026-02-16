@@ -139,6 +139,31 @@ public final class AgentSession: Sendable {
         return try await processMessage(content)
     }
 
+    /// Sends a message to the session with optional token-delta callbacks.
+    ///
+    /// This overload allows callers to receive incremental token output
+    /// during generation. The callback receives `(delta, accumulated)` pairs.
+    ///
+    /// - Parameters:
+    ///   - content: The message content.
+    ///   - onTokenDelta: Optional callback invoked for each token delta.
+    /// - Returns: The response containing the generated content and metadata.
+    /// - Throws: `CancellationError` if the task was cancelled while waiting.
+    public func send(
+        _ content: String,
+        onTokenDelta: (@Sendable (String, String) async -> Void)? = nil
+    ) async throws -> Response {
+        let acquired = await acquireProcessingSlot()
+        guard acquired else {
+            throw CancellationError()
+        }
+        defer { releaseProcessingSlot() }
+
+        try Task.checkCancellation()
+
+        return try await processMessage(content, onTokenDelta: onTokenDelta)
+    }
+
     /// Adds a steering message to be included in the **next** prompt.
     ///
     /// Steering messages are accumulated and combined with the next message
@@ -241,7 +266,10 @@ public final class AgentSession: Sendable {
     /// session replacement correctly. If `replaceSession()` is called during
     /// processing, current processing continues with the captured session,
     /// and the next message uses the new session.
-    private func processMessage(_ content: String) async throws -> Response {
+    private func processMessage(
+        _ content: String,
+        onTokenDelta: (@Sendable (String, String) async -> Void)? = nil
+    ) async throws -> Response {
         let startTime = ContinuousClock.now
 
         // Capture session reference to handle mid-processing replacement
@@ -261,7 +289,28 @@ public final class AgentSession: Sendable {
         ))
 
         // Use captured session for processing
-        let response = try await currentSession.respond(to: prompt)
+        let finalContent: String
+
+        if let onTokenDelta {
+            // Streaming mode — invoke callback for each incremental delta
+            var accumulated = ""
+            let responseStream = currentSession.streamResponse {
+                Prompt(prompt)
+            }
+            for try await snapshot in responseStream {
+                let snapshotContent = snapshot.content
+                if snapshotContent.count > accumulated.count {
+                    let delta = String(snapshotContent.dropFirst(accumulated.count))
+                    await onTokenDelta(delta, snapshotContent)
+                }
+                accumulated = snapshotContent
+            }
+            finalContent = accumulated
+        } else {
+            // Non-streaming mode — single respond call
+            let response = try await currentSession.respond(to: prompt)
+            finalContent = response.content
+        }
 
         let duration = ContinuousClock.now - startTime
 
@@ -272,10 +321,10 @@ public final class AgentSession: Sendable {
         await eventBus.emit(SessionEvent(
             name: .responseCompleted,
             sessionID: id,
-            value: response.content
+            value: finalContent
         ))
 
-        return Response(content: response.content, entries: newEntries, duration: duration)
+        return Response(content: finalContent, entries: newEntries, duration: duration)
     }
 
     /// Builds a prompt from the main message and any steering messages.

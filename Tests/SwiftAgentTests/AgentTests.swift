@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import Synchronization
 @testable import SwiftAgent
 
 #if OpenFoundationModels
@@ -81,104 +82,51 @@ struct AgentProtocolTests {
 
     /// Simple echo agent for testing
     struct EchoAgent: Agent {
-        let session: AgentSession
-        let outputs: AsyncStream<String>.Continuation
-
         var instructions: Instructions {
             Instructions("Echo everything back")
         }
 
-        var body: some Step<AgentSession.Response, String> {
-            Transform { (response: AgentSession.Response) in
-                "Echo: \(response.content)"
+        var body: some Step<String, String> {
+            Transform { (input: String) in
+                "Echo: \(input)"
             }
         }
     }
 
-    @Test("Agent emits output through continuation", .timeLimit(.minutes(1)))
-    func agentEmitsOutput() async throws {
-        let (stream, continuation) = AsyncStream<String>.makeStream()
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        })
+    @Test("Agent processes text input and returns RunResult", .timeLimit(.minutes(1)))
+    func agentProcessesTextInput() async throws {
+        let agent = EchoAgent()
+        let request = RunRequest(input: .text("Hello"))
 
-        let agent = EchoAgent(session: session, outputs: continuation)
+        let result = try await agent.run(request)
 
-        // Run agent in background task
-        let runTask = Task {
-            try await agent.run("Initial")
-        }
-
-        // Collect first output
-        var iterator = stream.makeAsyncIterator()
-        let output = await iterator.next()
-
-        // Cancel the agent
-        runTask.cancel()
-
-        #expect(output == "Echo: Mock response")
+        #expect(result.status == .completed)
+        #expect(result.finalOutput == "Echo: Hello")
     }
 
-    @Test("Agent processes multiple inputs in order", .timeLimit(.minutes(1)))
-    func agentProcessesMultipleInputs() async throws {
-        let (stream, continuation) = AsyncStream<String>.makeStream()
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        })
+    @Test("Agent returns failed for non-text input")
+    func agentReturnsFailedForNonTextInput() async throws {
+        let agent = EchoAgent()
+        let request = RunRequest(input: .cancel)
 
-        let agent = EchoAgent(session: session, outputs: continuation)
+        let result = try await agent.run(request)
 
-        // Run agent in background
-        let runTask = Task {
-            try await agent.run("First")
-        }
-
-        // Wait for first output
-        var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next()
-
-        // Add more inputs
-        session.input("Second")
-        session.input("Third")
-
-        // Collect more outputs
-        let second = await iterator.next()
-        let third = await iterator.next()
-
-        runTask.cancel()
-
-        #expect(second == "Echo: Mock response")
-        #expect(third == "Echo: Mock response")
+        #expect(result.status == .failed)
+        #expect(result.finalOutput == nil)
     }
 
-    @Test("Agent cancellation stops processing")
-    func agentCancellation() async throws {
-        let (_, continuation) = AsyncStream<String>.makeStream()
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        })
+    @Test("Agent applies steering from context")
+    func agentAppliesSteering() async throws {
+        let agent = EchoAgent()
+        let request = RunRequest(
+            input: .text("Hello"),
+            context: ContextPayload(steering: ["Be formal", "Be concise"])
+        )
 
-        let agent = EchoAgent(session: session, outputs: continuation)
+        let result = try await agent.run(request)
 
-        let task = Task {
-            try await agent.run("Start")
-        }
-
-        // Let it start
-        try await Task.sleep(for: .milliseconds(100))
-
-        // Cancel
-        task.cancel()
-
-        // Should throw CancellationError
-        do {
-            _ = try await task.value
-            Issue.record("Expected CancellationError")
-        } catch is CancellationError {
-            // Expected
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
+        #expect(result.status == .completed)
+        #expect(result.finalOutput == "Echo: Hello\n\nBe formal\n\nBe concise")
     }
 }
 
@@ -188,8 +136,6 @@ struct AgentProtocolTests {
 struct AgentWithToolsTests {
 
     struct ToolAgent: Agent {
-        let session: AgentSession
-        let outputs: AsyncStream<String>.Continuation
         let customTools: [any Tool]
 
         var tools: [any Tool] {
@@ -203,48 +149,34 @@ struct AgentWithToolsTests {
             }
         }
 
-        var body: some Step<AgentSession.Response, String> {
-            Transform { (response: AgentSession.Response) in
-                response.content
+        var body: some Step<String, String> {
+            Transform { (input: String) in
+                input
             }
         }
     }
 
     @Test("Agent tools are accessible")
     func agentToolsAccessible() async throws {
-        let (_, continuation) = AsyncStream<String>.makeStream()
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        })
-
-        let agent = ToolAgent(session: session, outputs: continuation, customTools: [])
-
+        let agent = ToolAgent(customTools: [])
         #expect(agent.tools.isEmpty)
     }
 
     @Test("Agent default tools is empty")
     func agentDefaultToolsEmpty() async throws {
-        let (_, continuation) = AsyncStream<String>.makeStream()
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        })
-
         struct NoToolsAgent: Agent {
-            let session: AgentSession
-            let outputs: AsyncStream<String>.Continuation
-
             var instructions: Instructions {
                 Instructions("No tools")
             }
 
-            var body: some Step<AgentSession.Response, String> {
-                Transform { (response: AgentSession.Response) in
-                    response.content
+            var body: some Step<String, String> {
+                Transform { (input: String) in
+                    input
                 }
             }
         }
 
-        let agent = NoToolsAgent(session: session, outputs: continuation)
+        let agent = NoToolsAgent()
         #expect(agent.tools.isEmpty)
     }
 }
@@ -255,45 +187,52 @@ struct AgentWithToolsTests {
 struct AgentSteeringTests {
 
     struct SteeringAgent: Agent {
-        let session: AgentSession
-        let outputs: AsyncStream<String>.Continuation
-
         var instructions: Instructions {
             Instructions("Test steering")
         }
 
-        var body: some Step<AgentSession.Response, String> {
-            Transform { (response: AgentSession.Response) in
-                response.content
+        var body: some Step<String, String> {
+            Transform { (input: String) in
+                input
             }
         }
     }
 
-    @Test("Agent steering messages are included in prompt", .timeLimit(.minutes(1)))
+    @Test("Agent steering messages are included in run result", .timeLimit(.minutes(1)))
     func agentSteeringIncluded() async throws {
-        let (stream, continuation) = AsyncStream<String>.makeStream()
+        let agent = SteeringAgent()
+        let request = RunRequest(
+            input: .text("Hello"),
+            context: ContextPayload(steering: ["Use formal tone", "Be concise"])
+        )
+
+        let result = try await agent.run(request)
+
+        #expect(result.status == .completed)
+        #expect(result.finalOutput?.contains("Hello") == true)
+        #expect(result.finalOutput?.contains("Use formal tone") == true)
+        #expect(result.finalOutput?.contains("Be concise") == true)
+    }
+}
+
+// MARK: - AgentSession Send with TokenDelta Tests
+
+@Suite("AgentSession Token Delta Tests")
+struct AgentSessionTokenDeltaTests {
+
+    @Test("AgentSession send with onTokenDelta callback", .timeLimit(.minutes(1)))
+    func sendWithTokenDelta() async throws {
         let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test")
         })
 
-        let agent = SteeringAgent(session: session, outputs: continuation)
-
-        // Add steering before running
-        session.steer("Use formal tone")
-        session.steer("Be concise")
-
-        // Run agent
-        let runTask = Task {
-            try await agent.run("Hello")
+        let receivedDelta = Mutex<String?>(nil)
+        let response = try await session.send("Hello") { delta, accumulated in
+            receivedDelta.withLock { $0 = delta }
         }
 
-        // Get output
-        var iterator = stream.makeAsyncIterator()
-        let output = await iterator.next()
-
-        runTask.cancel()
-
-        #expect(output == "Mock response")
+        #expect(response.content == "Mock response")
+        #expect(receivedDelta.withLock({ $0 }) == "Mock response")
     }
 }
 

@@ -85,26 +85,40 @@ public struct ChatSessionFactory {
     }
 }
 
-/// Interactive chat loop
-public struct InteractiveChatAgent: Step {
-    public typealias Input = String
-    public typealias Output = String
+/// Interactive chat agent using the new Agent protocol + StdioTransport pattern.
+///
+/// Replaces the old `Loop + WaitForInput` pattern with transport-agnostic I/O.
+///
+/// Usage:
+/// ```swift
+/// let config = try options.createConfiguration()
+/// let agent = InteractiveChatAgent()
+/// let session = ChatSessionFactory.createSession(configuration: config)
+/// let transport = StdioTransport(prompt: "You: ")
+/// let runtime = AgentRuntime(
+///     transport: transport,
+///     approvalHandler: AutoDenyApprovalHandler()
+/// )
+/// try await runtime.run(agent: agent, session: session)
+/// ```
+public struct InteractiveChatAgent: Agent {
 
-    private let configuration: AgentConfiguration
+    public init() {}
 
-    public init(configuration: AgentConfiguration) {
-        self.configuration = configuration
+    public var instructions: Instructions {
+        Instructions {
+            """
+            You are a helpful AI assistant. Provide clear, accurate, and friendly responses.
+            Be concise but thorough. Ask clarifying questions when needed.
+            """
+        }
     }
 
     public var body: some Step<String, String> {
-        Loop { _ in
-            WaitForInput(prompt: "You: ")
-            Transform<String, String> { input in
-                print("Assistant: ", terminator: "")
-                return input
-            }
-            ChatAgent()
+        Transform<String, String> { input in
+            print("Assistant: ", terminator: "")
+            return input
         }
-        .session(ChatSessionFactory.createSession(configuration: configuration))
+        ChatAgent()
     }
 }

@@ -38,7 +38,9 @@
       "WebFetch(domain:arxiv.org)",
       "WebFetch(domain:discuss.google.dev)",
       "WebFetch(domain:alexzhang13.github.io)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(xargs:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "additionalDirectories": [

@@ -301,7 +301,13 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
         effectiveConfig: PermissionConfiguration,
         next: @escaping Next
     ) async throws -> ToolResult {
-        guard let handler = effectiveConfig.handler else {
+        // Check context-injected handler first, then fall back to config handler
+        let handler: any PermissionHandler
+        if let harnessHandler = PermissionHandlerContext.current {
+            handler = harnessHandler
+        } else if let configHandler = effectiveConfig.handler {
+            handler = configHandler
+        } else {
             throw PermissionDenied(
                 toolName: context.toolName,
                 reason: "No permission handler configured and default is 'ask'"

@@ -28,6 +28,9 @@ public final class ToolPipeline: @unchecked Sendable {
 
     private var middleware: [any ToolMiddleware] = []
 
+    /// The middleware list (read-only access for composition).
+    public var middlewareList: [any ToolMiddleware] { middleware }
+
     public init() {}
 
     // MARK: - Factory Methods

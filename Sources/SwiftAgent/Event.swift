@@ -124,12 +124,15 @@ public struct StepEvent: Event {
     }
 }
 
-// MARK: - AgentEvent
+// MARK: - CommunityEvent
 
-/// An event emitted by distributed agents.
+/// An event emitted by distributed agents (community coordination).
 ///
 /// Use this for multi-agent coordination events.
-public struct AgentEvent: Event {
+///
+/// Previously named `AgentEvent`. Renamed to `CommunityEvent` to avoid
+/// collision with the `RunEvent` system used for Agent I/O.
+public struct CommunityEvent: Event {
     public let name: EventName
     public let timestamp: Date
     public let agentID: String
@@ -147,6 +150,10 @@ public struct AgentEvent: Event {
         self.value = value
     }
 }
+
+/// Backward-compatible type alias.
+@available(*, deprecated, renamed: "CommunityEvent")
+public typealias AgentEvent = CommunityEvent
 
 // MARK: - EventBus
 

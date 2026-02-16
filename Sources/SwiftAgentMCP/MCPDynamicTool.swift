@@ -69,11 +69,17 @@ public struct MCPDynamicTool: Tool, Sendable {
     /// - Parameter arguments: The generated content arguments
     /// - Returns: The tool output as a string
     public func call(arguments: GeneratedContent) async throws -> String {
+        try Task.checkCancellation()
+        try TurnCancellationContext.current?.checkCancellation()
+
         // Convert GeneratedContent to [String: Value] for MCP
         let mcpArguments = try convertGeneratedContentToValue(arguments)
 
         // Use original tool name (without server prefix) for MCP server call
         let (content, isError) = try await client.callTool(name: mcpTool.name, arguments: mcpArguments)
+
+        try Task.checkCancellation()
+        try TurnCancellationContext.current?.checkCancellation()
 
         // Extract text from Tool.Content enum
         let textContent = content.compactMap { item -> String? in

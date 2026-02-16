@@ -260,6 +260,10 @@ public struct SandboxExecutor: Sendable {
             "LC_ALL": "en_US.UTF-8"
         ]
 
+        // Pre-flight cancellation check
+        try Task.checkCancellation()
+        try TurnCancellationContext.current?.checkCancellation()
+
         do {
             try process.run()
         } catch {
@@ -284,6 +288,24 @@ public struct SandboxExecutor: Sendable {
                     stderr: stderr,
                     exitCode: process.terminationStatus
                 )
+            }
+
+            // Turn cancellation monitor task
+            group.addTask {
+                while !Task.isCancelled {
+                    if let token = TurnCancellationContext.current, token.isCancelled {
+                        if process.isRunning {
+                            process.terminate()
+                            try await Task.sleep(nanoseconds: 500_000_000)
+                            if process.isRunning {
+                                kill(process.processIdentifier, SIGKILL)
+                            }
+                        }
+                        throw SandboxError(reason: "Execution cancelled")
+                    }
+                    try await Task.sleep(nanoseconds: 250_000_000)
+                }
+                throw CancellationError()
             }
 
             // Timeout task - terminates the process if it runs too long

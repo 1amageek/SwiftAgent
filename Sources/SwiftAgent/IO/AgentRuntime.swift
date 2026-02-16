@@ -38,17 +38,109 @@ import Synchronization
 ///     → route by input type:
 ///         .text → enqueue to turn processor
 ///         .approvalResponse → resolve pending approval (immediate)
-///         .cancel → signal cancellation to active turn via TurnCancellationToken
+///         .cancel → match turnID to active token or record as pending cancel
 /// ```
 public final class AgentRuntime: Sendable {
 
     private let transport: any AgentTransport
     private let approvalHandler: (any ApprovalHandler)?
     private let transportApprovalHandler: TransportApprovalHandler?
-    private let completedTurns: Mutex<Set<String>>
+    /// Generational tracker for completed turn IDs.
+    ///
+    /// Uses a two-generation design to bound memory:
+    /// - `current`: actively collecting completed turnIDs.
+    /// - `previous`: retained for lookups; evicted in bulk when `current` fills.
+    /// - Lookups check both generations, so recently-evicted IDs are still recognized.
+    /// - Total memory is bounded to approximately `2 * generationCapacity` entries.
+    private let completedTurns: Mutex<CompletedTurnTracker>
 
-    /// The active turn's cancellation token. Set at turn start, cancelled by `.cancel`.
-    private let activeTurnToken: Mutex<TurnCancellationToken?>
+    /// Per-turnID cancellation state: active tokens, sentinel tokens, and pre-emptive cancels.
+    ///
+    /// After a cancelled turn, its token remains as a **sentinel** across two generations.
+    /// Late-arriving cancels hit the sentinel (idempotent `cancel()`) instead of
+    /// leaking into `pendingCancels`, which would poison a retry.
+    /// Terminal turns (completed/failed/denied/timedOut) are guarded by `completedTurns`,
+    /// so their tokens are removed.
+    /// Sentinel generations rotate when `current` exceeds `turnStateHighWaterMark`,
+    /// ensuring sentinels survive at least one full cycle before eviction.
+    private let turnState: Mutex<TurnState>
+
+    /// High water mark for best-effort collections (`pendingCancels`, sentinel tokens).
+    static let turnStateHighWaterMark = 10_000
+
+    private struct TurnState {
+        // MARK: - Sentinel tokens (two-generation)
+
+        /// Current generation: active tokens and recent sentinels.
+        var tokens: [String: TurnCancellationToken] = [:]
+        /// Previous generation: older sentinels awaiting eviction.
+        /// Lookups check both generations, so sentinels survive at least one
+        /// full generation cycle (≥ `turnStateHighWaterMark` turns) before eviction.
+        var previousTokens: [String: TurnCancellationToken] = [:]
+
+        /// Looks up a token in both generations.
+        func token(for turnID: String) -> TurnCancellationToken? {
+            tokens[turnID] ?? previousTokens[turnID]
+        }
+
+        /// Sets a token in the current generation, promoting from previous if needed.
+        mutating func setToken(_ token: TurnCancellationToken, for turnID: String) {
+            tokens[turnID] = token
+            previousTokens.removeValue(forKey: turnID)
+        }
+
+        /// Removes a token from both generations.
+        mutating func removeToken(for turnID: String) {
+            tokens.removeValue(forKey: turnID)
+            previousTokens.removeValue(forKey: turnID)
+        }
+
+        /// Rotates generations when the current one exceeds capacity.
+        mutating func rotateTokensIfNeeded(capacity: Int) {
+            if tokens.count >= capacity {
+                previousTokens = tokens
+                tokens = [:]
+            }
+        }
+
+        // MARK: - Pending cancels
+
+        /// turnIDs whose cancel arrived before any token was created (first cancel ever for this turnID).
+        /// Pre-emptive cancel is best-effort; eviction only loses the optimization.
+        var pendingCancels: Set<String> = []
+    }
+
+    /// Two-generation set that bounds memory while retaining recent entries.
+    ///
+    /// When `current` reaches `generationCapacity`, it is promoted to `previous`
+    /// and a fresh empty set becomes `current`. The old `previous` is discarded.
+    /// Lookups check both generations, so entries survive for at least one full
+    /// generation cycle before eviction.
+    struct CompletedTurnTracker {
+        private var current: Set<String> = []
+        private var previous: Set<String> = []
+        private let generationCapacity: Int
+
+        init(generationCapacity: Int = 10_000) {
+            self.generationCapacity = generationCapacity
+        }
+
+        /// Inserts a turnID. Rotates generations when `current` reaches capacity.
+        @discardableResult
+        mutating func insert(_ turnID: String) -> Bool {
+            let (inserted, _) = current.insert(turnID)
+            if current.count >= generationCapacity {
+                previous = current
+                current = []
+            }
+            return inserted
+        }
+
+        /// Returns `true` if the turnID exists in either generation.
+        func contains(_ turnID: String) -> Bool {
+            current.contains(turnID) || previous.contains(turnID)
+        }
+    }
 
     /// Creates an agent runtime.
     ///
@@ -64,8 +156,8 @@ public final class AgentRuntime: Sendable {
         self.transport = transport
         self.approvalHandler = approvalHandler
         self.transportApprovalHandler = transportApprovalHandler
-        self.completedTurns = Mutex([])
-        self.activeTurnToken = Mutex(nil)
+        self.completedTurns = Mutex(CompletedTurnTracker())
+        self.turnState = Mutex(TurnState())
     }
 
     /// Runs the agent loop, processing requests from the transport until closed.
@@ -117,14 +209,36 @@ public final class AgentRuntime: Sendable {
                     turnContinuation.yield(request)
 
                 case .approvalResponse(let response):
-                    let decision = self.mapApprovalDecision(response.decision)
-                    self.transportApprovalHandler?.resolve(
-                        approvalID: response.approvalID,
-                        decision: decision
-                    )
+                    if let handler = self.transportApprovalHandler {
+                        let decision = self.mapApprovalDecision(response.decision)
+                        handler.resolve(
+                            approvalID: response.approvalID,
+                            decision: decision
+                        )
+                    } else {
+                        let warning = RunEvent.WarningEvent(
+                            message: "Received approvalResponse for approvalID '\(response.approvalID)' but no TransportApprovalHandler is configured. The response was dropped.",
+                            code: "APPROVAL_HANDLER_MISSING",
+                            sessionID: request.sessionID,
+                            turnID: request.turnID
+                        )
+                        try? await self.transport.send(.warning(warning))
+                    }
 
                 case .cancel:
-                    self.activeTurnToken.withLock { $0?.cancel() }
+                    self.turnState.withLock { state in
+                        if let token = state.token(for: request.turnID) {
+                            // Active turn or sentinel (both generations) — cancel() is idempotent.
+                            token.cancel()
+                        } else {
+                            // Evict stale entries before inserting to bound memory.
+                            // Pre-emptive cancel is best-effort; eviction only loses the optimization.
+                            if state.pendingCancels.count >= Self.turnStateHighWaterMark {
+                                state.pendingCancels.removeAll()
+                            }
+                            state.pendingCancels.insert(request.turnID)
+                        }
+                    }
                 }
             }
         }
@@ -132,10 +246,38 @@ public final class AgentRuntime: Sendable {
         // Turn processor: runs in the current async context (no Sendable
         // boundary crossing for agent/session). Processes turns sequentially.
         for await request in turnStream {
+            // Definitive idempotency check: the receive loop checks at receive time,
+            // but a duplicate may pass if it arrives before the first attempt completes.
+            // This check runs after the previous turn finishes (sequential processing).
+            let alreadyCompleted = completedTurns.withLock { $0.contains(request.turnID) }
+            if alreadyCompleted {
+                turnGate?.leaveTurn()
+                continue
+            }
             let token = TurnCancellationToken()
-            activeTurnToken.withLock { $0 = token }
+            turnState.withLock { state in
+                // Overwrites any sentinel (in either generation) from a previous cancelled attempt.
+                state.setToken(token, for: request.turnID)
+                if state.pendingCancels.remove(request.turnID) != nil {
+                    token.cancel()
+                }
+            }
             await executeTurn(agent: agent, session: session, request: request, cancellationToken: token)
-            activeTurnToken.withLock { $0 = nil }
+            let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
+            turnState.withLock { state in
+                if isTerminal {
+                    // Terminal: completedTurns guards against future cancels.
+                    state.removeToken(for: request.turnID)
+                }
+                // Cancelled: token stays as sentinel to absorb late cancels.
+                // Retry will overwrite with a fresh token.
+                state.pendingCancels.remove(request.turnID)
+
+                // Rotate sentinel generations to bound memory. Sentinels survive
+                // at least one full generation cycle before eviction, ensuring
+                // late cancels within that window are absorbed (not leaked to pendingCancels).
+                state.rotateTokensIfNeeded(capacity: Self.turnStateHighWaterMark)
+            }
             turnGate?.leaveTurn()
         }
 

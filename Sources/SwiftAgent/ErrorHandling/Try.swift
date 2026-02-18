@@ -15,7 +15,7 @@ import Foundation
 /// ## Usage
 ///
 /// ```swift
-/// struct ResearchAgent: Agent {
+/// struct ResearchAgent: Step {
 ///     var body: some Step<Query, Report> {
 ///         Try {
 ///             FetchStep()

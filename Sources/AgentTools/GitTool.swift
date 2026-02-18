@@ -32,8 +32,26 @@ public struct GitTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Execute Git commands. Safe read operations by default. \
-    Destructive operations require allow_mutating=true. Max 60s, 1MB output.
+    Execute Git commands in a repository.
+
+    Usage:
+    - Read-only commands (status, log, diff, show, branch, tag, blame, grep, etc.) work by default
+    - Mutating commands (add, commit, push, pull, merge, rebase, reset, etc.) require allowMutating="true"
+    - Arguments are passed as a JSON array in argsJson (e.g., ["--oneline", "-n", "10"])
+    - Optionally specify a repository path; defaults to current directory
+
+    Safety:
+    - NEVER run destructive git commands (push --force, reset --hard, clean -f, branch -D) without explicit user permission
+    - NEVER skip hooks (--no-verify) unless explicitly requested
+    - Always create NEW commits rather than amending, unless explicitly requested
+    - When staging files, prefer adding specific files by name rather than using "git add ."
+    - NEVER use git commands with the -i flag (like git rebase -i) since they require interactive input
+
+    Limitations:
+    - Only whitelisted Git subcommands are allowed
+    - Maximum 60 second execution time
+    - Maximum 1MB output size
+    - No interactive commands
     """
 
     public var description: String { Self.description }

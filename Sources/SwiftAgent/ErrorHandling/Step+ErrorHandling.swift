@@ -28,7 +28,7 @@ extension Step where Self: Sendable {
     /// Timeouts operate independently at each level:
     ///
     /// ```swift
-    /// struct Pipeline: Agent {
+    /// struct Pipeline: Step {
     ///     var body: some Step<String, String> {
     ///         Step1().timeout(.seconds(5))   // Individual
     ///         Step2()

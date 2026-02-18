@@ -21,8 +21,8 @@ import Foundation
 /// ## Usage
 ///
 /// ```swift
-/// // Load from default configuration locations
-/// let manager = try await MCPClientManager.loadDefault()
+/// // Load from search paths
+/// let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
 ///
 /// // Or load from a specific file
 /// let manager = try await MCPClientManager.load(from: URL(fileURLWithPath: ".mcp.json"))
@@ -81,27 +81,17 @@ public actor MCPClientManager {
         return manager
     }
 
-    /// Loads configuration from default locations
+    /// Searches for configuration in the given paths and loads the first one found
     ///
-    /// Search order:
-    /// 1. `./.mcp.json` (project directory)
-    /// 2. `~/.config/claude/.mcp.json` (user directory)
-    ///
+    /// - Parameter searchPaths: Ordered list of file paths to search
     /// - Returns: A configured manager (may be empty if no config found)
-    public static func loadDefault() async throws -> MCPClientManager {
-        let searchPaths = [
-            FileManager.default.currentDirectoryPath + "/.mcp.json",
-            FileManager.default.homeDirectoryForCurrentUser.path + "/.config/claude/.mcp.json"
-        ]
-
+    public static func load(searchPaths: [String]) async throws -> MCPClientManager {
         for path in searchPaths {
             let url = URL(fileURLWithPath: path)
             if FileManager.default.fileExists(atPath: path) {
                 return try await load(from: url)
             }
         }
-
-        // No config found, return empty manager
         return MCPClientManager()
     }
 

@@ -67,8 +67,27 @@ public struct ExecuteCommandTool: Tool {
     public static let maxOutputSize = 1024 * 1024
 
     public static let description = """
-    Execute shell command. Allowed: ls, cat, git, swift, python3, node, npm, make, etc. \
-    No pipes/redirects. Max 10min timeout, 1MB output.
+    Executes a shell command with optional timeout.
+
+    IMPORTANT: This tool is for terminal operations like git, npm, swift build, etc. Do NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead:
+    - To read files use Read instead of cat, head, tail
+    - To edit files use Edit instead of sed or awk
+    - To create files use Write instead of echo or cat heredoc
+    - To search for files use Glob instead of find or ls
+    - To search the content of files use Grep instead of grep or rg
+
+    Usage:
+    - Specify the command to execute (e.g., "swift", "python3", "node", "npm", "make", "git")
+    - Only whitelisted commands are allowed
+    - No shell features: pipes, redirects, and shell variables are not supported
+    - Optionally set a custom timeout (default: 120 seconds, max: 10 minutes)
+    - Optionally specify a working directory
+    - If the output exceeds 1MB, it will be truncated
+    - No interactive commands are supported
+
+    When issuing multiple commands:
+    - If the commands are independent and can run in parallel, make multiple Bash tool calls in a single response
+    - If the commands depend on each other and must run sequentially, chain them appropriately
     """
 
     public var description: String { Self.description }

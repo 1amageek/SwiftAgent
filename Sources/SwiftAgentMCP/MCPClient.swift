@@ -115,10 +115,12 @@ public actor MCPClient {
     private let config: MCPServerConfig
     private let client: Client
     private let timeoutConfig: MCPTimeoutConfig
+    #if os(macOS)
     private var process: Process?
+    private var stderrTask: Task<Void, Never>?
+    #endif
     private var transport: (any Transport)?
     private var isConnected: Bool = false
-    private var stderrTask: Task<Void, Never>?
 
     /// Creates a new MCP client with the given configuration
     /// - Parameter config: The server configuration
@@ -166,12 +168,16 @@ public actor MCPClient {
     private func connectTransport() async throws {
         switch config.transport {
         case .stdio(let command, let arguments, let environment, let workingDirectory):
+            #if os(macOS)
             try await connectViaStdio(
                 command: command,
                 arguments: arguments,
                 environment: environment,
                 workingDirectory: workingDirectory
             )
+            #else
+            throw MCPClientError.connectionFailed("stdio transport is only available on macOS")
+            #endif
         case .http(let endpoint, let headers):
             try await connectViaHTTP(endpoint: endpoint, headers: headers)
         case .sse(let endpoint, let headers, _):
@@ -179,14 +185,14 @@ public actor MCPClient {
         }
     }
 
-    /// Connects via stdio transport (subprocess)
+    #if os(macOS)
+    /// Connects via stdio transport (subprocess) — macOS only
     private func connectViaStdio(
         command: String,
         arguments: [String],
         environment: [String: String]?,
         workingDirectory: URL?
     ) async throws {
-        // Create the subprocess
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command)
         process.arguments = arguments
@@ -203,7 +209,6 @@ public actor MCPClient {
             process.currentDirectoryURL = workDir
         }
 
-        // Set up pipes for stdio communication
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -212,37 +217,30 @@ public actor MCPClient {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        // Start the process
         try process.run()
         self.process = process
 
-        // Start task to drain stderr to prevent pipe blocking.
-        // The FileHandle is owned by stderrPipe, which is retained by Process.
-        // When Process terminates, availableData returns empty and loop exits.
         let stderrHandle = stderrPipe.fileHandleForReading
         stderrTask = Task.detached {
             while true {
                 let data = stderrHandle.availableData
                 if data.isEmpty { break }
-                // Stderr is discarded to prevent pipe buffer from filling up
             }
         }
 
-        // Create FileDescriptors from the pipe file handles
         let inputFD = FileDescriptor(rawValue: stdoutPipe.fileHandleForReading.fileDescriptor)
         let outputFD = FileDescriptor(rawValue: stdinPipe.fileHandleForWriting.fileDescriptor)
 
-        // Create stdio transport with the pipes
         let transport = StdioTransport(
             input: inputFD,
             output: outputFD
         )
         self.transport = transport
 
-        // Connect (initialization happens automatically)
         try await client.connect(transport: transport)
         isConnected = true
     }
+    #endif
 
     /// Connects via HTTP transport (standard request-response mode)
     ///
@@ -283,16 +281,17 @@ public actor MCPClient {
     public func disconnect() async {
         isConnected = false
 
-        // Cancel stderr drain task
+        #if os(macOS)
         stderrTask?.cancel()
         stderrTask = nil
 
-        // Terminate the subprocess if running
         if let process = process, process.isRunning {
             process.terminate()
             process.waitUntilExit()
         }
         process = nil
+        #endif
+
         transport = nil
     }
 

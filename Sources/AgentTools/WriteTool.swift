@@ -31,8 +31,16 @@ public struct WriteTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Write content to a file. Creates parent directories automatically. \
-    Overwrites existing files. Max 1MB, UTF-8 only.
+    Writes a file to the local filesystem.
+
+    Usage:
+    - This tool will overwrite the existing file if there is one at the provided path
+    - If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first
+    - Creates parent directories automatically if they don't exist
+    - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required
+    - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested
+    - NEVER use the Bash tool with echo or cat heredoc to write files. ALWAYS use this tool instead
+    - Maximum content size: 1MB, UTF-8 encoding only
     """
 
     public var description: String { Self.description }

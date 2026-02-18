@@ -10,7 +10,7 @@ import Foundation
 /// Configuration for tools available to an agent.
 ///
 /// `ToolConfiguration` provides flexible control over which tools are available
-/// during agent execution, similar to Claude Agent SDK's `tools` option.
+/// during agent execution.
 ///
 /// ## Usage
 ///
@@ -81,7 +81,7 @@ extension ToolConfiguration {
         /// Tool names included in this preset.
         ///
         /// These names correspond to the actual tool names defined in AgentTools module,
-        /// following Claude Code naming convention (PascalCase):
+        /// following SwiftAgent naming convention (PascalCase):
         /// - `Read`: ReadTool
         /// - `Write`: WriteTool
         /// - `Edit`: EditTool

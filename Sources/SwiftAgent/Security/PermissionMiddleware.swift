@@ -302,20 +302,21 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
         next: @escaping Next
     ) async throws -> ToolResult {
         // Check context-injected handler first, then fall back to config handler
-        let handler: any PermissionHandler
-        if let harnessHandler = PermissionHandlerContext.current {
+        let handler: any ApprovalHandler
+        if let harnessHandler = ApprovalHandlerContext.current {
             handler = harnessHandler
         } else if let configHandler = effectiveConfig.handler {
             handler = configHandler
         } else {
             throw PermissionDenied(
                 toolName: context.toolName,
-                reason: "No permission handler configured and default is 'ask'"
+                reason: "No approval handler configured and default is 'ask'"
             )
         }
 
         let request = PermissionRequest(from: context)
-        let response = try await handler.requestPermission(request)
+        let approvalID = UUID().uuidString
+        let response = try await handler.requestApproval(request, approvalID: approvalID)
 
         // Update session memory
         if effectiveConfig.enableSessionMemory {

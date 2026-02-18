@@ -10,7 +10,7 @@ import Foundation
 /// Unified security configuration for an agent.
 ///
 /// Combines permission checking and sandboxing into a single
-/// configuration point, following the Claude Code security model.
+/// configuration point for agent security.
 ///
 /// ## Example
 ///
@@ -124,7 +124,7 @@ extension SecurityConfiguration {
     ///
     /// - Parameter handler: The permission handler.
     /// - Returns: A new configuration with the handler set.
-    public func withHandler(_ handler: any PermissionHandler) -> SecurityConfiguration {
+    public func withHandler(_ handler: any ApprovalHandler) -> SecurityConfiguration {
         var copy = self
         copy.permissions = copy.permissions.withHandler(handler)
         return copy
@@ -174,6 +174,6 @@ extension SecurityConfiguration {
 
 /// Re-export security types for convenience.
 public typealias ToolPermissionRule = PermissionRule
-public typealias ToolPermissionHandler = PermissionHandler
+public typealias ToolPermissionHandler = ApprovalHandler
 public typealias ToolPermissionRequest = PermissionRequest
 public typealias ToolPermissionResponse = PermissionResponse

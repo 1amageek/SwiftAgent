@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// Permission rule with Claude Code-style pattern syntax.
+/// Permission rule with pattern syntax.
 ///
 /// Supports patterns like:
 /// - `"Read"` - matches tool name exactly
@@ -193,7 +193,7 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     ]
 
     private func matchArgumentPattern(_ pattern: String, against value: String) -> Bool {
-        // Handle "prefix:*" pattern (Claude Code style)
+        // Handle "prefix:*" pattern
         if pattern.hasSuffix(":*") {
             let prefix = String(pattern.dropLast(2))
 

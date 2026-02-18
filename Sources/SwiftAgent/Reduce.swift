@@ -16,7 +16,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// struct MetricAggregator: Agent {
+/// struct MetricAggregator: Step {
 ///     var body: some Step<[Metric], Summary> {
 ///         Reduce(initial: Summary()) { summary, metric, index in
 ///             // Process each metric and update summary

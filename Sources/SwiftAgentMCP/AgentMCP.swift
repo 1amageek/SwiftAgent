@@ -9,7 +9,7 @@
 ///
 /// This module enables SwiftAgent to use tools, resources, and prompts from MCP servers.
 /// MCP tools are automatically converted to Tool protocol for seamless integration.
-/// Implementation is compatible with Claude Code's MCP conventions.
+/// Implementation follows standard MCP conventions.
 ///
 /// ## Overview
 ///
@@ -19,7 +19,7 @@
 ///
 /// ## Features
 ///
-/// - **Claude Code compatible**: Tool names use `mcp__servername__toolname` format
+/// - **Standard naming**: Tool names use `mcp__servername__toolname` format
 /// - **Configuration file support**: Load from `.mcp.json` files with `${VAR}` expansion
 /// - **Multiple server management**: Connect to multiple MCP servers via `MCPClientManager`
 /// - **Transport options**: stdio, HTTP, SSE (Server-Sent Events)
@@ -33,8 +33,8 @@
 /// import SwiftAgent
 /// import SwiftAgentMCP
 ///
-/// // Load from .mcp.json (searches ./.mcp.json then ~/.config/claude/.mcp.json)
-/// let manager = try await MCPClientManager.loadDefault()
+/// // Load from search paths
+/// let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
 ///
 /// // Get all tools from all connected servers
 /// let tools = try await manager.allTools()
@@ -84,7 +84,7 @@
 ///
 /// ## Configuration File (.mcp.json)
 ///
-/// Claude Code compatible configuration format with environment variable expansion:
+/// Standard MCP configuration format with environment variable expansion:
 ///
 /// ```json
 /// {

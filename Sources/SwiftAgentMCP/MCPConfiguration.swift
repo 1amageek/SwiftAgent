@@ -11,7 +11,7 @@ import Foundation
 
 /// Configuration for MCP servers loaded from `.mcp.json` files.
 ///
-/// Supports Claude Code compatible configuration format:
+/// Supports standard MCP configuration format:
 ///
 /// ```json
 /// {
@@ -68,25 +68,16 @@ public struct MCPConfiguration: Codable, Sendable {
         return try decoder.decode(MCPConfiguration.self, from: data)
     }
 
-    /// Searches for configuration in default locations and loads it
+    /// Searches for configuration in the given paths and loads the first one found
     ///
-    /// Search order:
-    /// 1. `./.mcp.json` (project directory)
-    /// 2. `~/.config/claude/.mcp.json` (user directory)
-    ///
+    /// - Parameter searchPaths: Ordered list of file paths to search
     /// - Returns: The configuration if found, nil otherwise
-    public static func loadDefault() throws -> MCPConfiguration? {
-        let searchPaths = [
-            FileManager.default.currentDirectoryPath + "/.mcp.json",
-            FileManager.default.homeDirectoryForCurrentUser.path + "/.config/claude/.mcp.json"
-        ]
-
+    public static func load(searchPaths: [String]) throws -> MCPConfiguration? {
         for path in searchPaths {
             if FileManager.default.fileExists(atPath: path) {
                 return try load(from: URL(fileURLWithPath: path))
             }
         }
-
         return nil
     }
 

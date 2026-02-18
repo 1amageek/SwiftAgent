@@ -81,7 +81,7 @@ public typealias GenerateSnapshot<T: Generable> = LanguageModelSession.ResponseS
 /// where `snapshot.content` is `Out.PartiallyGenerated` (not `Out` itself).
 /// For custom @Generable types, PartiallyGenerated has Optional properties.
 /// The final complete result is still returned by the `run` method.
-public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
+public struct Generate<In: Sendable, Out: Sendable & Generable>: Step, @unchecked Sendable {
 
     public typealias Input = In
     public typealias Output = Out
@@ -528,7 +528,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step {
 /// When using streaming, the `onStream` handler receives a `ResponseStream.Snapshot`
 /// containing both the content (accumulated String) and the raw `GeneratedContent`.
 /// The complete text is still returned by the `run` method.
-public struct GenerateText<In: Sendable>: Step {
+public struct GenerateText<In: Sendable>: Step, @unchecked Sendable {
 
     public typealias Input = In
     public typealias Output = String

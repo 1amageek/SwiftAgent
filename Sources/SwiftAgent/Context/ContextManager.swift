@@ -68,7 +68,7 @@ public actor ContextManager {
     // MARK: - Token Estimation
 
     /// Average characters per token (approximation).
-    /// Claude models typically use ~4 characters per token for English.
+    /// Language models typically use ~4 characters per token for English.
     private let charsPerToken: Double = 4.0
 
     // MARK: - Initialization
@@ -76,7 +76,7 @@ public actor ContextManager {
     /// Creates a context manager.
     ///
     /// - Parameters:
-    ///   - contextWindowSize: Maximum tokens for the model (default: 128,000 for Claude).
+    ///   - contextWindowSize: Maximum tokens for the model (default: 128,000).
     ///   - compactionThreshold: Ratio to trigger compaction (default: 0.80).
     ///   - warningThreshold: Ratio for warning notifications (default: 0.70).
     ///   - strategy: Compaction strategy (default: Hybrid).

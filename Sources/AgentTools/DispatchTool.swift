@@ -45,15 +45,24 @@ public struct DispatchTool: Tool {
     public static let batchSeparator = "\n---\n"
 
     public static let description = """
-    Delegate sub-tasks to separate LLM sessions for focused reasoning (inspired by RLM). \
-    Sub-sessions have access to the shared Notebook for reading/writing data and can recursively \
-    dispatch further sub-tasks (depth-limited). \
-    Operations: "query" for a single sub-task, "query_batched" for parallel execution of multiple \
-    sub-tasks (separate tasks with "\\n---\\n"). \
-    Use query_batched when you have multiple independent questions to process in parallel \
-    (e.g., analyzing different chunks of data stored in Notebook). \
-    The sub-session has no access to the parent's conversation history. \
-    Provide all necessary context in the "context" field or store it in Notebook beforehand.
+    Launch a sub-session to handle a focused sub-task autonomously.
+
+    Usage:
+    - Sub-sessions have access to the shared Notebook for reading/writing data and can recursively dispatch further sub-tasks (depth-limited)
+    - The sub-session has NO access to the parent's conversation history. Provide all necessary context in the "context" field or store it in Notebook beforehand
+    - Launch multiple sub-tasks concurrently whenever possible to maximize performance
+    - Provide clear, detailed prompts so the sub-session can work autonomously and return exactly the information you need
+    - Clearly tell the sub-session whether you expect it to produce analysis or just gather information
+
+    Operations:
+    - "query": Single sub-task with task description and context
+    - "query_batched": Parallel execution of multiple independent sub-tasks (separate tasks with "\\n---\\n")
+
+    When to use:
+    - Open-ended codebase searches requiring multiple rounds of globbing and grepping
+    - Analyzing different chunks of data stored in Notebook in parallel
+    - Focused reasoning on a specific sub-problem without polluting the parent context
+    - Multiple independent questions that can be processed in parallel via query_batched
     """
 
     public var description: String { Self.description }

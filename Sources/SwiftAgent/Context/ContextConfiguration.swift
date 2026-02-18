@@ -86,7 +86,7 @@ public struct ContextConfiguration: Sendable {
     /// Disabled context management.
     public static let disabled = ContextConfiguration(enabled: false)
 
-    /// Default configuration for Claude models.
+    /// Default configuration for language models.
     ///
     /// - Context window: 128,000 tokens
     /// - Compaction threshold: 80%

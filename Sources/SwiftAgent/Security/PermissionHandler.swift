@@ -163,45 +163,35 @@ extension PermissionRequest {
     }
 }
 
-// MARK: - PermissionHandler Protocol
-
-/// Protocol for handling permission requests.
-///
-/// Implement this protocol to provide custom permission handling,
-/// such as CLI prompts, GUI dialogs, or automated approval flows.
-public protocol PermissionHandler: Sendable {
-
-    /// Requests permission for a tool invocation.
-    ///
-    /// - Parameter request: The permission request details.
-    /// - Returns: The user's decision.
-    /// - Throws: If the permission request cannot be processed.
-    func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse
-}
-
 // MARK: - Built-in Handlers
 
 /// A handler that always allows (for testing or trusted environments).
-public struct AlwaysAllowHandler: PermissionHandler {
+public struct AlwaysAllowHandler: ApprovalHandler {
 
     public init() {}
 
-    public func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse {
+    public func requestApproval(
+        _ request: PermissionRequest,
+        approvalID: String
+    ) async throws -> PermissionResponse {
         .allowOnce
     }
 }
 
 /// A handler that always denies (for read-only modes).
-public struct AlwaysDenyHandler: PermissionHandler {
+public struct AlwaysDenyHandler: ApprovalHandler {
 
     public init() {}
 
-    public func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse {
+    public func requestApproval(
+        _ request: PermissionRequest,
+        approvalID: String
+    ) async throws -> PermissionResponse {
         .deny
     }
 }
 
-/// A CLI-based permission handler that prompts via stdin/stdout.
+/// A CLI-based approval handler that prompts via stdin/stdout.
 ///
 /// Displays a permission prompt and waits for user input.
 ///
@@ -221,7 +211,7 @@ public struct AlwaysDenyHandler: PermissionHandler {
 ///
 /// Choice [y/a/n/b]:
 /// ```
-public struct CLIPermissionHandler: PermissionHandler {
+public struct CLIPermissionHandler: ApprovalHandler {
 
     private let output: @Sendable (String) -> Void
 
@@ -232,7 +222,10 @@ public struct CLIPermissionHandler: PermissionHandler {
         self.output = output
     }
 
-    public func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse {
+    public func requestApproval(
+        _ request: PermissionRequest,
+        approvalID: String
+    ) async throws -> PermissionResponse {
         output("")
         output("=== Permission Request ===")
         output("Tool: \(request.toolName)")
@@ -270,7 +263,7 @@ public struct CLIPermissionHandler: PermissionHandler {
 }
 
 /// A handler that uses a closure for custom logic.
-public struct ClosurePermissionHandler: PermissionHandler {
+public struct ClosurePermissionHandler: ApprovalHandler {
 
     private let handler: @Sendable (PermissionRequest) async throws -> PermissionResponse
 
@@ -281,7 +274,10 @@ public struct ClosurePermissionHandler: PermissionHandler {
         self.handler = handler
     }
 
-    public func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse {
+    public func requestApproval(
+        _ request: PermissionRequest,
+        approvalID: String
+    ) async throws -> PermissionResponse {
         try await handler(request)
     }
 }

@@ -15,7 +15,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// struct DocumentProcessor: Agent {
+/// struct DocumentProcessor: Step {
 ///     var body: some Step<[Document], [ProcessedDocument]> {
 ///         Map { document, index in
 ///             // Process each document

@@ -77,7 +77,7 @@ public struct GuardrailConfiguration: Sendable {
 
     /// Handler for "ask" decisions.
     /// `nil` means use the global configuration's handler.
-    public var handler: (any PermissionHandler)?
+    public var handler: (any ApprovalHandler)?
 
     /// Sandbox configuration.
     /// `nil` means use the global configuration's sandbox (or none).
@@ -101,7 +101,7 @@ public struct GuardrailConfiguration: Sendable {
         finalDeny: [PermissionRule] = [],
         overrides: [PermissionRule] = [],
         defaultAction: PermissionDecision? = nil,
-        handler: (any PermissionHandler)? = nil,
+        handler: (any ApprovalHandler)? = nil,
         sandbox: SandboxExecutor.Configuration? = nil
     ) {
         self.allow = allow

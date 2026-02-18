@@ -4,7 +4,7 @@ Control tool execution with permissions and sandboxing.
 
 ## Overview
 
-SwiftAgent provides a layered security system inspired by Claude Code:
+SwiftAgent provides a layered security system:
 
 ```
 Tool Request

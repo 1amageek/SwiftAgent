@@ -33,7 +33,7 @@ public enum SwiftAgentSpanAttributes {
     /// The provider of the language model (e.g., "openai", "anthropic")
     public static let modelProvider = "llm.provider"
     
-    /// The name/ID of the model (e.g., "gpt-4o", "claude-3")
+    /// The name/ID of the model (e.g., "gpt-4o", "llama-3")
     public static let modelName = "llm.model"
     
     /// The number of tokens in the prompt

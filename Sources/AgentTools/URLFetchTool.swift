@@ -41,10 +41,25 @@ public struct URLFetchTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Fetch and read content from a specific URL you already know. \
-    Use when you have an exact URL to retrieve (e.g., documentation page, API reference, article). \
-    Converts HTML to Markdown. Max 5MB, 30s timeout. \
-    Do NOT use for searching - use web_search instead.
+    Fetches content from a specified URL and processes it.
+
+    Usage:
+    - Takes a URL and an optional prompt as input
+    - Fetches the URL content, converts HTML to markdown
+    - Use when you have an exact URL to retrieve (e.g., documentation page, API reference, article)
+    - The URL must be a fully-formed valid URL
+    - HTTP URLs will be automatically upgraded to HTTPS
+    - The prompt should describe what information you want to extract from the page
+    - Results may be summarized if the content is very large
+    - Includes a self-cleaning 15-minute cache for faster responses when repeatedly accessing the same URL
+    - Do NOT use this for searching - use WebSearch instead to find URLs first
+
+    Limitations:
+    - Only supports HTTP and HTTPS URLs
+    - Blocks access to private IP ranges and localhost (SSRF protection)
+    - Maximum response size: 5MB
+    - Maximum execution time: 30 seconds
+    - Read-only (GET requests only)
     """
 
     public var description: String { Self.description }

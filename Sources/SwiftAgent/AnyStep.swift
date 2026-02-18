@@ -2,7 +2,7 @@
 //  AnyStep.swift
 //  SwiftAgent
 //
-//  Created by Claude Code on 2025/01/26.
+//  Created by SwiftAgent on 2025/01/26.
 //
 
 import Foundation

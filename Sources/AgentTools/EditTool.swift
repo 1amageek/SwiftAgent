@@ -37,8 +37,17 @@ public struct EditTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Replace exact string in file. Fails if old_string not unique (use replace_all=true for multiple). \
-    Preserve exact indentation. Max 1MB, UTF-8 only.
+    Performs exact string replacements in files.
+
+    Usage:
+    - You MUST use the Read tool at least once before editing a file. This tool will error if you attempt an edit without reading the file first
+    - When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears in the file. Never include line number prefixes in old_string or new_string
+    - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required
+    - The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique, or use replace_all=true to change every instance
+    - Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance
+    - old_string and new_string must be different
+    - NEVER use the Bash tool with sed or awk to edit files. ALWAYS use this tool instead
+    - Maximum file size: 1MB, UTF-8 text files only
     """
 
     public var description: String { Self.description }

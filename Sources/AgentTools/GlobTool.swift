@@ -33,8 +33,20 @@ public struct GlobTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Find files by glob pattern. Use * for any chars, ** for recursive, ? for single char. \
-    Example: "**/*.swift" finds all Swift files.
+    Fast file pattern matching tool that works with any codebase size.
+
+    Usage:
+    - Supports glob patterns like "**/*.swift" or "Sources/**/*.ts"
+    - Returns matching file paths sorted alphabetically
+    - Use this tool when you need to find files by name patterns
+    - When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Dispatch tool instead
+    - You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful
+    - NEVER use the Bash tool with find or ls to search for files. ALWAYS use this tool instead
+
+    Pattern syntax:
+    - * matches any characters except path separator
+    - ** matches any characters including path separators (recursive)
+    - ? matches a single character
     """
 
     public var description: String { Self.description }

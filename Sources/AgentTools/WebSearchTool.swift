@@ -39,10 +39,19 @@ public struct WebSearchTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Search the web to find relevant URLs when you don't know the exact page. \
-    Use for discovering information, finding solutions, or researching topics. \
-    Returns list of results with titles, URLs, and snippets. \
-    After finding URLs, use WebFetch to read full content.
+    Searches the web and returns a list of results with titles, URLs, and snippets.
+
+    Usage:
+    - Use this tool for accessing information beyond the model's knowledge cutoff
+    - Provide a clear search query describing what you're looking for
+    - Optionally filter results by allowed or blocked domains
+    - After finding relevant URLs, use WebFetch to read the full content of specific pages
+    - Returns search result information formatted with titles and URLs
+    - IMPORTANT: Use the correct year in search queries based on the current date
+
+    Limitations:
+    - Results depend on the configured search provider
+    - Some providers may have rate limits or require API keys
     """
 
     public var description: String { Self.description }

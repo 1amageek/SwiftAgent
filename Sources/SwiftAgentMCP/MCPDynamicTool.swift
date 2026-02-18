@@ -12,7 +12,7 @@ import SwiftAgent
 
 /// A dynamic tool that wraps an MCP tool and conforms to Tool protocol
 ///
-/// Tool names follow Claude Code convention: `mcp__servername__toolname`
+/// Tool names follow SwiftAgent convention: `mcp__servername__toolname`
 /// This enables per-server permission rules via `PermissionRule.mcp("servername")`.
 public struct MCPDynamicTool: Tool, Sendable {
     public typealias Arguments = GeneratedContent
@@ -27,7 +27,7 @@ public struct MCPDynamicTool: Tool, Sendable {
     /// The server name for namespacing
     private let serverName: String
 
-    /// The tool name in Claude Code format: `mcp__servername__toolname`
+    /// The tool name in MCP format: `mcp__servername__toolname`
     public var name: String {
         "mcp__\(serverName)__\(mcpTool.name)"
     }

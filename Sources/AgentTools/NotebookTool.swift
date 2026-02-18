@@ -30,12 +30,25 @@ public struct NotebookTool: Tool {
     public static let defaultLineLimit = 200
 
     public static let description = """
-    In-memory key-value scratchpad for storing and retrieving data outside the context window. \
-    Use this to save intermediate results, accumulate data across multiple steps, or store large \
-    content that would otherwise consume context. Operations: "write" to store a value by key \
-    (overwrites existing), "read" to retrieve a value by key (supports offset/limit for large values), \
-    "append" to add text to an existing key, "list" to see all stored keys, "delete" to remove a key. \
-    Data persists only for the current session.
+    In-memory key-value scratchpad for storing and retrieving data outside the context window.
+
+    Usage:
+    - Use this to save intermediate results, accumulate data across multiple steps, or store large content that would otherwise consume context
+    - Data persists only for the current session and is shared with sub-sessions created by Dispatch
+    - When dealing with large data, store it in Notebook and have Dispatch sub-tasks read from it
+
+    Operations:
+    - "write": Store a value by key (overwrites existing)
+    - "read": Retrieve a value by key (supports offset/limit for large values)
+    - "append": Add text to an existing key's value
+    - "list": Show all stored keys with their sizes
+    - "delete": Remove a key
+
+    When to use:
+    - Intermediate results from multi-step analysis
+    - Large data that would fill up the context window
+    - Shared data between parent and Dispatch sub-sessions
+    - Accumulating results from parallel Dispatch queries
     """
 
     public var description: String { Self.description }

@@ -1,10 +1,10 @@
 # ``AgentTools``
 
-A collection of Claude Code-style tools for file operations, search, and command execution.
+A collection of tools for file operations, search, and command execution.
 
 ## Overview
 
-AgentTools provides a set of tools that follow the Claude Code naming conventions. These tools enable agents to interact with the file system, execute commands, and perform web operations.
+AgentTools provides a set of tools that follow the SwiftAgent naming conventions. These tools enable agents to interact with the file system, execute commands, and perform web operations.
 
 ### Available Tools
 

@@ -211,14 +211,14 @@ public struct Override: GuardrailRule {
 /// ```
 public struct AskUser: GuardrailRule {
 
-    /// The permission handler to use for prompts.
-    public let handler: (any PermissionHandler)?
+    /// The approval handler to use for prompts.
+    public let handler: (any ApprovalHandler)?
 
     /// Creates an ask-user rule.
     ///
     /// - Parameter handler: Optional custom handler for user prompts.
     ///   If nil, uses the default handler from the middleware.
-    public init(handler: (any PermissionHandler)? = nil) {
+    public init(handler: (any ApprovalHandler)? = nil) {
         self.handler = handler
     }
 

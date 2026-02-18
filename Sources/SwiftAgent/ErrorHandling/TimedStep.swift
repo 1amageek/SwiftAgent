@@ -40,7 +40,7 @@ import Foundation
 /// or share remaining time.
 ///
 /// ```swift
-/// struct Pipeline: Agent {
+/// struct Pipeline: Step {
 ///     var body: some Step<String, String> {
 ///         Step1().timeout(.seconds(5))   // Individual: 5s
 ///         Step2()                         // No timeout

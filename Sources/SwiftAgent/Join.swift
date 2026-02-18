@@ -14,7 +14,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// struct TextProcessor: Agent {
+/// struct TextProcessor: Step {
 ///     var body: some Step<String, String> {
 ///         Join(separator: " ")
 ///     }

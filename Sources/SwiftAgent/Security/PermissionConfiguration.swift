@@ -9,7 +9,7 @@ import Foundation
 
 /// Permission decision types.
 ///
-/// Compatible with Claude Code's permission system.
+/// Compatible with SwiftAgent's permission system.
 public enum PermissionDecision: String, Sendable, Codable {
     /// Allow the tool execution.
     case allow
@@ -19,7 +19,7 @@ public enum PermissionDecision: String, Sendable, Codable {
     case ask
 }
 
-/// Claude Code-style permission configuration.
+/// Permission configuration for tool execution control.
 ///
 /// Defines allow and deny rules for tool execution, with support for
 /// pattern matching and interactive user confirmation.
@@ -72,7 +72,7 @@ public struct PermissionConfiguration: Sendable {
     public var defaultAction: PermissionDecision
 
     /// Handler for "ask" decisions.
-    public var handler: (any PermissionHandler)?
+    public var handler: (any ApprovalHandler)?
 
     /// Whether to remember "always allow" and "block" decisions within the session.
     public var enableSessionMemory: Bool
@@ -93,7 +93,7 @@ public struct PermissionConfiguration: Sendable {
         finalDeny: [PermissionRule] = [],
         overrides: [PermissionRule] = [],
         defaultAction: PermissionDecision = .ask,
-        handler: (any PermissionHandler)? = nil,
+        handler: (any ApprovalHandler)? = nil,
         enableSessionMemory: Bool = true
     ) {
         self.allow = allow
@@ -261,7 +261,7 @@ extension PermissionConfiguration {
     ///
     /// - Parameter handler: The permission handler.
     /// - Returns: A new configuration with the handler set.
-    public func withHandler(_ handler: any PermissionHandler) -> PermissionConfiguration {
+    public func withHandler(_ handler: any ApprovalHandler) -> PermissionConfiguration {
         var copy = self
         copy.handler = handler
         return copy

@@ -4,7 +4,7 @@ Model Context Protocol (MCP) integration for SwiftAgent.
 
 ## Overview
 
-SwiftAgentMCP provides seamless integration with MCP servers, enabling agents to use external tools and services. It supports the same configuration format as Claude Code.
+SwiftAgentMCP provides seamless integration with MCP servers, enabling agents to use external tools and services. It supports the standard MCP configuration format.
 
 ### Configuration
 
@@ -27,8 +27,8 @@ Create a `.mcp.json` file in your project root:
 ### Loading MCP Tools
 
 ```swift
-// Load from .mcp.json
-let manager = try await MCPClientManager.loadDefault()
+// Load from search paths
+let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
 let tools = try await manager.allTools()
 
 // Connect to a single server

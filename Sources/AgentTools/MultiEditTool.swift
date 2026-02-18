@@ -32,8 +32,16 @@ public struct MultiEditTool: Tool {
     public var name: String { Self.name }
 
     public static let description = """
-    Apply multiple edits to a file atomically. All succeed or none applied. \
-    Format: [{"old":"text","new":"replacement"},...]. Max 1MB, UTF-8 only.
+    Apply multiple edit operations to a file in a single atomic transaction.
+
+    Usage:
+    - You MUST use the Read tool first before using this tool
+    - All edits succeed or none are applied (transactional). If any edit fails, the file is left unchanged
+    - Edits are applied in order; earlier edits may change the text that later edits match against
+    - Provide edits as a JSON array: [{"old":"text to find","new":"replacement text"},...]
+    - Each edit performs an exact string replacement (same rules as Edit tool)
+    - Use this tool instead of multiple sequential Edit calls when you need to make several changes to the same file
+    - Maximum file size: 1MB, UTF-8 text files only
     """
 
     public var description: String { Self.description }

@@ -22,7 +22,7 @@ import Foundation
 ///     .use(TimeoutMiddleware(duration: .seconds(30)))
 ///
 /// let tools = pipeline.wrap(baseTools)
-/// let session = AgentSession(tools: tools, ...)
+/// let session = Conversation(tools: tools, ...)
 /// ```
 public final class ToolPipeline: @unchecked Sendable {
 

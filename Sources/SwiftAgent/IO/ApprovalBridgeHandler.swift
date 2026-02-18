@@ -5,35 +5,34 @@
 
 import Foundation
 
-/// Bridges `PermissionMiddleware`'s `.ask` flow with the event system.
+/// Decorates an `ApprovalHandler` with event emission.
 ///
-/// Implements `PermissionHandler` so it can be injected via
-/// `PermissionHandlerContext`. Internally it emits
-/// `approvalRequired`/`approvalResolved` events and delegates
-/// to the transport-agnostic `ApprovalHandler`.
+/// Emits `approvalRequired`/`approvalResolved` events around each
+/// approval request, then delegates to the inner handler.
 ///
-/// Created by `AgentRuntime` and injected via `PermissionHandlerContext`.
-final class ApprovalBridgeHandler: PermissionHandler, @unchecked Sendable {
-    private let approvalHandler: any ApprovalHandler
+/// Created by `AgentSession` and injected via `ApprovalHandlerContext`.
+final class ApprovalBridgeHandler: ApprovalHandler, @unchecked Sendable {
+    private let inner: any ApprovalHandler
     private let eventSink: EventSink
     private let sessionID: String
     private let turnID: String
 
     init(
-        approvalHandler: any ApprovalHandler,
+        inner: any ApprovalHandler,
         eventSink: EventSink,
         sessionID: String,
         turnID: String
     ) {
-        self.approvalHandler = approvalHandler
+        self.inner = inner
         self.eventSink = eventSink
         self.sessionID = sessionID
         self.turnID = turnID
     }
 
-    func requestPermission(_ request: PermissionRequest) async throws -> PermissionResponse {
-        let approvalID = UUID().uuidString
-
+    func requestApproval(
+        _ request: PermissionRequest,
+        approvalID: String
+    ) async throws -> PermissionResponse {
         // 1. Emit approval_required
         await eventSink.emit(.approvalRequired(RunEvent.ApprovalRequestEvent(
             approvalID: approvalID,
@@ -45,8 +44,8 @@ final class ApprovalBridgeHandler: PermissionHandler, @unchecked Sendable {
             turnID: turnID
         )))
 
-        // 2. Delegate to transport-specific handler
-        let response = try await approvalHandler.requestApproval(request, approvalID: approvalID)
+        // 2. Delegate to inner handler
+        let response = try await inner.requestApproval(request, approvalID: approvalID)
 
         // 3. Emit approval_resolved
         let approvalDecision: ApprovalDecision = switch response {

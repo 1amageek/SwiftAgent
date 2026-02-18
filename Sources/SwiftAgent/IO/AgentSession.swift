@@ -1,14 +1,14 @@
 //
-//  AgentRuntime.swift
+//  AgentSession.swift
 //  SwiftAgent
 //
 
 import Foundation
 import Synchronization
 
-/// The orchestrator between `AgentTransport` and `Agent`.
+/// The orchestrator between `AgentTransport` and `Conversation`.
 ///
-/// `AgentRuntime` uses a two-task architecture:
+/// `AgentSession` uses a two-task architecture:
 /// - **Receive loop** (background Task): Always running, drains transport messages immediately
 /// - **Turn processor** (main context): Executes turns sequentially from an internal queue
 ///
@@ -22,12 +22,20 @@ import Synchronization
 /// ## Usage
 ///
 /// ```swift
-/// let transport = StdioTransport()
-/// let runtime = AgentRuntime(
-///     transport: transport,
-///     approvalHandler: LegacyApprovalAdapter(CLIPermissionHandler())
-/// )
-/// try await runtime.run(agent: MyAgent(), session: session)
+/// let session = Conversation(
+///     languageModelSession: LanguageModelSession(
+///         model: SystemLanguageModel.default,
+///         tools: [ReadTool(), ExecuteCommandTool()]
+///     ) {
+///         Instructions("You are a coding assistant.")
+///     }
+/// ) {
+///     GenerateText { (input: String) in Prompt(input) }
+/// }
+///
+/// let transport = StdioTransport(prompt: "> ")
+/// let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// try await session.run(conversation)
 /// ```
 ///
 /// ## Turn Lifecycle
@@ -40,7 +48,7 @@ import Synchronization
 ///         .approvalResponse → resolve pending approval (immediate)
 ///         .cancel → match turnID to active token or record as pending cancel
 /// ```
-public final class AgentRuntime: Sendable {
+public final class AgentSession: Sendable {
 
     private let transport: any AgentTransport
     private let approvalHandler: (any ApprovalHandler)?
@@ -142,7 +150,7 @@ public final class AgentRuntime: Sendable {
         }
     }
 
-    /// Creates an agent runtime.
+    /// Creates an agent session.
     ///
     /// - Parameters:
     ///   - transport: The transport for receiving requests and sending events.
@@ -160,17 +168,15 @@ public final class AgentRuntime: Sendable {
         self.turnState = Mutex(TurnState())
     }
 
-    /// Runs the agent loop, processing requests from the transport until closed.
+    /// Runs the agent session loop, processing requests from the transport until closed.
     ///
     /// This method blocks until the transport's input side is closed or the task is cancelled.
     /// Turns are processed sequentially — only one turn executes at a time.
     /// Approval responses and cancellation signals are handled concurrently
     /// via a background receive loop.
     ///
-    /// - Parameters:
-    ///   - agent: The agent to run.
-    ///   - session: The language model session to inject.
-    public func run<A: Agent>(agent: A, session: LanguageModelSession) async throws {
+    /// - Parameter conversation: The agent session that handles message processing.
+    public func run(_ conversation: Conversation) async throws {
         let (turnStream, turnContinuation) = AsyncStream<RunRequest>.makeStream()
 
         // Create TurnGate only for transports that don't support background receive
@@ -244,7 +250,7 @@ public final class AgentRuntime: Sendable {
         }
 
         // Turn processor: runs in the current async context (no Sendable
-        // boundary crossing for agent/session). Processes turns sequentially.
+        // boundary crossing for conversation). Processes turns sequentially.
         for await request in turnStream {
             // Definitive idempotency check: the receive loop checks at receive time,
             // but a duplicate may pass if it arrives before the first attempt completes.
@@ -262,7 +268,7 @@ public final class AgentRuntime: Sendable {
                     token.cancel()
                 }
             }
-            await executeTurn(agent: agent, session: session, request: request, cancellationToken: token)
+            await executeTurn(conversation: conversation, request: request, cancellationToken: token)
             let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
             turnState.withLock { state in
                 if isTerminal {
@@ -289,22 +295,18 @@ public final class AgentRuntime: Sendable {
 
     // MARK: - Turn Execution
 
-    /// Executes a single turn: creates event stream, runs agent, forwards events.
+    /// Executes a single turn: creates event stream, delegates to Conversation, forwards events.
     ///
     /// The `TurnCancellationToken` is injected into the execution context via
     /// `TurnCancellationContext`, making it available at checkpoints within
-    /// `Agent.run()`, `Generate`, and `Loop`.
+    /// `Generate` and `Loop`.
     ///
     /// Error handling:
-    /// - Default `Agent.run()` catches all errors internally and returns `RunResult`.
-    ///   In that case the `do` block succeeds and no catch block fires.
-    /// - Custom `Agent.run()` overrides that throw are caught here,
-    ///   emitting `.error` and `.runCompleted(.failed)` events.
     /// - `CancellationError` (from `.cancel`) emits `.runCompleted(.cancelled)`.
     ///   Cancelled turns are NOT marked as completed (allowing retry).
-    private func executeTurn<A: Agent>(
-        agent: A,
-        session: LanguageModelSession,
+    /// - Other errors emit `.error` and `.runCompleted(.failed)`.
+    private func executeTurn(
+        conversation: Conversation,
         request: RunRequest,
         cancellationToken: TurnCancellationToken
     ) async {
@@ -324,44 +326,59 @@ public final class AgentRuntime: Sendable {
         }
 
         // Create approval bridge if handler is provided
-        let bridge: (any PermissionHandler)? = approvalHandler.map { handler in
+        let bridge: (any ApprovalHandler)? = approvalHandler.map { handler in
             ApprovalBridgeHandler(
-                approvalHandler: handler,
+                inner: handler,
                 eventSink: sink,
                 sessionID: request.sessionID,
                 turnID: request.turnID
             )
         }
 
+        guard case .text(let text) = request.input else {
+            await sink.emit(.runCompleted(RunEvent.RunCompleted(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .failed
+            )))
+            sink.finish()
+            _ = await forwardTask.result
+            completedTurns.withLock { _ = $0.insert(request.turnID) }
+            return
+        }
+
+        // Apply steering from request context
+        if let steering = request.context?.steering {
+            for s in steering { conversation.steer(s) }
+        }
+
+        await sink.emit(.runStarted(RunEvent.RunStarted(
+            sessionID: request.sessionID,
+            turnID: request.turnID
+        )))
+
         do {
-            let result = try await TurnCancellationContext.withValue(cancellationToken) {
-                try await PermissionHandlerContext.withValue(bridge) {
+            _ = try await TurnCancellationContext.withValue(cancellationToken) {
+                try await ApprovalHandlerContext.withValue(bridge) {
                     try await EventSinkContext.withValue(sink) {
-                        try await withSession(session) {
-                            try await agent.run(request)
-                        }
+                        try await conversation.send(text)
                     }
                 }
             }
-            // Default Agent.run() catches all errors internally and returns RunResult.
-            // Mark terminal statuses as completed (except cancelled).
-            switch result.status {
-            case .completed, .failed, .denied, .timedOut:
-                completedTurns.withLock { _ = $0.insert(request.turnID) }
-            case .cancelled:
-                // Cancelled turns are NOT marked as completed — client may retry.
-                break
-            }
+
+            await sink.emit(.runCompleted(RunEvent.RunCompleted(
+                sessionID: request.sessionID,
+                turnID: request.turnID,
+                status: .completed
+            )))
+            completedTurns.withLock { _ = $0.insert(request.turnID) }
         } catch is CancellationError {
-            // Turn was cancelled. Emit cancellation event.
-            // Only fires for custom Agent.run() overrides that rethrow CancellationError.
             await sink.emit(.runCompleted(RunEvent.RunCompleted(
                 sessionID: request.sessionID,
                 turnID: request.turnID,
                 status: .cancelled
             )))
         } catch {
-            // Unexpected error from a custom Agent.run() override.
             let runError = RunEvent.RunError(
                 message: error.localizedDescription,
                 isFatal: true,

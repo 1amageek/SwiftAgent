@@ -35,10 +35,10 @@ public struct EventName: RawRepresentable, Hashable, Sendable {
 // MARK: - Standard Event Names
 
 extension EventName {
-    /// Emitted when a prompt is submitted to an AgentSession.
+    /// Emitted when a prompt is submitted to an Conversation.
     public static let promptSubmitted = EventName("promptSubmitted")
 
-    /// Emitted when a response is completed by an AgentSession.
+    /// Emitted when a response is completed by an Conversation.
     public static let responseCompleted = EventName("responseCompleted")
 
     /// Emitted for notifications, warnings, or errors that don't interrupt processing.
@@ -78,7 +78,7 @@ public protocol Event: Sendable {
 
 // MARK: - SessionEvent
 
-/// An event emitted by AgentSession.
+/// An event emitted by Conversation.
 ///
 /// Use this for session lifecycle events like prompt submission and response completion.
 public struct SessionEvent: Event {

@@ -158,4 +158,4 @@ let data = try await race.run(url)
 
 - Learn about <doc:CoreConcepts> for deeper understanding
 - Explore ``Context`` for dependency injection
-- See ``AgentSession`` for interactive conversations
+- See ``Conversation`` for interactive conversations

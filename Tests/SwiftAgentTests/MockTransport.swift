@@ -7,7 +7,7 @@ import Foundation
 import Synchronization
 @testable import SwiftAgent
 
-/// A mock transport for testing AgentRuntime.
+/// A mock transport for testing AgentSession.
 ///
 /// Uses Continuation-based design for thread-safe request enqueuing
 /// and event collection.

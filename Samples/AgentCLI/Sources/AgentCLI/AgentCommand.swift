@@ -82,15 +82,21 @@ extension AgentCommand {
                     .session(session)
                     .run(message)
             } else {
-                // Interactive mode via AgentRuntime + StdioTransport
+                // Interactive mode via AgentSession + StdioTransport
                 print("SwiftAgent Chat (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("---")
-                let agent = InteractiveChatAgent()
-                let session = ChatSessionFactory.createSession(configuration: config)
+                let languageModelSession = ChatSessionFactory.createSession(configuration: config)
+                let conversation = Conversation(languageModelSession: languageModelSession) {
+                    Transform<String, String> { input in
+                        print("Assistant: ", terminator: "")
+                        return input
+                    }
+                    ChatAgent()
+                }
                 let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
-                let runtime = AgentRuntime(transport: transport, approvalHandler: LegacyApprovalAdapter(CLIPermissionHandler()))
-                try await runtime.run(agent: agent, session: session)
+                let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+                try await session.run(conversation)
             }
         }
     }
@@ -123,20 +129,22 @@ extension AgentCommand {
                 print("---")
                 _ = try await CodingAgent(configuration: config).run(task)
             } else {
-                // Interactive mode via AgentRuntime + StdioTransport
+                // Interactive mode via AgentSession + StdioTransport
                 print("SwiftAgent Coding Assistant (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("Working directory: \(config.workingDirectory)")
                 print("---")
-                let agent = InteractiveCodingAgent(configuration: config)
                 let session = config.createSession(
                     instructions: Instructions {
                         "You are an expert coding assistant."
                     }
                 )
+                let conversation = Conversation(languageModelSession: session) {
+                    CodingAgent(configuration: config)
+                }
                 let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
-                let runtime = AgentRuntime(transport: transport, approvalHandler: LegacyApprovalAdapter(CLIPermissionHandler()))
-                try await runtime.run(agent: agent, session: session)
+                let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+                try await session.run(conversation)
             }
         }
     }

@@ -95,9 +95,9 @@ Type erasure and debugging.
 
 ### Session Management
 
-- <doc:AgentSessionGuide>
+- <doc:ConversationGuide>
 - ``Session``
-- ``AgentSession``
+- ``Conversation``
 - ``LanguageModelSessionDelegate``
 
 ### Events

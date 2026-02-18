@@ -85,21 +85,18 @@ public struct ChatSessionFactory {
     }
 }
 
-/// Interactive chat agent using the new Agent protocol + StdioTransport pattern.
-///
-/// Replaces the old `Loop + WaitForInput` pattern with transport-agnostic I/O.
+/// Interactive chat agent using Conversation + StdioTransport pattern.
 ///
 /// Usage:
 /// ```swift
 /// let config = try options.createConfiguration()
-/// let agent = InteractiveChatAgent()
-/// let session = ChatSessionFactory.createSession(configuration: config)
+/// let languageModelSession = ChatSessionFactory.createSession(configuration: config)
+/// let conversation = Conversation(languageModelSession: languageModelSession) {
+///     ChatAgent()
+/// }
 /// let transport = StdioTransport(prompt: "You: ")
-/// let runtime = AgentRuntime(
-///     transport: transport,
-///     approvalHandler: AutoDenyApprovalHandler()
-/// )
-/// try await runtime.run(agent: agent, session: session)
+/// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// try await runtime.run(conversation)
 /// ```
 public struct InteractiveChatAgent: Agent {
 

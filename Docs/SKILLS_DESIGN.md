@@ -61,7 +61,7 @@ Instructions for the agent...
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                              AgentSession                                     │
+│                              Conversation                                     │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────────────────────┐ │
 │  │  SkillRegistry  │  │SkillPermissions │  │      ToolPipeline             │ │
 │  │                 │  │                 │  │ ┌─────────────────────────┐   │ │
@@ -109,7 +109,7 @@ Instructions for the agent...
    SkillRegistry.register(skill)   ←─── name + description を保持
 
 2. Session Creation
-   AgentSession.create()
+   Conversation.create()
         │
         ├─→ SkillPermissions 作成
         │
@@ -720,12 +720,12 @@ extension AgentConfiguration {
 }
 ```
 
-## 6. Integration with AgentSession
+## 6. Integration with Conversation
 
 ### 6.1 Session Creation Changes
 
 ```swift
-public actor AgentSession {
+public actor Conversation {
 
     // ... existing properties ...
 
@@ -734,7 +734,7 @@ public actor AgentSession {
 
     public static func create(
         configuration: AgentConfiguration
-    ) async throws -> AgentSession {
+    ) async throws -> Conversation {
         // ... existing code ...
 
         // Initialize skill registry
@@ -776,7 +776,7 @@ public actor AgentSession {
 ### 6.2 Skill-Related Methods
 
 ```swift
-extension AgentSession {
+extension Conversation {
 
     /// Lists available skills.
     public func listSkills() async -> [Skill] {
@@ -868,7 +868,7 @@ let config = AgentConfiguration(
 )
 
 // Create session
-let session = try await AgentSession.create(configuration: config)
+let session = try await Conversation.create(configuration: config)
 
 // List available skills
 let skills = await session.listSkills()
@@ -1018,7 +1018,7 @@ let skillTool = SkillTool(registry: registry, permissions: skillPermissions)
 ### 12.2 Integration Tests
 
 - `SkillDiscovery` のディレクトリスキャン
-- `AgentSession` へのスキル統合
+- `Conversation` へのスキル統合
 - `SkillTool` の実行
 
 ### 12.3 Test Fixtures

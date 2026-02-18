@@ -15,7 +15,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// struct DataNormalizer: Agent {
+/// struct DataNormalizer: Step {
 ///     var body: some Step<RawData, NormalizedData> {
 ///         // Preprocess data
 ///         Transform { raw in
@@ -29,15 +29,15 @@ import Foundation
 ///     }
 /// }
 /// ```
-public struct Transform<Input: Sendable, Output: Sendable>: Step {
+public struct Transform<Input: Sendable, Output: Sendable>: Step, Sendable {
     /// The transformation closure
-    private let transformer: (Input) async throws -> Output
-    
+    private let transformer: @Sendable (Input) async throws -> Output
+
     /// Creates a new transform step with the specified transformation closure
     ///
     /// - Parameter transformer: A closure that transforms the input into the output
     public init(
-        transformer: @escaping (Input) async throws -> Output
+        transformer: @escaping @Sendable (Input) async throws -> Output
     ) {
         self.transformer = transformer
     }

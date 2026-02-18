@@ -13,16 +13,18 @@ import Synchronization
 #if OpenFoundationModels
 import OpenFoundationModels
 
-// MARK: - AgentSession Input Queue Tests
+// MARK: - Conversation Input Queue Tests
 
-@Suite("AgentSession Input Queue Tests")
-struct AgentSessionInputQueueTests {
+@Suite("Conversation Input Queue Tests")
+struct ConversationInputQueueTests {
 
-    @Test("AgentSession input adds to queue")
-    func agentSessionInputAddsToQueue() async throws {
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
+    @Test("Conversation input adds to queue")
+    func conversationInputAddsToQueue() async throws {
+        let session = Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test")
-        })
+        }) {
+            GenerateText { (input: String) in Prompt(input) }
+        }
 
         session.input("Hello")
         session.input("World")
@@ -34,11 +36,13 @@ struct AgentSessionInputQueueTests {
         #expect(second == "World")
     }
 
-    @Test("AgentSession waitForInput suspends until input available", .timeLimit(.minutes(1)))
-    func agentSessionWaitForInputSuspends() async throws {
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
+    @Test("Conversation waitForInput suspends until input available", .timeLimit(.minutes(1)))
+    func conversationWaitForInputSuspends() async throws {
+        let session = Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test")
-        })
+        }) {
+            GenerateText { (input: String) in Prompt(input) }
+        }
 
         // Start a task that waits for input
         let task = Task {
@@ -56,11 +60,13 @@ struct AgentSessionInputQueueTests {
         #expect(result == "Delayed input")
     }
 
-    @Test("AgentSession input preserves order")
-    func agentSessionInputPreservesOrder() async throws {
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
+    @Test("Conversation input preserves order")
+    func conversationInputPreservesOrder() async throws {
+        let session = Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test")
-        })
+        }) {
+            GenerateText { (input: String) in Prompt(input) }
+        }
 
         // Add multiple inputs
         for i in 1...5 {
@@ -93,40 +99,19 @@ struct AgentProtocolTests {
         }
     }
 
-    @Test("Agent processes text input and returns RunResult", .timeLimit(.minutes(1)))
-    func agentProcessesTextInput() async throws {
+    @Test("Agent body processes text input")
+    func agentBodyProcessesTextInput() async throws {
         let agent = EchoAgent()
-        let request = RunRequest(input: .text("Hello"))
+        let result = try await agent.body.run("Hello")
 
-        let result = try await agent.run(request)
-
-        #expect(result.status == .completed)
-        #expect(result.finalOutput == "Echo: Hello")
+        #expect(result == "Echo: Hello")
     }
 
-    @Test("Agent returns failed for non-text input")
-    func agentReturnsFailedForNonTextInput() async throws {
+    @Test("Agent instructions are accessible")
+    func agentInstructionsAccessible() async throws {
         let agent = EchoAgent()
-        let request = RunRequest(input: .cancel)
-
-        let result = try await agent.run(request)
-
-        #expect(result.status == .failed)
-        #expect(result.finalOutput == nil)
-    }
-
-    @Test("Agent applies steering from context")
-    func agentAppliesSteering() async throws {
-        let agent = EchoAgent()
-        let request = RunRequest(
-            input: .text("Hello"),
-            context: ContextPayload(steering: ["Be formal", "Be concise"])
-        )
-
-        let result = try await agent.run(request)
-
-        #expect(result.status == .completed)
-        #expect(result.finalOutput == "Echo: Hello\n\nBe formal\n\nBe concise")
+        // Just verify it compiles and returns a value
+        let _ = agent.instructions
     }
 }
 
@@ -181,58 +166,52 @@ struct AgentWithToolsTests {
     }
 }
 
-// MARK: - Agent Steering Tests
+// MARK: - Conversation Steering Tests
 
-@Suite("Agent Steering Tests")
-struct AgentSteeringTests {
+@Suite("Conversation Steering Tests")
+struct ConversationSteeringTests {
 
-    struct SteeringAgent: Agent {
-        var instructions: Instructions {
+    @Test("Conversation steering messages are included in send", .timeLimit(.minutes(1)))
+    func conversationSteeringIncluded() async throws {
+        let session = Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test steering")
-        }
-
-        var body: some Step<String, String> {
+        }) {
             Transform { (input: String) in
                 input
             }
         }
-    }
 
-    @Test("Agent steering messages are included in run result", .timeLimit(.minutes(1)))
-    func agentSteeringIncluded() async throws {
-        let agent = SteeringAgent()
-        let request = RunRequest(
-            input: .text("Hello"),
-            context: ContextPayload(steering: ["Use formal tone", "Be concise"])
-        )
+        session.steer("Be formal")
+        session.steer("Be concise")
 
-        let result = try await agent.run(request)
+        let response = try await session.send("Hello")
 
-        #expect(result.status == .completed)
-        #expect(result.finalOutput?.contains("Hello") == true)
-        #expect(result.finalOutput?.contains("Use formal tone") == true)
-        #expect(result.finalOutput?.contains("Be concise") == true)
+        #expect(response.content.contains("Hello"))
+        #expect(response.content.contains("Be formal"))
+        #expect(response.content.contains("Be concise"))
     }
 }
 
-// MARK: - AgentSession Send with TokenDelta Tests
+// MARK: - Conversation Step-based Streaming Tests
 
-@Suite("AgentSession Token Delta Tests")
-struct AgentSessionTokenDeltaTests {
+@Suite("Conversation Step-based Streaming Tests")
+struct ConversationStepStreamingTests {
 
-    @Test("AgentSession send with onTokenDelta callback", .timeLimit(.minutes(1)))
-    func sendWithTokenDelta() async throws {
-        let session = AgentSession(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
+    @Test("Conversation send with streaming Step", .timeLimit(.minutes(1)))
+    func sendWithStreamingStep() async throws {
+        let receivedContent = Mutex<String?>(nil)
+        let session = Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
             Instructions("Test")
-        })
-
-        let receivedDelta = Mutex<String?>(nil)
-        let response = try await session.send("Hello") { delta, accumulated in
-            receivedDelta.withLock { $0 = delta }
+        }) {
+            GenerateText(prompt: { (input: String) in Prompt(input) }, onStream: { snapshot in
+                receivedContent.withLock { $0 = snapshot.content }
+            })
         }
 
+        let response = try await session.send("Hello")
+
         #expect(response.content == "Mock response")
-        #expect(receivedDelta.withLock({ $0 }) == "Mock response")
+        #expect(receivedContent.withLock({ $0 }) == "Mock response")
     }
 }
 

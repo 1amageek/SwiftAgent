@@ -123,21 +123,18 @@ private struct CodingStep: Step {
 
 // MARK: - Interactive Mode
 
-/// Interactive coding agent using the Agent protocol + StdioTransport pattern.
-///
-/// Replaces the old `Loop + WaitForInput` pattern with transport-agnostic I/O.
+/// Interactive coding agent using Conversation + StdioTransport pattern.
 ///
 /// Usage:
 /// ```swift
 /// let config = try options.createConfiguration()
-/// let agent = InteractiveCodingAgent(configuration: config)
 /// let session = config.createSession(instructions: Instructions { "Coding assistant" })
+/// let conversation = Conversation(languageModelSession: session) {
+///     CodingAgent(configuration: config)
+/// }
 /// let transport = StdioTransport(prompt: "You: ")
-/// let runtime = AgentRuntime(
-///     transport: transport,
-///     approvalHandler: AutoDenyApprovalHandler()
-/// )
-/// try await runtime.run(agent: agent, session: session)
+/// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// try await runtime.run(conversation)
 /// ```
 public struct InteractiveCodingAgent: Agent {
 

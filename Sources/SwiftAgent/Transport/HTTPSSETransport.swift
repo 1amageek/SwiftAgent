@@ -32,9 +32,9 @@ import Synchronization
 ///     transport.eventStream()
 /// }
 ///
-/// // Start the runtime
-/// let runtime = AgentRuntime(transport: transport)
-/// try await runtime.run(agent: myAgent, session: session)
+/// // Start the session
+/// let session = AgentSession(transport: transport)
+/// try await session.run(myConversation)
 /// ```
 public final class HTTPSSETransport: AgentTransport, @unchecked Sendable {
 
@@ -56,7 +56,7 @@ public final class HTTPSSETransport: AgentTransport, @unchecked Sendable {
 
     /// Enqueues a request from the HTTP handler.
     ///
-    /// If the runtime is waiting for a request, it is resumed immediately.
+    /// If the session is waiting for a request, it is resumed immediately.
     /// Otherwise, the request is buffered.
     public func enqueueRequest(_ request: RunRequest) {
         let continuation = state.withLock { state -> CheckedContinuation<RunRequest, any Error>? in

@@ -1,5 +1,5 @@
 //
-//  AgentRuntimeTests.swift
+//  AgentSessionTests.swift
 //  SwiftAgent
 //
 
@@ -11,26 +11,24 @@ import Synchronization
 #if OpenFoundationModels
 import OpenFoundationModels
 
-// MARK: - Test Agents
+// MARK: - Test Helpers
 
-struct EchoRuntimeAgent: Agent {
-    var instructions: Instructions {
+/// Creates an Conversation with a simple echo step for testing.
+private func makeEchoSession() -> Conversation {
+    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
         Instructions("Echo")
-    }
-
-    var body: some Step<String, String> {
+    }) {
         Transform { (input: String) in
             "Echo: \(input)"
         }
     }
 }
 
-struct SlowRuntimeAgent: Agent {
-    var instructions: Instructions {
+/// Creates an Conversation with a slow step that checks cancellation for testing.
+private func makeSlowSession() -> Conversation {
+    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
         Instructions("Slow")
-    }
-
-    var body: some Step<String, String> {
+    }) {
         Transform { (input: String) in
             // Poll for cancellation via TurnCancellationToken
             for _ in 0..<50 {
@@ -42,14 +40,12 @@ struct SlowRuntimeAgent: Agent {
     }
 }
 
-/// An agent that checks cancellation once at the start, then returns immediately.
-/// Pre-emptive cancel → .cancelled; no cancel → .completed (instantly).
-struct CancellationAwareAgent: Agent {
-    var instructions: Instructions {
+/// Creates an Conversation that checks cancellation once at the start, then returns immediately.
+/// Pre-emptive cancel → CancellationError; no cancel → completed (instantly).
+private func makeCancellationAwareSession() -> Conversation {
+    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
         Instructions("CancellationAware")
-    }
-
-    var body: some Step<String, String> {
+    }) {
         Transform { (input: String) in
             try TurnCancellationContext.current?.checkCancellation()
             return "Done: \(input)"
@@ -57,22 +53,19 @@ struct CancellationAwareAgent: Agent {
     }
 }
 
-// MARK: - AgentRuntime Tests
+// MARK: - AgentSession Tests
 
-@Suite("AgentRuntime Tests")
-struct AgentRuntimeTests {
+@Suite("AgentSession Tests")
+struct AgentSessionTests {
 
     @Test("Text request produces runStarted and runCompleted events", .timeLimit(.minutes(1)))
     func textRequestProducesEvents() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let hasRunStarted = events.contains { event in
@@ -93,10 +86,7 @@ struct AgentRuntimeTests {
     @Test("Cancel request produces cancelled status", .timeLimit(.minutes(1)))
     func cancelProducesCancelledStatus() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -111,7 +101,7 @@ struct AgentRuntimeTests {
             transport.finishInput()
         }
 
-        try await runtime.run(agent: SlowRuntimeAgent(), session: session)
+        try await session.run(makeSlowSession())
 
         let events = transport.collectedEvents
         let hasCancelled = events.contains { event in
@@ -127,10 +117,7 @@ struct AgentRuntimeTests {
     @Test("Duplicate turnID is skipped", .timeLimit(.minutes(1)))
     func duplicateTurnIDSkipped() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -139,7 +126,7 @@ struct AgentRuntimeTests {
         transport.enqueue(RunRequest(turnID: turnID, input: .text("Duplicate")))
         transport.finishInput()
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let completedCount = events.filter { event in
@@ -156,14 +143,11 @@ struct AgentRuntimeTests {
     @Test("Gated transport works correctly", .timeLimit(.minutes(1)))
     func gatedTransportWorks() async throws {
         let transport = MockTransport(supportsBackgroundReceive: false)
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let hasRunCompleted = events.contains { event in
@@ -181,10 +165,7 @@ struct AgentRuntimeTests {
     @Test("Cross-turn cancel does not affect unrelated turn", .timeLimit(.minutes(1)))
     func crossTurnCancelDoesNotAffectUnrelatedTurn() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnA = UUID().uuidString
         let turnB = UUID().uuidString
@@ -200,7 +181,7 @@ struct AgentRuntimeTests {
             transport.finishInput()
         }
 
-        try await runtime.run(agent: SlowRuntimeAgent(), session: session)
+        try await session.run(makeSlowSession())
 
         let events = transport.collectedEvents
         // Turn B should complete normally (not cancelled)
@@ -224,10 +205,7 @@ struct AgentRuntimeTests {
     @Test("Pre-emptive cancel before turn starts produces cancelled status", .timeLimit(.minutes(1)))
     func preemptiveCancelProducesCancelledStatus() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -236,7 +214,7 @@ struct AgentRuntimeTests {
         transport.enqueue(RunRequest(turnID: turnID, input: .text("Hello")))
         transport.finishInput()
 
-        try await runtime.run(agent: SlowRuntimeAgent(), session: session)
+        try await session.run(makeSlowSession())
 
         let events = transport.collectedEvents
         let hasCancelled = events.contains { event in
@@ -252,10 +230,7 @@ struct AgentRuntimeTests {
     @Test("Cancel for completed turn is harmless", .timeLimit(.minutes(1)))
     func cancelForCompletedTurnIsHarmless() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -271,7 +246,7 @@ struct AgentRuntimeTests {
             transport.finishInput()
         }
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let hasCompleted = events.contains { event in
@@ -294,10 +269,7 @@ struct AgentRuntimeTests {
     @Test("Cancel for nonexistent turn is harmless", .timeLimit(.minutes(1)))
     func cancelForNonexistentTurnIsHarmless() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let realTurnID = UUID().uuidString
         let fakeTurnID = UUID().uuidString
@@ -308,7 +280,7 @@ struct AgentRuntimeTests {
         transport.enqueue(RunRequest(turnID: realTurnID, input: .text("Hello")))
         transport.finishInput()
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let hasCompleted = events.contains { event in
@@ -324,10 +296,7 @@ struct AgentRuntimeTests {
     @Test("Late cancel after cancelled turn does not poison retry", .timeLimit(.minutes(1)))
     func lateCancelDoesNotPoisonRetry() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -347,7 +316,7 @@ struct AgentRuntimeTests {
             transport.finishInput()
         }
 
-        try await runtime.run(agent: CancellationAwareAgent(), session: session)
+        try await session.run(makeCancellationAwareSession())
 
         let events = transport.collectedEvents
         let completedStatuses = events.compactMap { event -> RunStatus? in
@@ -366,10 +335,7 @@ struct AgentRuntimeTests {
     @Test("Duplicate cancel for same turn is idempotent", .timeLimit(.minutes(1)))
     func duplicateCancelIsIdempotent() async throws {
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
@@ -384,7 +350,7 @@ struct AgentRuntimeTests {
             transport.finishInput()
         }
 
-        try await runtime.run(agent: SlowRuntimeAgent(), session: session)
+        try await session.run(makeSlowSession())
 
         let events = transport.collectedEvents
         let cancelledCount = events.filter { event in
@@ -403,20 +369,17 @@ struct AgentRuntimeTests {
     func approvalResponseWithoutHandlerEmitsWarning() async throws {
         // No transportApprovalHandler configured
         let transport = MockTransport()
-        let runtime = AgentRuntime(transport: transport)
-        let session = LanguageModelSession(model: MockLanguageModel()) {
-            Instructions("Test")
-        }
+        let session = AgentSession(transport: transport)
 
         let turnID = UUID().uuidString
 
         // Send approval response first (turnID not yet completed, passes idempotency check),
-        // then a text request so the runtime can shut down.
+        // then a text request so the session can shut down.
         let approval = ApprovalResponse(approvalID: "test-approval", decision: .allowOnce)
         transport.enqueue(RunRequest(turnID: turnID, input: .approvalResponse(approval)))
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await runtime.run(agent: EchoRuntimeAgent(), session: session)
+        try await session.run(makeEchoSession())
 
         let events = transport.collectedEvents
         let hasWarning = events.contains { event in

@@ -10,8 +10,7 @@ import Foundation
 /// A protocol for storing and retrieving agent sessions.
 ///
 /// `SessionStore` provides persistence for agent sessions, allowing them
-/// to be saved and resumed later. This is similar to Claude Agent SDK's
-/// session resumption capability.
+/// to be saved and resumed later.
 ///
 /// ## Usage
 ///
@@ -23,7 +22,7 @@ import Foundation
 ///
 /// // Load a session
 /// if let snapshot = try await store.load(id: sessionID) {
-///     let session = try await AgentSession.resume(from: snapshot)
+///     let session = try await Conversation.resume(from: snapshot)
 /// }
 /// ```
 public protocol SessionStore: Sendable {

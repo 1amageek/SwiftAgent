@@ -6,8 +6,8 @@
 //
 
 
-/// - Note: Use `AgentRuntime` with `AgentTransport` instead for transport-agnostic input handling.
-@available(*, deprecated, message: "Use AgentRuntime with AgentTransport instead")
+/// - Note: Use `AgentSession` with `AgentTransport` instead for transport-agnostic input handling.
+@available(*, deprecated, message: "Use AgentSession with AgentTransport instead")
 public struct WaitForInput: Step {
     public typealias Input = String
     public typealias Output = String

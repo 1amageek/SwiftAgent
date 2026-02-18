@@ -31,8 +31,8 @@ import Synchronization
 ///     }
 /// }
 ///
-/// let runtime = AgentRuntime(transport: transport)
-/// try await runtime.run(agent: myAgent, session: session)
+/// let session = AgentSession(transport: transport)
+/// try await session.run(myConversation)
 /// ```
 public final class WebSocketTransport: AgentTransport, @unchecked Sendable {
 

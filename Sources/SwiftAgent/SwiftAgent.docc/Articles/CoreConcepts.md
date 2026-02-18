@@ -131,10 +131,10 @@ This enables dependency injection without explicit parameter passing.
 
 ### Session: Language Model Integration
 
-``AgentSession`` manages interactive conversations with thread-safe message queuing:
+``Conversation`` manages interactive conversations with thread-safe message queuing:
 
 ```swift
-let session = AgentSession(tools: myTools) {
+let session = Conversation(tools: myTools) {
     Instructions("You are a helpful assistant.")
 }
 
@@ -231,7 +231,7 @@ MyStep()
 | Step | Async transformation unit (primitive or declarative) |
 | Memory/Relay | Mutable state sharing |
 | Context | TaskLocal value propagation |
-| AgentSession | Interactive LLM conversations |
+| Conversation | Interactive LLM conversations |
 | Gate | Flow control (pass/block) |
 | Parallel | Collect all successes |
 | Race | Return first success |

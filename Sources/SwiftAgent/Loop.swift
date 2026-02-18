@@ -222,7 +222,7 @@ extension Loop {
     public init(
         max: Int,
         @StepBuilder step: @escaping (Input) -> S,
-        while condition: @escaping (S.Output) -> Bool
+        while condition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(max: max, step: step) {
             Transform { output in
@@ -230,7 +230,7 @@ extension Loop {
             }
         }
     }
-    
+
     /// Create a loop with a simple boolean termination condition
     ///
     /// This convenience initializer allows creating a loop with a simple boolean condition
@@ -250,7 +250,7 @@ extension Loop {
     public init(
         max: Int,
         @StepBuilder step: @escaping (Input) -> S,
-        until stopCondition: @escaping (S.Output) -> Bool
+        until stopCondition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(max: max, step: step) {
             Transform { output in
@@ -258,7 +258,7 @@ extension Loop {
             }
         }
     }
-    
+
     /// Create an infinite loop with a simple boolean continuation condition
     ///
     /// Example:
@@ -273,7 +273,7 @@ extension Loop {
     ///   - condition: Simple boolean condition for loop continuation (returns true to continue)
     public init(
         @StepBuilder step: @escaping (Input) -> S,
-        while condition: @escaping (S.Output) -> Bool
+        while condition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(step: step) {
             Transform { output in
@@ -281,7 +281,7 @@ extension Loop {
             }
         }
     }
-    
+
     /// Create an infinite loop with a simple boolean termination condition
     ///
     /// Example:
@@ -296,7 +296,7 @@ extension Loop {
     ///   - stopCondition: Simple boolean condition for loop termination (returns true to stop)
     public init(
         @StepBuilder step: @escaping (Input) -> S,
-        until stopCondition: @escaping (S.Output) -> Bool
+        until stopCondition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(step: step) {
             Transform { output in

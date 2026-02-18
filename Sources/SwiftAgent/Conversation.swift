@@ -1,5 +1,5 @@
 //
-//  AgentSession.swift
+//  Conversation.swift
 //  SwiftAgent
 //
 //  Created by SwiftAgent on 2025/01/08.
@@ -10,7 +10,7 @@ import Synchronization
 
 /// A thread-safe class that manages an interactive session with a language model.
 ///
-/// `AgentSession` provides a simple interface for sending messages to a language model
+/// `Conversation` provides a simple interface for sending messages to a language model
 /// and receiving responses. It supports steering where additional context can be
 /// accumulated and included in subsequent prompts.
 ///
@@ -23,9 +23,11 @@ import Synchronization
 /// let languageModelSession = LanguageModelSession(model: model, tools: myTools) {
 ///     Instructions("You are a helpful assistant.")
 /// }
-/// let agentSession = AgentSession(languageModelSession: languageModelSession)
+/// let conversation = Conversation(languageModelSession: languageModelSession) {
+///     GenerateText { Prompt($0) }
+/// }
 ///
-/// let response = try await agentSession.send("Hello!")
+/// let response = try await conversation.send("Hello!")
 /// print(response.content)
 /// ```
 ///
@@ -35,18 +37,18 @@ import Synchronization
 ///
 /// ```swift
 /// // Add steering hints before sending
-/// agentSession.steer("Make sure to use async/await")
-/// agentSession.steer("Add error handling")
+/// conversation.steer("Make sure to use async/await")
+/// conversation.steer("Add error handling")
 ///
 /// // Steering messages are combined with the next send()
-/// let response = try await agentSession.send("Write a function...")
+/// let response = try await conversation.send("Write a function...")
 /// print(response.content)
 /// ```
 ///
 /// **Note:** Steering messages added while a prompt is being processed
 /// will be included in the *following* prompt, not the current one.
 
-public final class AgentSession: Sendable {
+public final class Conversation: Sendable {
 
     // MARK: - Types
 
@@ -73,9 +75,6 @@ public final class AgentSession: Sendable {
     /// Unique identifier for this session.
     public let id: String
 
-    /// The event bus for emitting session events.
-    public let eventBus: EventBus
-
     // MARK: - Private State
 
     private struct SessionState: Sendable {
@@ -87,23 +86,24 @@ public final class AgentSession: Sendable {
 
     private let state: Mutex<SessionState>
     private let languageModelSession: LanguageModelSession
+    private let step: AnyStep<String, String>
     private let inputStreamStorage: Mutex<AsyncStream<String>>
 
     // MARK: - Initialization
 
-    /// Creates a new session with a pre-configured LanguageModelSession.
+    /// Creates a new session with a pre-configured LanguageModelSession and a Step.
     ///
     /// - Parameters:
     ///   - id: Unique identifier for this session. Defaults to a new UUID.
-    ///   - eventBus: The event bus for emitting events. Defaults to a new EventBus.
     ///   - languageModelSession: The LanguageModelSession to use.
-    public init(
+    ///   - step: A `@StepBuilder` closure that defines the processing pipeline.
+    public init<S: Step & Sendable>(
         id: String = UUID().uuidString,
-        eventBus: EventBus = EventBus(),
-        languageModelSession: LanguageModelSession
-    ) {
+        languageModelSession: LanguageModelSession,
+        @StepBuilder step: () -> S
+    ) where S.Input == String, S.Output == String {
         self.id = id
-        self.eventBus = eventBus
+        self.step = AnyStep(step())
         var inputContinuation: AsyncStream<String>.Continuation?
         let inputStream = AsyncStream<String> { continuation in
             inputContinuation = continuation
@@ -137,31 +137,6 @@ public final class AgentSession: Sendable {
         try Task.checkCancellation()
 
         return try await processMessage(content)
-    }
-
-    /// Sends a message to the session with optional token-delta callbacks.
-    ///
-    /// This overload allows callers to receive incremental token output
-    /// during generation. The callback receives `(delta, accumulated)` pairs.
-    ///
-    /// - Parameters:
-    ///   - content: The message content.
-    ///   - onTokenDelta: Optional callback invoked for each token delta.
-    /// - Returns: The response containing the generated content and metadata.
-    /// - Throws: `CancellationError` if the task was cancelled while waiting.
-    public func send(
-        _ content: String,
-        onTokenDelta: (@Sendable (String, String) async -> Void)? = nil
-    ) async throws -> Response {
-        let acquired = await acquireProcessingSlot()
-        guard acquired else {
-            throw CancellationError()
-        }
-        defer { releaseProcessingSlot() }
-
-        try Task.checkCancellation()
-
-        return try await processMessage(content, onTokenDelta: onTokenDelta)
     }
 
     /// Adds a steering message to be included in the **next** prompt.
@@ -266,10 +241,7 @@ public final class AgentSession: Sendable {
     /// session replacement correctly. If `replaceSession()` is called during
     /// processing, current processing continues with the captured session,
     /// and the next message uses the new session.
-    private func processMessage(
-        _ content: String,
-        onTokenDelta: (@Sendable (String, String) async -> Void)? = nil
-    ) async throws -> Response {
+    private func processMessage(_ content: String) async throws -> Response {
         let startTime = ContinuousClock.now
 
         // Capture session reference to handle mid-processing replacement
@@ -281,48 +253,15 @@ public final class AgentSession: Sendable {
         // Build prompt with steering messages
         let prompt = buildPrompt(mainMessage: content)
 
-        // Emit prompt submitted event
-        await eventBus.emit(SessionEvent(
-            name: .promptSubmitted,
-            sessionID: id,
-            value: prompt
-        ))
-
-        // Use captured session for processing
-        let finalContent: String
-
-        if let onTokenDelta {
-            // Streaming mode — invoke callback for each incremental delta
-            var accumulated = ""
-            let responseStream = currentSession.streamResponse {
-                Prompt(prompt)
-            }
-            for try await snapshot in responseStream {
-                let snapshotContent = snapshot.content
-                if snapshotContent.count > accumulated.count {
-                    let delta = String(snapshotContent.dropFirst(accumulated.count))
-                    await onTokenDelta(delta, snapshotContent)
-                }
-                accumulated = snapshotContent
-            }
-            finalContent = accumulated
-        } else {
-            // Non-streaming mode — single respond call
-            let response = try await currentSession.respond(to: prompt)
-            finalContent = response.content
+        // Delegate to step with session in TaskLocal context
+        let finalContent = try await withSession(currentSession) {
+            try await step.run(prompt)
         }
 
         let duration = ContinuousClock.now - startTime
 
         // Get all entries added during this request from captured session
         let newEntries = Array(currentSession.transcript.suffix(from: startIndex))
-
-        // Emit response completed event
-        await eventBus.emit(SessionEvent(
-            name: .responseCompleted,
-            sessionID: id,
-            value: finalContent
-        ))
 
         return Response(content: finalContent, entries: newEntries, duration: duration)
     }

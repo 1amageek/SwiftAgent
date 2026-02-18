@@ -8,19 +8,20 @@ import Synchronization
 
 /// A transport-agnostic handler for tool approval requests.
 ///
-/// Unlike `PermissionHandler` (which `CLIPermissionHandler` implements via `readLine()`),
 /// `ApprovalHandler` uses correlation IDs and integrates with the event system,
 /// enabling approval flows over any transport (CLI, HTTP+SSE, WebSocket).
+///
+/// Built-in implementations: `CLIPermissionHandler`, `AlwaysAllowHandler`,
+/// `AlwaysDenyHandler`, `ClosurePermissionHandler`, `AutoDenyApprovalHandler`,
+/// `TransportApprovalHandler`.
 ///
 /// ## Lifecycle
 ///
 /// ```
-/// Harness detects .ask decision
-///     → emits approval_required (via EventSink)
+/// PermissionMiddleware detects .ask decision
+///     → generates approvalID
 ///     → calls handler.requestApproval(request, approvalID)
-///         (handler suspends until transport delivers response)
-///     → emits approval_resolved
-///     → continues or denies
+///     → continues or denies based on response
 /// ```
 public protocol ApprovalHandler: Sendable {
     /// Requests approval for a tool invocation.
@@ -33,27 +34,6 @@ public protocol ApprovalHandler: Sendable {
         _ request: PermissionRequest,
         approvalID: String
     ) async throws -> PermissionResponse
-}
-
-// MARK: - LegacyApprovalAdapter
-
-/// Wraps an existing `PermissionHandler` as an `ApprovalHandler`.
-///
-/// Provides backward compatibility with `CLIPermissionHandler` and other
-/// existing handlers that implement the `PermissionHandler` protocol.
-public struct LegacyApprovalAdapter: ApprovalHandler {
-    private let handler: any PermissionHandler
-
-    public init(_ handler: any PermissionHandler) {
-        self.handler = handler
-    }
-
-    public func requestApproval(
-        _ request: PermissionRequest,
-        approvalID: String
-    ) async throws -> PermissionResponse {
-        try await handler.requestPermission(request)
-    }
 }
 
 // MARK: - AutoDenyApprovalHandler
@@ -104,7 +84,7 @@ public final class TransportApprovalHandler: ApprovalHandler, @unchecked Sendabl
 
     /// Resolves a pending approval.
     ///
-    /// Called by `AgentRuntime` when it receives an `ApprovalResponse` from the transport.
+    /// Called by `AgentSession` when it receives an `ApprovalResponse` from the transport.
     public func resolve(approvalID: String, decision: PermissionResponse) {
         let continuation = pendingApprovals.withLock { pending -> CheckedContinuation<PermissionResponse, any Error>? in
             pending.removeValue(forKey: approvalID)

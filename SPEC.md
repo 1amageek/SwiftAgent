@@ -14,7 +14,7 @@
 
 本仕様の対象は次のモジュールとサンプル実装。
 
-- Core: `SwiftAgent` (`Step`, `AgentSession`, `ToolPipeline`, Security)
+- Core: `SwiftAgent` (`Step`, `Conversation`, `ToolPipeline`, Security)
 - Tools: `AgentTools`
 - CLI: `Samples/AgentCLI`
 
@@ -33,7 +33,7 @@
 
 ### 3.2 Session Runtime
 
-- `AgentSession` は `send(_:)`, `input(_:)`, `waitForInput()` を提供。
+- `Conversation` は `send(_:)`, `input(_:)`, `waitForInput()` を提供。
 - 並行送信は内部 `Mutex` で逐次化（FIFO wait queue）。
 - `EventBus` に `promptSubmitted` / `responseCompleted` を発行。
 - `LanguageModelSession` は TaskLocal (`SessionContext`) で伝搬。
@@ -179,7 +179,7 @@ public protocol ToolHarness: Sendable {
 
 ### Phase 2: Runtime Consolidation
 
-- `AgentSession` のイベントを `AgentEvent` に正規化。
+- `Conversation` のイベントを `AgentEvent` に正規化。
 - Tool 実行ログを `tool_trace` に統合。
 - 承認フローを `approval_required` / `approval_resolved` で統一。
 
@@ -211,7 +211,7 @@ public protocol ToolHarness: Sendable {
 ## 10. References (Current Code)
 
 - `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Agent.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/AgentSession.swift`
+- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Conversation.swift`
 - `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/WaitForInput.swift`
 - `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Middleware/ToolPipeline.swift`
 - `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Security/PermissionMiddleware.swift`

@@ -1,10 +1,10 @@
 # Building an Agent Loop
 
-Learn how to build a production-ready agent loop with AgentSession.
+Learn how to build a production-ready agent loop with Conversation.
 
 ## Overview
 
-``AgentSession`` is a thread-safe class for managing interactive conversations with language models. This guide shows how to build a complete agent application step by step.
+``Conversation`` is a thread-safe class for managing interactive conversations with language models. This guide shows how to build a complete agent application step by step.
 
 ## Basic Agent Loop
 
@@ -14,7 +14,7 @@ The simplest agent loop:
 import SwiftAgent
 
 // Create session
-let session = AgentSession(tools: []) {
+let session = Conversation(tools: []) {
     Instructions("You are a helpful assistant.")
 }
 
@@ -39,7 +39,7 @@ import AgentTools
 let provider = AgentToolsProvider(workingDirectory: "/path/to/work")
 let tools = provider.allTools()  // Read, Write, Edit, Glob, Grep, Bash, Git...
 
-let session = AgentSession(tools: tools) {
+let session = Conversation(tools: tools) {
     Instructions("""
         You are a coding assistant.
         Available tools: read, write, edit, glob, grep, bash, git
@@ -49,7 +49,7 @@ let session = AgentSession(tools: tools) {
 
 ## Response Structure
 
-``AgentSession/Response`` contains:
+``Conversation/Response`` contains:
 
 ```swift
 let response = try await session.send("Explain this code")
@@ -115,24 +115,24 @@ task.cancel()  // Removed from queue, doesn't consume slot
 
 ## Event Handling
 
-Monitor session lifecycle with ``EventBus``:
+Monitor step lifecycle with ``EventBus`` and the `.emit()` modifier:
 
 ```swift
 let eventBus = EventBus()
 
-eventBus.on(.promptSubmitted) { event in
-    if let e = event as? SessionEvent {
-        print("[Sent] \(e.value ?? "")")
-    }
+eventBus.on(.processingStarted) { event in
+    print("[Started]")
 }
 
-eventBus.on(.responseCompleted) { event in
+eventBus.on(.processingCompleted) { event in
     print("[Completed]")
 }
 
-let session = AgentSession(eventBus: eventBus, tools: tools) {
-    Instructions("You are a helpful assistant.")
-}
+// Use .context(eventBus) to inject, .emit() to fire events
+MyStep()
+    .emit(.processingStarted, on: .before)
+    .emit(.processingCompleted, on: .after)
+    .context(eventBus)
 ```
 
 ## Session Persistence
@@ -148,7 +148,7 @@ try data.write(to: fileURL)
 // Restore
 let data = try Data(contentsOf: fileURL)
 let snapshot = try JSONDecoder().decode(SessionSnapshot.self, from: data)
-let restored = AgentSession.restore(from: snapshot, tools: tools)
+let restored = Conversation.restore(from: snapshot, tools: tools)
 
 // Continue conversation
 let response = try await restored.send("Continue from where we left off")
@@ -223,7 +223,7 @@ struct AgentREPL: Step {
     let tools: [any Tool]
 
     func run(_ input: Void) async throws -> Void {
-        let session = AgentSession(tools: tools) {
+        let session = Conversation(tools: tools) {
             Instructions("You are a coding assistant.")
         }
 
@@ -294,7 +294,7 @@ Build complex agents by nesting:
 ```
 MyApp
 └── AgentREPL (Step)
-    └── AgentSession
+    └── Conversation
         └── CodingAssistant (Step)
             ├── Gate (validation)
             ├── ProcessingAgent (Step)
@@ -325,28 +325,25 @@ struct MyApp {
 
 ### Creating Sessions
 
-- ``AgentSession/init(id:eventBus:model:tools:instructions:)``
-- ``AgentSession/init(id:eventBus:transcript:model:tools:)``
+- ``Conversation/init(id:languageModelSession:step:)``
 
 ### Sending Messages
 
-- ``AgentSession/send(_:)``
-- ``AgentSession/steer(_:)``
-- ``AgentSession/Response``
+- ``Conversation/send(_:)``
+- ``Conversation/steer(_:)``
+- ``Conversation/Response``
 
 ### Session State
 
-- ``AgentSession/transcript``
-- ``AgentSession/isResponding``
-- ``AgentSession/pendingSteeringCount``
+- ``Conversation/transcript``
+- ``Conversation/isResponding``
+- ``Conversation/pendingSteeringCount``
 
 ### Events
 
 - ``EventBus``
-- ``SessionEvent``
 
 ### Persistence
 
-- ``AgentSession/snapshot()``
-- ``AgentSession/restore(from:eventBus:model:tools:)``
+- ``Conversation/snapshot()``
 - ``SessionSnapshot``

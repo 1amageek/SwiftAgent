@@ -9,15 +9,15 @@ import Synchronization
 /// A CLI transport that uses stdin/stdout for Agent I/O.
 ///
 /// `StdioTransport` wraps `readLine()` / `print()` to implement
-/// the `AgentTransport` protocol, enabling the Agent runtime to
+/// the `AgentTransport` protocol, enabling the Agent session to
 /// drive interactive CLI sessions.
 ///
 /// ## Usage
 ///
 /// ```swift
 /// let transport = StdioTransport(prompt: "You: ")
-/// let runtime = AgentRuntime(transport: transport)
-/// try await runtime.run(agent: myAgent, session: session)
+/// let session = AgentSession(transport: transport)
+/// try await session.run(myConversation)
 /// ```
 ///
 /// ## Event Rendering

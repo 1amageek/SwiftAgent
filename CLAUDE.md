@@ -314,19 +314,19 @@ extension SandboxExecutor.Configuration: Contextable {
 // これで @Context var config: SandboxExecutor.Configuration が使える
 ```
 
-## AgentSession
+## Conversation
 
-スレッドセーフな対話型セッション管理クラス。FIFOメッセージキューとsteering機能を提供。
+スレッドセーフな対話型会話管理クラス。FIFOメッセージキューとsteering機能を提供。
 
 ### 基本的な使い方
 
 ```swift
 // シンプルな初期化（内部で DefaultSessionDelegate を生成）
-let session = AgentSession(tools: myTools) {
+let conversation = Conversation(tools: myTools) {
     Instructions("You are a helpful assistant.")
 }
 
-let response = try await session.send("Hello!")
+let response = try await conversation.send("Hello!")
 print(response.content)
 ```
 
@@ -349,7 +349,7 @@ struct MyDelegate: LanguageModelSessionDelegate {
 let initialSession = LanguageModelSession(model: .default, tools: myTools) {
     Instructions("You are a helpful assistant.")
 }
-let session = AgentSession(initialSession: initialSession, delegate: MyDelegate(model: .default, tools: myTools))
+let conversation = Conversation(initialSession: initialSession, delegate: MyDelegate(model: .default, tools: myTools))
 ```
 
 ### メッセージキュー
@@ -358,11 +358,11 @@ let session = AgentSession(initialSession: initialSession, delegate: MyDelegate(
 
 ```swift
 // 順番に処理される
-Task { try await session.send("First") }
-Task { try await session.send("Second") }
+Task { try await conversation.send("First") }
+Task { try await conversation.send("Second") }
 
 // キャンセル対応
-let task = Task { try await session.send("Will be cancelled") }
+let task = Task { try await conversation.send("Will be cancelled") }
 task.cancel()  // キューから除去され、スロットを消費しない
 ```
 
@@ -372,10 +372,10 @@ task.cancel()  // キューから除去され、スロットを消費しない
 
 ```swift
 // send() の前に追加
-session.steer("Use async/await")
-session.steer("Add error handling")
+conversation.steer("Use async/await")
+conversation.steer("Add error handling")
 
-let response = try await session.send("Write a function...")
+let response = try await conversation.send("Write a function...")
 // → steering メッセージと "Write a function..." が結合されて送信
 ```
 
@@ -386,7 +386,7 @@ let response = try await session.send("Write a function...")
 ```swift
 // コンテキスト圧縮後に置換
 let compactedTranscript = ...
-session.replaceSession(with: compactedTranscript)
+conversation.replaceSession(with: compactedTranscript)
 // 現在処理中のメッセージ → 古いセッションで継続
 // 次のメッセージ → 新しいセッションを使用
 ```

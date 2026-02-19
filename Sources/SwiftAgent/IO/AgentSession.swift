@@ -168,15 +168,11 @@ public final class AgentSession: Sendable {
         self.turnState = Mutex(TurnState())
     }
 
-    /// Runs the agent session loop, processing requests from the transport until closed.
+    /// Runs the agent session loop with a pre-built Conversation.
     ///
-    /// This method blocks until the transport's input side is closed or the task is cancelled.
-    /// Turns are processed sequentially — only one turn executes at a time.
-    /// Approval responses and cancellation signals are handled concurrently
-    /// via a background receive loop.
-    ///
-    /// - Parameter conversation: The agent session that handles message processing.
-    public func run(_ conversation: Conversation) async throws {
+    /// This is an internal entry point used by the public `run(tools:pipeline:instructions:step:)` overloads.
+    /// Use those overloads instead to ensure tools are wrapped with `EventEmittingMiddleware`.
+    private func run(_ conversation: Conversation) async throws {
         let (turnStream, turnContinuation) = AsyncStream<RunRequest>.makeStream()
 
         // Create TurnGate only for transports that don't support background receive

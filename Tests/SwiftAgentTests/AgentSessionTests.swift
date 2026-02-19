@@ -11,48 +11,6 @@ import Synchronization
 #if OpenFoundationModels
 import OpenFoundationModels
 
-// MARK: - Test Helpers
-
-/// Creates an Conversation with a simple echo step for testing.
-private func makeEchoSession() -> Conversation {
-    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-        Instructions("Echo")
-    }) {
-        Transform { (input: String) in
-            "Echo: \(input)"
-        }
-    }
-}
-
-/// Creates an Conversation with a slow step that checks cancellation for testing.
-private func makeSlowSession() -> Conversation {
-    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-        Instructions("Slow")
-    }) {
-        Transform { (input: String) in
-            // Poll for cancellation via TurnCancellationToken
-            for _ in 0..<50 {
-                try TurnCancellationContext.current?.checkCancellation()
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            return input
-        }
-    }
-}
-
-/// Creates an Conversation that checks cancellation once at the start, then returns immediately.
-/// Pre-emptive cancel → CancellationError; no cancel → completed (instantly).
-private func makeCancellationAwareSession() -> Conversation {
-    Conversation(languageModelSession: LanguageModelSession(model: MockLanguageModel()) {
-        Instructions("CancellationAware")
-    }) {
-        Transform { (input: String) in
-            try TurnCancellationContext.current?.checkCancellation()
-            return "Done: \(input)"
-        }
-    }
-}
-
 // MARK: - AgentSession Tests
 
 @Suite("AgentSession Tests")
@@ -65,7 +23,11 @@ struct AgentSessionTests {
 
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let hasRunStarted = events.contains { event in
@@ -101,7 +63,17 @@ struct AgentSessionTests {
             transport.finishInput()
         }
 
-        try await session.run(makeSlowSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Slow")
+        } step: {
+            Transform { (input: String) in
+                for _ in 0..<50 {
+                    try TurnCancellationContext.current?.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                return input
+            }
+        }
 
         let events = transport.collectedEvents
         let hasCancelled = events.contains { event in
@@ -126,7 +98,11 @@ struct AgentSessionTests {
         transport.enqueue(RunRequest(turnID: turnID, input: .text("Duplicate")))
         transport.finishInput()
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let completedCount = events.filter { event in
@@ -147,7 +123,11 @@ struct AgentSessionTests {
 
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let hasRunCompleted = events.contains { event in
@@ -181,7 +161,17 @@ struct AgentSessionTests {
             transport.finishInput()
         }
 
-        try await session.run(makeSlowSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Slow")
+        } step: {
+            Transform { (input: String) in
+                for _ in 0..<50 {
+                    try TurnCancellationContext.current?.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                return input
+            }
+        }
 
         let events = transport.collectedEvents
         // Turn B should complete normally (not cancelled)
@@ -214,7 +204,17 @@ struct AgentSessionTests {
         transport.enqueue(RunRequest(turnID: turnID, input: .text("Hello")))
         transport.finishInput()
 
-        try await session.run(makeSlowSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Slow")
+        } step: {
+            Transform { (input: String) in
+                for _ in 0..<50 {
+                    try TurnCancellationContext.current?.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                return input
+            }
+        }
 
         let events = transport.collectedEvents
         let hasCancelled = events.contains { event in
@@ -246,7 +246,11 @@ struct AgentSessionTests {
             transport.finishInput()
         }
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let hasCompleted = events.contains { event in
@@ -280,7 +284,11 @@ struct AgentSessionTests {
         transport.enqueue(RunRequest(turnID: realTurnID, input: .text("Hello")))
         transport.finishInput()
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let hasCompleted = events.contains { event in
@@ -316,7 +324,14 @@ struct AgentSessionTests {
             transport.finishInput()
         }
 
-        try await session.run(makeCancellationAwareSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("CancellationAware")
+        } step: {
+            Transform { (input: String) in
+                try TurnCancellationContext.current?.checkCancellation()
+                return "Done: \(input)"
+            }
+        }
 
         let events = transport.collectedEvents
         let completedStatuses = events.compactMap { event -> RunStatus? in
@@ -350,7 +365,17 @@ struct AgentSessionTests {
             transport.finishInput()
         }
 
-        try await session.run(makeSlowSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Slow")
+        } step: {
+            Transform { (input: String) in
+                for _ in 0..<50 {
+                    try TurnCancellationContext.current?.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                return input
+            }
+        }
 
         let events = transport.collectedEvents
         let cancelledCount = events.filter { event in
@@ -379,7 +404,11 @@ struct AgentSessionTests {
         transport.enqueue(RunRequest(turnID: turnID, input: .approvalResponse(approval)))
         transport.enqueueAndClose(RunRequest(input: .text("Hello")))
 
-        try await session.run(makeEchoSession())
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (input: String) in "Echo: \(input)" }
+        }
 
         let events = transport.collectedEvents
         let hasWarning = events.contains { event in

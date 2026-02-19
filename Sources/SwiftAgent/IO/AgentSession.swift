@@ -293,6 +293,91 @@ public final class AgentSession: Sendable {
         await transport.close()
     }
 
+    // MARK: - Convenience Run (tools + pipeline)
+
+    #if OpenFoundationModels
+    /// Runs the agent session with tools automatically wrapped by a `ToolPipeline`.
+    ///
+    /// This overload wraps the provided tools with `EventEmittingMiddleware` (and other
+    /// middleware in the pipeline) before creating the `LanguageModelSession` and `Conversation`.
+    /// Use this instead of `run(_ conversation:)` to guarantee tool event emission.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// let transport = StdioTransport(prompt: "> ")
+    /// let session = AgentSession(transport: transport)
+    /// try await session.run(
+    ///     model: myModel,
+    ///     tools: [ReadTool(), WriteTool(), ExecuteCommandTool()]
+    /// ) {
+    ///     Instructions("You are a coding assistant.")
+    /// } step: {
+    ///     MyCodingAgent()
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - model: The language model to use.
+    ///   - tools: The tools to make available. Automatically wrapped by `pipeline`.
+    ///   - pipeline: The middleware pipeline. Defaults to `.default` (includes `EventEmittingMiddleware`).
+    ///   - instructions: System instructions for the language model.
+    ///   - step: The processing step pipeline.
+    public func run<S: Step & Sendable>(
+        model: any LanguageModel,
+        tools: [any Tool] = [],
+        pipeline: ToolPipeline = .default,
+        @InstructionsBuilder instructions: @Sendable () -> Instructions,
+        @StepBuilder step: @Sendable () -> S
+    ) async throws where S.Input == String, S.Output == String {
+        let wrappedTools = pipeline.wrap(tools)
+        let languageModelSession = LanguageModelSession(model: model, tools: wrappedTools) {
+            instructions()
+        }
+        let conversation = Conversation(languageModelSession: languageModelSession, step: step)
+        try await run(conversation)
+    }
+    #else
+    /// Runs the agent session with tools automatically wrapped by a `ToolPipeline`.
+    ///
+    /// This overload wraps the provided tools with `EventEmittingMiddleware` (and other
+    /// middleware in the pipeline) before creating the `LanguageModelSession` and `Conversation`.
+    /// Use this instead of `run(_ conversation:)` to guarantee tool event emission.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// let transport = StdioTransport(prompt: "> ")
+    /// let session = AgentSession(transport: transport)
+    /// try await session.run(
+    ///     tools: [ReadTool(), WriteTool(), ExecuteCommandTool()]
+    /// ) {
+    ///     Instructions("You are a coding assistant.")
+    /// } step: {
+    ///     MyCodingAgent()
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - tools: The tools to make available. Automatically wrapped by `pipeline`.
+    ///   - pipeline: The middleware pipeline. Defaults to `.default` (includes `EventEmittingMiddleware`).
+    ///   - instructions: System instructions for the language model.
+    ///   - step: The processing step pipeline.
+    public func run<S: Step & Sendable>(
+        tools: [any Tool] = [],
+        pipeline: ToolPipeline = .default,
+        @InstructionsBuilder instructions: @Sendable () -> Instructions,
+        @StepBuilder step: @Sendable () -> S
+    ) async throws where S.Input == String, S.Output == String {
+        let wrappedTools = pipeline.wrap(tools)
+        let languageModelSession = LanguageModelSession(tools: wrappedTools) {
+            instructions()
+        }
+        let conversation = Conversation(languageModelSession: languageModelSession, step: step)
+        try await run(conversation)
+    }
+    #endif
+
     // MARK: - Turn Execution
 
     /// Executes a single turn: creates event stream, delegates to Conversation, forwards events.

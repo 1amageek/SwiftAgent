@@ -8,6 +8,7 @@
 import Foundation
 import SwiftAgent
 
+#if os(macOS)
 /// A tool for executing shell commands in a controlled environment.
 ///
 /// `ExecuteCommandTool` allows safe execution of commands through direct process
@@ -574,4 +575,5 @@ private extension ExecuteCommandTool {
         }
     }
 }
+#endif // os(macOS)
 

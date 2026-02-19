@@ -8,6 +8,7 @@
 import Foundation
 import SwiftAgent
 
+#if os(macOS)
 /// A tool for executing Git commands in a repository.
 ///
 /// `GitTool` provides controlled Git operations with safety checks
@@ -335,15 +336,16 @@ extension GitOutput: CustomStringConvertible {
     public var description: String {
         let status = success ? "Success" : "Failed"
         let truncateNote = truncated ? " (truncated)" : ""
-        
+
         return """
         Git Operation [\(status)]
         Exit code: \(exitCode)
         Execution time: \(String(format: "%.3f", executionTime))s\(truncateNote)
-        
+
         Output:
         \(output)
         """
     }
 }
+#endif // os(macOS)
 

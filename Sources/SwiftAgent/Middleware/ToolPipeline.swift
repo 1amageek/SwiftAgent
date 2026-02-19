@@ -53,6 +53,7 @@ public final class ToolPipeline: @unchecked Sendable {
     /// ```
     public static var `default`: ToolPipeline {
         ToolPipeline()
+            .use(EventEmittingMiddleware())
             .use(PermissionMiddleware(configuration: .permissive))
             .use(SandboxMiddleware(configuration: .none))
     }
@@ -184,8 +185,8 @@ public struct PipelinedTool<T: Tool>: Tool, Sendable where T.Arguments: Sendable
     public typealias Arguments = T.Arguments
     public typealias Output = T.Output
 
-    private let tool: T
-    private let middleware: [any ToolMiddleware]
+    fileprivate let tool: T
+    fileprivate let middleware: [any ToolMiddleware]
 
     public var name: String { tool.name }
     public var description: String { tool.description }
@@ -195,8 +196,19 @@ public struct PipelinedTool<T: Tool>: Tool, Sendable where T.Arguments: Sendable
         self.tool = tool
         self.middleware = middleware
     }
+}
 
+extension PipelinedTool {
     public func call(arguments: Arguments) async throws -> Output {
+        try await _callImpl(arguments: arguments) { String(describing: $0) }
+    }
+}
+
+extension PipelinedTool {
+    fileprivate func _callImpl(
+        arguments: Arguments,
+        serializeOutput: @escaping @Sendable (Output) -> String
+    ) async throws -> Output {
         let startTime = ContinuousClock.now
         let args = arguments  // Capture for Sendable
 
@@ -220,7 +232,7 @@ public struct PipelinedTool<T: Tool>: Tool, Sendable where T.Arguments: Sendable
                 let output = try await tool.call(arguments: args)
                 outputBox.value = output  // Store the typed output
                 let duration = ContinuousClock.now - startTime
-                return .success(String(describing: output), duration: duration)
+                return .success(serializeOutput(output), duration: duration)
             } catch {
                 let duration = ContinuousClock.now - startTime
                 return .failure(error, duration: duration)
@@ -344,17 +356,19 @@ private func _executeTypedToolWithMiddleware<T: Tool>(
 
 /// Box for capturing tool and arguments in Sendable closures.
 private final class ToolExecutionBox<T: Tool>: @unchecked Sendable {
-    private let tool: T
-    private let arguments: T.Arguments
+    let tool: T
+    let arguments: T.Arguments
 
     init(tool: T, arguments: T.Arguments) {
         self.tool = tool
         self.arguments = arguments
     }
+}
 
+extension ToolExecutionBox {
     func execute() async throws -> String {
         let output = try await tool.call(arguments: arguments)
-        return String(describing: output.promptRepresentation)
+        return String(describing: output)
     }
 }
 

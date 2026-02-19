@@ -357,13 +357,29 @@ public final class AgentSession: Sendable {
             turnID: request.turnID
         )))
 
+        let sessionContext = AgentSessionContext(
+            sessionID: request.sessionID,
+            turnID: request.turnID
+        )
+
         do {
-            _ = try await TurnCancellationContext.withValue(cancellationToken) {
-                try await ApprovalHandlerContext.withValue(bridge) {
-                    try await EventSinkContext.withValue(sink) {
-                        try await conversation.send(text)
+            let response = try await AgentSessionContext.$current.withValue(sessionContext) {
+                try await TurnCancellationContext.withValue(cancellationToken) {
+                    try await ApprovalHandlerContext.withValue(bridge) {
+                        try await EventSinkContext.withValue(sink) {
+                            try await conversation.send(text)
+                        }
                     }
                 }
+            }
+
+            // Emit final content
+            if !response.content.isEmpty {
+                await sink.emitTokenDelta(
+                    delta: response.content,
+                    accumulated: response.content,
+                    isComplete: true
+                )
             }
 
             await sink.emit(.runCompleted(RunEvent.RunCompleted(

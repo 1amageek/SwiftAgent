@@ -174,14 +174,12 @@ private struct ClaudeResearchStep: Step {
     let hypotheses: Relay<[String]>
 
     func run(_ query: String) async throws -> ResearchResult {
-        let toolProvider = AgentToolsProvider(workingDirectory: configuration.workingDirectory)
-
         // Select tools optimized for research tasks
         let tools: [any Tool] = [
-            toolProvider.tool(named: "WebFetch")!,  // Fetch known URLs
-            toolProvider.tool(named: "Read")!,       // Read local files
-            toolProvider.tool(named: "Grep")!,       // Search file contents
-            toolProvider.tool(named: "Glob")!,       // Find files by pattern
+            URLFetchTool(),
+            ReadTool(workingDirectory: configuration.workingDirectory),
+            GrepTool(workingDirectory: configuration.workingDirectory),
+            GlobTool(workingDirectory: configuration.workingDirectory),
         ]
 
         let session = configuration.createSession(

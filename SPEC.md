@@ -40,8 +40,7 @@
 
 ### 3.3 Tool Execution
 
-- ツールは `ToolConfiguration` と `ToolProvider` で解決。
-- 標準ツールは `AgentToolsProvider` が提供 (`Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash`, `Git`, `WebFetch` など)。
+- 標準ツールは `AgentTools` モジュールが提供 (`ReadTool`, `WriteTool`, `EditTool`, `GrepTool`, `GlobTool`, `ExecuteCommandTool`, `GitTool`, `URLFetchTool` など)。使う側が直接 `[any Tool]` を構築する。
 - 実行は `ToolPipeline` によるミドルウェアチェーン。
 - `PermissionMiddleware` と `SandboxMiddleware` が主要セキュリティ境界。
 

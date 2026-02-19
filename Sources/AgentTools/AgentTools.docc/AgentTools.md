@@ -21,19 +21,21 @@ AgentTools provides a set of tools that follow the SwiftAgent naming conventions
 | `WebFetch` | Fetch URL contents |
 | `WebSearch` | Web search |
 
-### Using the Tool Provider
+### Using Tools
 
 ```swift
-let provider = AgentToolsProvider(workingDirectory: "/path/to/work")
-
-// Get all tools
-let tools = provider.allTools()
-
-// Get specific tools
-let readTool = provider.tool(named: "Read")
-
-// Use presets
-let defaultTools = provider.tools(for: ToolConfiguration.ToolPreset.default.toolNames)
+// Create tools directly
+let tools: [any Tool] = [
+    ReadTool(workingDirectory: "/path/to/work"),
+    WriteTool(workingDirectory: "/path/to/work"),
+    EditTool(workingDirectory: "/path/to/work"),
+    MultiEditTool(workingDirectory: "/path/to/work"),
+    GlobTool(workingDirectory: "/path/to/work"),
+    GrepTool(workingDirectory: "/path/to/work"),
+    ExecuteCommandTool(workingDirectory: "/path/to/work"),
+    GitTool(),
+    URLFetchTool(),
+]
 ```
 
 ### Security Integration
@@ -50,11 +52,6 @@ let config = AgentConfiguration(...)
 ```
 
 ## Topics
-
-### Tool Provider
-
-- ``AgentToolsProvider``
-- ``ToolConfiguration``
 
 ### File Operations
 

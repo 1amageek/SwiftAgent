@@ -751,17 +751,18 @@ Claude Code スタイルのツール名を採用。
 | `WebSearch` | Web検索 |
 
 ```swift
-// ツールプロバイダーの使用
-let provider = AgentToolsProvider(workingDirectory: "/path/to/work")
-let tools = provider.allTools()
-
-// 特定のツールを取得
-if let readTool = provider.tool(named: "Read") {
-    // ...
-}
-
-// プリセットの使用
-let defaultTools = provider.tools(for: ToolConfiguration.ToolPreset.default.toolNames)
+// ツールを直接構築
+let tools: [any Tool] = [
+    ReadTool(workingDirectory: "/path/to/work"),
+    WriteTool(workingDirectory: "/path/to/work"),
+    EditTool(workingDirectory: "/path/to/work"),
+    MultiEditTool(workingDirectory: "/path/to/work"),
+    GlobTool(workingDirectory: "/path/to/work"),
+    GrepTool(workingDirectory: "/path/to/work"),
+    ExecuteCommandTool(workingDirectory: "/path/to/work"),
+    GitTool(),
+    URLFetchTool(),
+]
 ```
 
 ## Security

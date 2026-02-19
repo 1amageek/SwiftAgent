@@ -68,8 +68,17 @@ private struct CodingStep: Step {
     let modifiedFiles: Relay<Set<String>>
 
     func run(_ input: String) async throws -> String {
-        let toolProvider = AgentToolsProvider(workingDirectory: configuration.workingDirectory)
-        let tools = toolProvider.allTools()
+        let tools: [any Tool] = [
+            ReadTool(workingDirectory: configuration.workingDirectory),
+            WriteTool(workingDirectory: configuration.workingDirectory),
+            EditTool(workingDirectory: configuration.workingDirectory),
+            MultiEditTool(workingDirectory: configuration.workingDirectory),
+            GrepTool(workingDirectory: configuration.workingDirectory),
+            GlobTool(workingDirectory: configuration.workingDirectory),
+            ExecuteCommandTool(workingDirectory: configuration.workingDirectory),
+            GitTool(),
+            URLFetchTool(),
+        ]
 
         let session = configuration.createSession(
             tools: tools,

@@ -36,8 +36,16 @@ Tools give the agent capabilities to interact with the environment:
 ```swift
 import AgentTools
 
-let provider = AgentToolsProvider(workingDirectory: "/path/to/work")
-let tools = provider.allTools()  // Read, Write, Edit, Glob, Grep, Bash, Git...
+let tools: [any Tool] = [
+    ReadTool(workingDirectory: "/path/to/work"),
+    WriteTool(workingDirectory: "/path/to/work"),
+    EditTool(workingDirectory: "/path/to/work"),
+    GlobTool(workingDirectory: "/path/to/work"),
+    GrepTool(workingDirectory: "/path/to/work"),
+    ExecuteCommandTool(workingDirectory: "/path/to/work"),
+    GitTool(),
+    URLFetchTool(),
+]
 
 let session = Conversation(tools: tools) {
     Instructions("""
@@ -313,9 +321,18 @@ import AgentTools
 struct MyApp {
     static func main() async throws {
         let workingDir = FileManager.default.currentDirectoryPath
-        let provider = AgentToolsProvider(workingDirectory: workingDir)
+        let tools: [any Tool] = [
+            ReadTool(workingDirectory: workingDir),
+            WriteTool(workingDirectory: workingDir),
+            EditTool(workingDirectory: workingDir),
+            GlobTool(workingDirectory: workingDir),
+            GrepTool(workingDirectory: workingDir),
+            ExecuteCommandTool(workingDirectory: workingDir),
+            GitTool(),
+            URLFetchTool(),
+        ]
 
-        try await AgentREPL(tools: provider.allTools())
+        try await AgentREPL(tools: tools)
             .run(())
     }
 }

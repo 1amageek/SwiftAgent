@@ -35,9 +35,6 @@ public enum AgentError: Error, LocalizedError, Sendable {
     /// Tool execution failed.
     case toolExecutionFailed(name: String, underlyingError: Error)
 
-    /// Tool configuration is invalid.
-    case invalidToolConfiguration(reason: String)
-
     // MARK: - Model Errors
 
     /// Failed to load the model.
@@ -81,8 +78,6 @@ public enum AgentError: Error, LocalizedError, Sendable {
             return "Tool not found: '\(name)'"
         case .toolExecutionFailed(let name, let error):
             return "Tool '\(name)' execution failed: \(error.localizedDescription)"
-        case .invalidToolConfiguration(let reason):
-            return "Invalid tool configuration: \(reason)"
         case .modelLoadFailed(let error):
             return "Failed to load model: \(error.localizedDescription)"
         case .modelUnavailable(let reason):
@@ -111,11 +106,9 @@ public enum AgentError: Error, LocalizedError, Sendable {
         case .sessionBusy:
             return "Wait for the current operation to complete before sending another prompt."
         case .toolNotFound:
-            return "Ensure the tool is included in the ToolConfiguration."
+            return "Ensure the tool is included in the tools array."
         case .toolExecutionFailed:
             return "Check the tool arguments and implementation."
-        case .invalidToolConfiguration:
-            return "Review the tool configuration settings."
         case .modelLoadFailed:
             return "Ensure the model is downloaded and accessible."
         case .modelUnavailable:

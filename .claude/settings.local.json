@@ -40,7 +40,8 @@
       "WebFetch(domain:alexzhang13.github.io)",
       "Bash(git push:*)",
       "Bash(xargs:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "additionalDirectories": [

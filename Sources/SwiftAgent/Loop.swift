@@ -57,10 +57,10 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
     private let loopType: LoopType
     
     /// The step to execute in each iteration
-    private let step: (Input) -> S
-    
+    private let step: @Sendable (Input) -> S
+
     /// Optional condition to check for loop termination
-    private let condition: (() -> any Step<S.Output, Bool>)?
+    private let condition: (@Sendable () -> any Step<S.Output, Bool>)?
     
     /// Create a finite loop with a maximum number of iterations and termination condition
     ///
@@ -70,34 +70,34 @@ public struct Loop<S: Step>: Step where S.Input == S.Output {
     ///   - condition: Condition to check for loop termination
     public init(
         max: Int,
-        @StepBuilder step: @escaping (Input) -> S,
-        @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
+        @StepBuilder until condition: @escaping @Sendable () -> any Step<S.Output, Bool>
     ) {
         precondition(max > 0, "Maximum iterations must be greater than 0")
         self.loopType = .finite(max)
         self.step = step
         self.condition = condition
     }
-    
+
     /// Create a loop with only a termination condition (uses a default max of Int.max)
     ///
     /// - Parameters:
     ///   - step: The step to execute in each iteration
     ///   - condition: Condition to check for loop termination
     public init(
-        @StepBuilder step: @escaping (Input) -> S,
-        @StepBuilder until condition: @escaping () -> any Step<S.Output, Bool>
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
+        @StepBuilder until condition: @escaping @Sendable () -> any Step<S.Output, Bool>
     ) {
         self.loopType = .infinite
         self.step = step
         self.condition = condition
     }
-    
+
     /// Create an infinite loop
     ///
     /// - Parameter step: The step to execute in each iteration
     public init(
-        @StepBuilder step: @escaping (Input) -> S
+        @StepBuilder step: @escaping @Sendable (Input) -> S
     ) {
         self.loopType = .infinite
         self.step = step
@@ -221,7 +221,7 @@ extension Loop {
     ///   - condition: Simple boolean condition for loop continuation (returns true to continue)
     public init(
         max: Int,
-        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
         while condition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(max: max, step: step) {
@@ -249,7 +249,7 @@ extension Loop {
     ///   - stopCondition: Simple boolean condition for loop termination (returns true to stop)
     public init(
         max: Int,
-        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
         until stopCondition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(max: max, step: step) {
@@ -272,7 +272,7 @@ extension Loop {
     ///   - step: The step to execute in each iteration
     ///   - condition: Simple boolean condition for loop continuation (returns true to continue)
     public init(
-        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
         while condition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(step: step) {
@@ -295,7 +295,7 @@ extension Loop {
     ///   - step: The step to execute in each iteration
     ///   - stopCondition: Simple boolean condition for loop termination (returns true to stop)
     public init(
-        @StepBuilder step: @escaping (Input) -> S,
+        @StepBuilder step: @escaping @Sendable (Input) -> S,
         until stopCondition: @escaping @Sendable (S.Output) -> Bool
     ) {
         self.init(step: step) {

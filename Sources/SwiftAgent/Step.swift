@@ -59,7 +59,7 @@ import Foundation
 /// ```
 ///
 /// - Note: Input and Output types must conform to `Sendable` for concurrency safety.
-public protocol Step<Input, Output> {
+public protocol Step<Input, Output>: Sendable {
 
     /// The type of input required by the step.
     associatedtype Input: Sendable

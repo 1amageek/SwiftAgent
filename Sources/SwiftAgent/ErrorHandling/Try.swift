@@ -78,13 +78,9 @@ where TryStep.Input == CatchStep.Input, TryStep.Output == CatchStep.Output {
     }
 }
 
-// MARK: - Sendable Conformance
-
-extension Try: Sendable where TryStep: Sendable, CatchStep: Sendable {}
-
 // MARK: - Error-Ignoring Initializer
 
-extension Try where CatchStep: Sendable {
+extension Try {
     /// Creates a try-catch step that ignores the error.
     ///
     /// - Parameters:

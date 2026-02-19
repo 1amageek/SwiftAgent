@@ -155,35 +155,35 @@ struct GenerateMaxRetriesParameterTests {
     @Test("Generate default maxRetries is 3")
     func generateDefaultMaxRetries() {
         let session = LanguageModelSession(model: SystemLanguageModel.default)
-        let generate = Generate<String, String>(session: session) { Prompt($0) }
+        let _ = Generate<String, String>(session: session) { Prompt($0) }
         // Default maxRetries is 3, so maxAttempts = 4
         // We can't directly access maxRetries, but we can verify it compiles with default
-        #expect(true)
+        #expect(Bool(true))
     }
 
     @Test("Generate accepts custom maxRetries")
     func generateCustomMaxRetries() {
         let session = LanguageModelSession(model: SystemLanguageModel.default)
-        let generate = Generate<String, String>(session: session, maxRetries: 5) { Prompt($0) }
+        let _ = Generate<String, String>(session: session, maxRetries: 5) { Prompt($0) }
         // Verify it compiles with custom maxRetries
-        #expect(true)
+        #expect(Bool(true))
     }
 
     @Test("Generate accepts maxRetries of 0")
     func generateZeroMaxRetries() {
         let session = LanguageModelSession(model: SystemLanguageModel.default)
-        let generate = Generate<String, String>(session: session, maxRetries: 0) { Prompt($0) }
+        let _ = Generate<String, String>(session: session, maxRetries: 0) { Prompt($0) }
         // maxRetries = 0 means only 1 attempt, no retries
-        #expect(true)
+        #expect(Bool(true))
     }
 
     @Test("GenerateText does not have maxRetries parameter")
     func generateTextNoMaxRetries() {
         let session = LanguageModelSession(model: SystemLanguageModel.default)
         // GenerateText should not have maxRetries parameter
-        let generateText = GenerateText(session: session) { Prompt($0) }
+        let _ = GenerateText<String>(session: session, transform: { $0 })
         // If this compiles, GenerateText correctly omits maxRetries
-        #expect(true)
+        #expect(Bool(true))
     }
     #endif
 }

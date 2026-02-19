@@ -323,20 +323,28 @@ let restored = Conversation.restore(from: snapshot, tools: myTools)
 | `isResponding` | `Bool` | Whether currently generating |
 | `pendingSteeringCount` | `Int` | Steering messages waiting |
 
-### CLI
+### AgentSession (CLI)
+
+`AgentSession` is the entry point for interactive applications. It connects a `Conversation` to a transport layer (stdio, WebSocket, HTTP SSE).
 
 ```swift
-let conversation = Conversation(
-    languageModelSession: LanguageModelSession(
-        model: SystemLanguageModel.default,
-        tools: [ReadTool(), ExecuteCommandTool()]
-    ) {
-        Instructions("You are a coding assistant.")
-    }
+import SwiftAgent
+import AgentTools
+
+// 1. Create a LanguageModelSession with tools
+let lms = LanguageModelSession(
+    model: SystemLanguageModel.default,
+    tools: [ReadTool(), WriteTool(), ExecuteCommandTool(), GrepTool(), GlobTool()]
 ) {
+    Instructions("You are a coding assistant.")
+}
+
+// 2. Wrap it in a Conversation with a step pipeline
+let conversation = Conversation(languageModelSession: lms) {
     GenerateText { (input: String) in Prompt(input) }
 }
 
+// 3. Create an AgentSession with transport and run
 let transport = StdioTransport(prompt: "> ")
 let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
 try await session.run(conversation)

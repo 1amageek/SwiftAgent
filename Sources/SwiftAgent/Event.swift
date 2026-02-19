@@ -238,14 +238,14 @@ public struct EmittingStep<Base: Step>: Step {
 
     private let base: Base
     private let stepName: String
-    private let beforeEvents: [(EventName, ((any Sendable)?) -> (any Sendable)?)]
-    private let afterEvents: [(EventName, (Output) -> (any Sendable)?)]
+    private let beforeEvents: [(EventName, @Sendable ((any Sendable)?) -> (any Sendable)?)]
+    private let afterEvents: [(EventName, @Sendable (Output) -> (any Sendable)?)]
 
     init(
         base: Base,
         stepName: String? = nil,
-        beforeEvents: [(EventName, ((any Sendable)?) -> (any Sendable)?)] = [],
-        afterEvents: [(EventName, (Output) -> (any Sendable)?)] = []
+        beforeEvents: [(EventName, @Sendable ((any Sendable)?) -> (any Sendable)?)] = [],
+        afterEvents: [(EventName, @Sendable (Output) -> (any Sendable)?)] = []
     ) {
         self.base = base
         self.stepName = stepName ?? String(describing: type(of: base))
@@ -308,14 +308,14 @@ extension Step {
         case .before:
             return EmittingStep(
                 base: self,
-                beforeEvents: [(name, { _ in nil })],
+                beforeEvents: [(name, { @Sendable _ in nil })],
                 afterEvents: []
             )
         case .after:
             return EmittingStep(
                 base: self,
                 beforeEvents: [],
-                afterEvents: [(name, { _ in nil })]
+                afterEvents: [(name, { @Sendable _ in nil })]
             )
         }
     }
@@ -343,14 +343,14 @@ extension Step {
         case .before:
             return EmittingStep(
                 base: self,
-                beforeEvents: [(name, { _ in nil })],
+                beforeEvents: [(name, { @Sendable _ in nil })],
                 afterEvents: []
             )
         case .after:
             return EmittingStep(
                 base: self,
                 beforeEvents: [],
-                afterEvents: [(name, { payload($0) })]
+                afterEvents: [(name, { @Sendable output in payload(output) })]
             )
         }
     }
@@ -370,7 +370,7 @@ extension EmittingStep {
             return EmittingStep(
                 base: base,
                 stepName: stepName,
-                beforeEvents: beforeEvents + [(name, { _ in nil })],
+                beforeEvents: beforeEvents + [(name, { @Sendable _ in nil })],
                 afterEvents: afterEvents
             )
         case .after:
@@ -378,7 +378,7 @@ extension EmittingStep {
                 base: base,
                 stepName: stepName,
                 beforeEvents: beforeEvents,
-                afterEvents: afterEvents + [(name, { _ in nil })]
+                afterEvents: afterEvents + [(name, { @Sendable _ in nil })]
             )
         }
     }
@@ -394,7 +394,7 @@ extension EmittingStep {
             return EmittingStep(
                 base: base,
                 stepName: stepName,
-                beforeEvents: beforeEvents + [(name, { _ in nil })],
+                beforeEvents: beforeEvents + [(name, { @Sendable _ in nil })],
                 afterEvents: afterEvents
             )
         case .after:
@@ -402,7 +402,7 @@ extension EmittingStep {
                 base: base,
                 stepName: stepName,
                 beforeEvents: beforeEvents,
-                afterEvents: afterEvents + [(name, { payload($0) })]
+                afterEvents: afterEvents + [(name, { @Sendable output in payload(output) })]
             )
         }
     }

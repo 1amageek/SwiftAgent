@@ -29,11 +29,11 @@ import Foundation
 /// ```
 public struct Reduce<Input: Collection & Sendable, Output: Sendable>: Step where Input.Element: Sendable {
     /// A closure that produces a step to process each element and accumulate the result
-    private let process: (Output, Input.Element, Int) -> any Step<Output, Output>
-    
+    private let process: @Sendable (Output, Input.Element, Int) -> any Step<Output, Output>
+
     /// The initial value for the reduction
     private let initial: Output
-    
+
     /// Creates a new reduce step with the specified initial value and processing step
     ///
     /// - Parameters:
@@ -43,7 +43,7 @@ public struct Reduce<Input: Collection & Sendable, Output: Sendable>: Step where
     ///             and the element's index in the collection.
     public init(
         initial: Output,
-        @StepBuilder process: @escaping (Output, Input.Element, Int) -> any Step<Output, Output>
+        @StepBuilder process: @escaping @Sendable (Output, Input.Element, Int) -> any Step<Output, Output>
     ) {
         self.initial = initial
         self.process = process

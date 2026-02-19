@@ -32,7 +32,7 @@ public struct AnyStep<In: Sendable, Out: Sendable>: Step, Sendable {
     /// Creates a type-erased step from any concrete step
     ///
     /// - Parameter step: The concrete step to wrap
-    public init<S: Step & Sendable>(_ step: S) where S.Input == In, S.Output == Out {
+    public init<S: Step>(_ step: S) where S.Input == In, S.Output == Out {
         self._run = step.run
     }
     
@@ -48,7 +48,7 @@ public struct AnyStep<In: Sendable, Out: Sendable>: Step, Sendable {
 }
 
 /// Extension to make AnyStep creation more convenient
-extension Step where Self: Sendable {
+extension Step {
     /// Creates a type-erased version of this step
     ///
     /// - Returns: An `AnyStep` wrapping this step

@@ -100,6 +100,4 @@ public struct RetryStep<S: Step>: Step {
     }
 }
 
-// MARK: - Sendable Conformance
 
-extension RetryStep: Sendable where S: Sendable {}

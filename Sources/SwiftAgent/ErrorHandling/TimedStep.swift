@@ -50,7 +50,7 @@ import Foundation
 /// Pipeline()
 ///     .timeout(.seconds(10))  // Overall: 10s (independent)
 /// ```
-public struct TimedStep<S: Step & Sendable>: Step, Sendable {
+public struct TimedStep<S: Step>: Step {
     public typealias Input = S.Input
     public typealias Output = S.Output
 

@@ -15,17 +15,17 @@ public struct Monitor<S: Step>: Step {
     public typealias Output = S.Output
     
     private let step: S
-    private let onInput: ((Input) async -> Void)?
-    private let onOutput: ((Output) async -> Void)?
-    private let onError: ((Error) async -> Void)?
-    private let onComplete: ((TimeInterval) async -> Void)?
-    
+    private let onInput: (@Sendable (Input) async -> Void)?
+    private let onOutput: (@Sendable (Output) async -> Void)?
+    private let onError: (@Sendable (Error) async -> Void)?
+    private let onComplete: (@Sendable (TimeInterval) async -> Void)?
+
     internal init(
         step: S,
-        onInput: ((Input) async -> Void)? = nil,
-        onOutput: ((Output) async -> Void)? = nil,
-        onError: ((Error) async -> Void)? = nil,
-        onComplete: ((TimeInterval) async -> Void)? = nil
+        onInput: (@Sendable (Input) async -> Void)? = nil,
+        onOutput: (@Sendable (Output) async -> Void)? = nil,
+        onError: (@Sendable (Error) async -> Void)? = nil,
+        onComplete: (@Sendable (TimeInterval) async -> Void)? = nil
     ) {
         self.step = step
         self.onInput = onInput
@@ -71,43 +71,43 @@ extension Step {
     /// Adds a monitor for the input of this step
     /// - Parameter handler: A closure that receives the input
     /// - Returns: A Monitor wrapping this step
-    public func onInput(_ handler: @escaping (Input) async -> Void) -> Monitor<Self> {
+    public func onInput(_ handler: @escaping @Sendable (Input) async -> Void) -> Monitor<Self> {
         Monitor<Self>(step: self, onInput: handler)
     }
-    
+
     /// Adds a monitor for the output of this step
     /// - Parameter handler: A closure that receives the output
     /// - Returns: A Monitor wrapping this step
-    public func onOutput(_ handler: @escaping (Output) async -> Void) -> Monitor<Self> {
+    public func onOutput(_ handler: @escaping @Sendable (Output) async -> Void) -> Monitor<Self> {
         Monitor<Self>(step: self, onOutput: handler)
     }
-    
+
     /// Adds a monitor for errors of this step
     /// - Parameter handler: A closure that receives the error
     /// - Returns: A Monitor wrapping this step
-    public func onError(_ handler: @escaping (Error) async -> Void) -> Monitor<Self> {
+    public func onError(_ handler: @escaping @Sendable (Error) async -> Void) -> Monitor<Self> {
         Monitor<Self>(step: self, onError: handler)
     }
-    
+
     /// Adds a monitor for completion of this step
     /// - Parameter handler: A closure that receives the execution duration
     /// - Returns: A Monitor wrapping this step
-    public func onComplete(_ handler: @escaping (TimeInterval) async -> Void) -> Monitor<Self> {
+    public func onComplete(_ handler: @escaping @Sendable (TimeInterval) async -> Void) -> Monitor<Self> {
         Monitor<Self>(step: self, onComplete: handler)
     }
-    
+
     /// Adds monitors for both input and output of this step
     /// - Parameters:
     ///   - inputHandler: A closure that receives the input
     ///   - outputHandler: A closure that receives the output
     /// - Returns: A Monitor wrapping this step
     public func monitor(
-        input inputHandler: @escaping (Input) async -> Void,
-        output outputHandler: @escaping (Output) async -> Void
+        input inputHandler: @escaping @Sendable (Input) async -> Void,
+        output outputHandler: @escaping @Sendable (Output) async -> Void
     ) -> Monitor<Self> {
         Monitor<Self>(step: self, onInput: inputHandler, onOutput: outputHandler)
     }
-    
+
     /// Adds comprehensive monitoring for this step
     /// - Parameters:
     ///   - onInput: A closure that receives the input
@@ -116,10 +116,10 @@ extension Step {
     ///   - onComplete: A closure that receives the execution duration
     /// - Returns: A Monitor wrapping this step
     public func monitor(
-        onInput: ((Input) async -> Void)? = nil,
-        onOutput: ((Output) async -> Void)? = nil,
-        onError: ((Error) async -> Void)? = nil,
-        onComplete: ((TimeInterval) async -> Void)? = nil
+        onInput: (@Sendable (Input) async -> Void)? = nil,
+        onOutput: (@Sendable (Output) async -> Void)? = nil,
+        onError: (@Sendable (Error) async -> Void)? = nil,
+        onComplete: (@Sendable (TimeInterval) async -> Void)? = nil
     ) -> Monitor<Self> {
         Monitor<Self>(
             step: self,

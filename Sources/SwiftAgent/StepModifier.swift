@@ -8,7 +8,7 @@
 import Foundation
 
 /// A protocol that modifies the behavior of a Step.
-public protocol StepModifier {
+public protocol StepModifier: Sendable {
     /// The input type of the Step being modified
     associatedtype Input: Sendable
     

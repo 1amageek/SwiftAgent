@@ -34,14 +34,14 @@ public struct Map<InElement: Sendable, OutElement: Sendable>: Step {
     public typealias Output = [OutElement]
     
     /// A closure that produces a step to transform each element
-    private let transform: (InElement, Int) -> AnyStep<InElement, OutElement>
-    
+    private let transform: @Sendable (InElement, Int) -> AnyStep<InElement, OutElement>
+
     /// Creates a new map step with the specified transformation
     ///
     /// - Parameter transform: A closure that produces a step to transform each element.
     ///                       The closure receives the element and its index in the collection.
     public init(
-        @StepBuilder transform: @escaping (
+        @StepBuilder transform: @escaping @Sendable (
             InElement,
             Int
         ) -> AnyStep<InElement, OutElement>

@@ -77,6 +77,4 @@ public struct GuardedStep<S: Step>: Step {
     }
 }
 
-// MARK: - Sendable Conformance
 
-extension GuardedStep: Sendable where S: Sendable {}

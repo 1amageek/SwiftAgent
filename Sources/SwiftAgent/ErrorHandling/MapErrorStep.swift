@@ -89,6 +89,4 @@ public struct MapErrorStep<S: Step>: Step {
     }
 }
 
-// MARK: - Sendable Conformance
 
-extension MapErrorStep: Sendable where S: Sendable {}

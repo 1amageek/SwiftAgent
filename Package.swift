@@ -22,11 +22,11 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
+        .package(url: "https://github.com/1amageek/mcp-swift-sdk.git", branch: "fix/network-transport-data-race"),
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
         .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.6.1"),
+        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.8.0"),
     ],
     targets: [
         .macro(
@@ -76,7 +76,7 @@ let package = Package(
             name: "SwiftAgentMCP",
             dependencies: [
                 "SwiftAgent",
-                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "MCP", package: "mcp-swift-sdk"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),

@@ -29,6 +29,9 @@ Samples/**/Package.resolved
 **/api_keys.json
 **/secrets.json
 
+# Claude Code
+.claude/settings.local.json
+
 # Generated files
 .vscode/
 .idea/

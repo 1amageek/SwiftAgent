@@ -9,23 +9,25 @@ import Foundation
 
 /// Loads and parses SKILL.md files.
 ///
-/// This loader supports the Agent Skills specification format:
+/// Supports two formats:
 ///
+/// **Format 1: YAML Frontmatter**
 /// ```markdown
 /// ---
 /// name: skill-name
 /// description: What this skill does
-/// license: MIT
-/// compatibility: Requires git
-/// metadata:
-///   author: example-org
-///   version: "1.0"
-/// allowed-tools: Bash(git:*) Read
 /// ---
+/// # Instructions
+/// ```
 ///
-/// # Skill Instructions
+/// **Format 2: Plain Markdown** (Claude Code / Codex compatible)
+/// ```markdown
+/// # Skill Title
 ///
-/// Instructions for the agent...
+/// Description paragraph.
+///
+/// ## When to Use
+/// - ...
 /// ```
 public struct SkillLoader: Sendable {
 
@@ -62,11 +64,16 @@ public struct SkillLoader: Sendable {
             throw SkillError.fileReadError(path: skillFilePath, underlyingError: error)
         }
 
-        // Parse frontmatter only
-        let (metadata, _) = try parseFrontmatter(content)
+        // Detect format and parse
+        let directoryName = (directoryPath as NSString).lastPathComponent
+        let metadata: SkillMetadata
+        if hasFrontmatter(content) {
+            (metadata, _) = try parseFrontmatter(content)
+        } else {
+            (metadata, _) = try parseMarkdownSkill(content, directoryName: directoryName)
+        }
 
         // Validate metadata
-        let directoryName = (directoryPath as NSString).lastPathComponent
         try metadata.validate(directoryName: directoryName)
 
         return Skill(
@@ -104,11 +111,17 @@ public struct SkillLoader: Sendable {
             throw SkillError.fileReadError(path: skillFilePath, underlyingError: error)
         }
 
-        // Parse frontmatter and body
-        let (metadata, body) = try parseFrontmatter(content)
+        // Detect format and parse
+        let directoryName = (directoryPath as NSString).lastPathComponent
+        let metadata: SkillMetadata
+        let body: String
+        if hasFrontmatter(content) {
+            (metadata, body) = try parseFrontmatter(content)
+        } else {
+            (metadata, body) = try parseMarkdownSkill(content, directoryName: directoryName)
+        }
 
         // Validate metadata
-        let directoryName = (directoryPath as NSString).lastPathComponent
         try metadata.validate(directoryName: directoryName)
 
         return Skill(
@@ -128,6 +141,74 @@ public struct SkillLoader: Sendable {
             return skill
         }
         return try loadFull(from: skill.directoryPath)
+    }
+
+    // MARK: - Format Detection
+
+    /// Checks whether the content starts with YAML frontmatter delimiters.
+    private static func hasFrontmatter(_ content: String) -> Bool {
+        let firstLine = content.prefix(while: { $0 != "\n" && $0 != "\r" })
+        return firstLine.trimmingCharacters(in: .whitespaces) == "---"
+    }
+
+    // MARK: - Plain Markdown Parsing
+
+    /// Parses a plain Markdown SKILL.md (Claude Code / Codex format).
+    ///
+    /// Extracts:
+    /// - `name` from the directory name
+    /// - `description` from the first paragraph after the title heading
+    /// - `body` is the entire file content
+    ///
+    /// - Parameters:
+    ///   - content: Raw SKILL.md file content.
+    ///   - directoryName: Parent directory name used as the skill name.
+    /// - Returns: Tuple of (metadata, body).
+    /// - Throws: `SkillError.invalidFormat` if content is empty.
+    static func parseMarkdownSkill(
+        _ content: String,
+        directoryName: String
+    ) throws -> (metadata: SkillMetadata, body: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw SkillError.invalidFormat(reason: "SKILL.md is empty")
+        }
+
+        let lines = trimmed.components(separatedBy: .newlines)
+
+        // Extract description: first non-empty paragraph after skipping headings
+        var descriptionLines: [String] = []
+        var foundDescription = false
+        for line in lines {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+
+            // Skip heading lines
+            if stripped.hasPrefix("#") {
+                if foundDescription { break }
+                continue
+            }
+
+            // Skip empty lines before description starts
+            if stripped.isEmpty {
+                if foundDescription { break }
+                continue
+            }
+
+            // Collect description paragraph lines
+            descriptionLines.append(stripped)
+            foundDescription = true
+        }
+
+        let description = descriptionLines.isEmpty
+            ? directoryName
+            : descriptionLines.joined(separator: " ")
+
+        let metadata = SkillMetadata(
+            name: directoryName,
+            description: description
+        )
+
+        return (metadata, content)
     }
 
     // MARK: - Frontmatter Parsing

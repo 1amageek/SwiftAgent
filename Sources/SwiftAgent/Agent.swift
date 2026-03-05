@@ -17,7 +17,7 @@ import Foundation
 /// Agents:
 /// - Define `tools` available to the LLM
 /// - Define `instructions` that guide the LLM's behavior
-/// - Define a `body` Step that processes `String -> String`
+/// - Define a `body` Step that processes `Prompt -> String`
 ///
 /// ## Usage
 ///
@@ -27,13 +27,13 @@ import Foundation
 ///         Instructions("You are a helpful assistant")
 ///     }
 ///
-///     var body: some Step<String, String> {
-///         GenerateText(session: session) { Prompt($0) }
+///     var body: some Step<Prompt, String> {
+///         GenerateText<Prompt>()
 ///     }
 /// }
 /// ```
 public protocol Agent {
-    associatedtype Body: Step where Body.Input == String, Body.Output == String
+    associatedtype Body: Step where Body.Input == Prompt, Body.Output == String
 
     /// The tools available to this agent.
     var tools: [any Tool] { get }

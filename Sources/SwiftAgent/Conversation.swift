@@ -24,11 +24,20 @@ import Synchronization
 ///     Instructions("You are a helpful assistant.")
 /// }
 /// let conversation = Conversation(languageModelSession: languageModelSession) {
-///     GenerateText { Prompt($0) }
+///     GenerateText()
 /// }
 ///
 /// let response = try await conversation.send("Hello!")
 /// print(response.content)
+/// ```
+///
+/// ## Multimodal Input
+///
+/// ```swift
+/// let response = try await conversation.send(Prompt {
+///     "What is in this image?"
+///     PromptImage(source: .url(imageURL))
+/// })
 /// ```
 ///
 /// ## Steering
@@ -36,11 +45,9 @@ import Synchronization
 /// Use `steer()` to add additional context to the **next** prompt:
 ///
 /// ```swift
-/// // Add steering hints before sending
 /// conversation.steer("Make sure to use async/await")
 /// conversation.steer("Add error handling")
 ///
-/// // Steering messages are combined with the next send()
 /// let response = try await conversation.send("Write a function...")
 /// print(response.content)
 /// ```
@@ -78,16 +85,16 @@ public final class Conversation: Sendable {
     // MARK: - Private State
 
     private struct SessionState: Sendable {
-        var steeringMessages: [String] = []
+        var steeringMessages: [Prompt] = []
         var isProcessing = false
         var waitQueue: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
-        var inputContinuation: AsyncStream<String>.Continuation?
+        var inputContinuation: AsyncStream<Prompt>.Continuation?
     }
 
     private let state: Mutex<SessionState>
     private let languageModelSession: LanguageModelSession
-    private let step: AnyStep<String, String>
-    private let inputStreamStorage: Mutex<AsyncStream<String>>
+    private let step: AnyStep<Prompt, String>
+    private let inputStreamStorage: Mutex<AsyncStream<Prompt>>
 
     // MARK: - Initialization
 
@@ -101,11 +108,11 @@ public final class Conversation: Sendable {
         id: String = UUID().uuidString,
         languageModelSession: LanguageModelSession,
         @StepBuilder step: () -> S
-    ) where S.Input == String, S.Output == String {
+    ) where S.Input == Prompt, S.Output == String {
         self.id = id
         self.step = AnyStep(step())
-        var inputContinuation: AsyncStream<String>.Continuation?
-        let inputStream = AsyncStream<String> { continuation in
+        var inputContinuation: AsyncStream<Prompt>.Continuation?
+        let inputStream = AsyncStream<Prompt> { continuation in
             inputContinuation = continuation
         }
         self.inputStreamStorage = Mutex(inputStream)
@@ -115,56 +122,78 @@ public final class Conversation: Sendable {
 
     // MARK: - Message Handling
 
-    /// Sends a message to the session and waits for the response.
+    /// Sends a multimodal prompt to the session and waits for the response.
     ///
     /// If the session is currently processing another message, this method waits
     /// for the current processing to complete before starting.
     ///
     /// Any steering messages added via `steer()` will be included in the prompt.
     ///
-    /// - Parameter content: The message content.
+    /// - Parameter content: The prompt content (text, images, or both).
     /// - Returns: The response containing the generated content and metadata.
     /// - Throws: `CancellationError` if the task was cancelled while waiting.
-    public func send(_ content: String) async throws -> Response {
-        // Acquire exclusive processing slot (returns false if cancelled while waiting)
+    public func send(_ content: Prompt) async throws -> Response {
         let acquired = await acquireProcessingSlot()
         guard acquired else {
             throw CancellationError()
         }
         defer { releaseProcessingSlot() }
 
-        // Also check cancellation after acquiring in case cancelled during handoff
         try Task.checkCancellation()
 
         return try await processMessage(content)
     }
 
-    /// Adds a steering message to be included in the **next** prompt.
+    /// Sends a text message to the session and waits for the response.
+    ///
+    /// Convenience overload that wraps the string in a `Prompt`.
+    ///
+    /// - Parameter content: The text message content.
+    /// - Returns: The response containing the generated content and metadata.
+    /// - Throws: `CancellationError` if the task was cancelled while waiting.
+    public func send(_ content: String) async throws -> Response {
+        try await send(Prompt(content))
+    }
+
+    /// Adds a steering prompt to be included in the **next** message.
     ///
     /// Steering messages are accumulated and combined with the next message
     /// sent via `send()`. They are consumed when the prompt is built.
     ///
-    /// **Note:** Steering messages added while a prompt is being processed
-    /// will be included in the *following* prompt, not the current one.
+    /// - Parameter content: The steering prompt content.
+    public func steer(_ content: Prompt) {
+        state.withLock { $0.steeringMessages.append(content) }
+    }
+
+    /// Adds a text steering message to be included in the **next** message.
+    ///
+    /// Convenience overload that wraps the string in a `Prompt`.
     ///
     /// - Parameter content: The steering message content.
     public func steer(_ content: String) {
-        state.withLock { $0.steeringMessages.append(content) }
+        steer(Prompt(content))
     }
 
     // MARK: - Input Queue
 
-    /// Adds a message to the input queue.
+    /// Adds a prompt to the input queue.
     ///
     /// Messages added via this method are processed in FIFO order by the agent loop.
-    /// If the agent is currently processing another message, this message will be
-    /// queued and processed after the current message completes.
     ///
-    /// - Parameter message: The message to add to the input queue.
-    public func input(_ message: String) {
+    /// - Parameter message: The prompt to add to the input queue.
+    public func input(_ message: Prompt) {
         _ = state.withLock { state in
             state.inputContinuation?.yield(message)
         }
+    }
+
+    /// Adds a text message to the input queue.
+    ///
+    /// Convenience overload that wraps the string in a `Prompt`.
+    ///
+    /// - Parameter message: The text message to add to the input queue.
+    public func input(_ message: String) {
+        input(Prompt(message))
     }
 
     /// Waits for the next input from the queue.
@@ -172,9 +201,9 @@ public final class Conversation: Sendable {
     /// This method suspends until input is available in the queue.
     /// It is typically called in a loop by the agent to process incoming messages.
     ///
-    /// - Returns: The next input message from the queue.
+    /// - Returns: The next input prompt from the queue.
     /// - Throws: `CancellationError` if the task is cancelled or the stream ends.
-    public func waitForInput() async throws -> String {
+    public func waitForInput() async throws -> Prompt {
         let stream = inputStreamStorage.withLock { $0 }
         for await input in stream {
             return input
@@ -208,7 +237,6 @@ public final class Conversation: Sendable {
                 }
             }
         } onCancel: {
-            // Remove from queue and resume with false if still waiting
             let continuation: CheckedContinuation<Bool, Never>? = state.withLock { state in
                 if let index = state.waitQueue.firstIndex(where: { $0.id == waiterID }) {
                     let waiter = state.waitQueue.remove(at: index)
@@ -221,13 +249,11 @@ public final class Conversation: Sendable {
     }
 
     /// Releases the processing slot and resumes the next waiter if any.
-    ///
-    /// Resumes continuation outside the lock to prevent potential deadlocks.
     private func releaseProcessingSlot() {
         let nextWaiter: CheckedContinuation<Bool, Never>? = state.withLock { state in
             if let next = state.waitQueue.first {
                 state.waitQueue.removeFirst()
-                return next.continuation  // isProcessing remains true for next waiter
+                return next.continuation
             }
             state.isProcessing = false
             return nil
@@ -236,39 +262,29 @@ public final class Conversation: Sendable {
     }
 
     /// Processes a message with any accumulated steering messages.
-    ///
-    /// Captures the session reference at the start to handle mid-processing
-    /// session replacement correctly. If `replaceSession()` is called during
-    /// processing, current processing continues with the captured session,
-    /// and the next message uses the new session.
-    private func processMessage(_ content: String) async throws -> Response {
+    private func processMessage(_ content: Prompt) async throws -> Response {
         let startTime = ContinuousClock.now
 
-        // Capture session reference to handle mid-processing replacement
         let currentSession = languageModelSession
 
-        // Record transcript count before processing to calculate diff later
         let startIndex = currentSession.transcript.count
 
-        // Build prompt with steering messages
         let prompt = buildPrompt(mainMessage: content)
 
-        // Delegate to step with session in TaskLocal context
         let finalContent = try await withSession(currentSession) {
             try await step.run(prompt)
         }
 
         let duration = ContinuousClock.now - startTime
 
-        // Get all entries added during this request from captured session
         let newEntries = Array(currentSession.transcript.suffix(from: startIndex))
 
         return Response(content: finalContent, entries: newEntries, duration: duration)
     }
 
     /// Builds a prompt from the main message and any steering messages.
-    private func buildPrompt(mainMessage: String) -> String {
-        let steering = state.withLock { state -> [String] in
+    private func buildPrompt(mainMessage: Prompt) -> Prompt {
+        let steering = state.withLock { state -> [Prompt] in
             let messages = state.steeringMessages
             state.steeringMessages.removeAll()
             return messages
@@ -278,8 +294,10 @@ public final class Conversation: Sendable {
             return mainMessage
         }
 
-        // Combine main message with steering messages
-        return ([mainMessage] + steering).joined(separator: "\n\n")
+        return Prompt {
+            mainMessage
+            for s in steering { s }
+        }
     }
 
     // MARK: - Session State

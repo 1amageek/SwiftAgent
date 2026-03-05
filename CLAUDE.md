@@ -70,9 +70,8 @@ try await MyStep().context(AppConfig(maxRetries: 5)).run("input")
 // Step による宣言的な合成（body を定義すると run が自動実装）
 struct TextPipeline: Step {
     @Session var session: LanguageModelSession
-    var body: some Step<String, String> {
-        Transform { $0.trimmingCharacters(in: .whitespaces) }
-        GenerateText(session: session) { Prompt($0) }
+    var body: some Step<Prompt, String> {
+        GenerateText<Prompt>(session: session)
     }
 }
 
@@ -164,9 +163,8 @@ Pipeline {
 struct SecurePipeline: Step {
     @Session var session: LanguageModelSession
 
-    var body: some Step<String, String> {
-        Gate { input in .pass(sanitize(input)) }
-        GenerateText(session: session) { Prompt($0) }
+    var body: some Step<Prompt, String> {
+        GenerateText<Prompt>(session: session)
         Gate { output in .pass(filterSensitive(output)) }
     }
 }
@@ -942,7 +940,7 @@ HandleSensitive()
 ```swift
 // 宣言的Step内での階層的ガードレール
 struct SecureWorkflow: Step {
-    var body: some Step<String, String> {
+    var body: some Step<Prompt, String> {
         // 親のガードレール付きStep
         ProcessStep()
             .guardrail {

@@ -1,5 +1,5 @@
 {
-  "originHash" : "9c2d79bf3a966435f11f04180be9d40bf5115030fccaddef8249a04ddb71f587",
+  "originHash" : "9488ede09c0346ad5e1d2ae4b9fe0383e3b97a26b7945789b7b33d4c17e81142",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -11,12 +11,30 @@
       }
     },
     {
+      "identity" : "jsonschema",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattt/JSONSchema.git",
+      "state" : {
+        "revision" : "4c6f2467d5bc72b062c7a9b7e4cd77a09635ea8b",
+        "version" : "1.3.1"
+      }
+    },
+    {
       "identity" : "mcp-swift-sdk",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/mcp-swift-sdk.git",
       "state" : {
         "branch" : "fix/network-transport-data-race",
         "revision" : "18eb50799a29e4ff36bf572b69c52ce2b924b87d"
+      }
+    },
+    {
+      "identity" : "openfoundationmodels",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1amageek/OpenFoundationModels.git",
+      "state" : {
+        "revision" : "1360b8aadb44524325819a3f6c7f270e33e1b71b",
+        "version" : "1.9.1"
       }
     },
     {

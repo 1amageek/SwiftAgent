@@ -26,7 +26,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents
@@ -66,12 +66,12 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Slow")
         } step: {
-            Transform { (input: String) in
+            Transform { (input: Prompt) in
                 for _ in 0..<50 {
                     try TurnCancellationContext.current?.checkCancellation()
                     try await Task.sleep(for: .milliseconds(100))
                 }
-                return input
+                return "done"
             }
         }
 
@@ -101,7 +101,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents
@@ -126,7 +126,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents
@@ -164,12 +164,12 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Slow")
         } step: {
-            Transform { (input: String) in
+            Transform { (input: Prompt) in
                 for _ in 0..<50 {
                     try TurnCancellationContext.current?.checkCancellation()
                     try await Task.sleep(for: .milliseconds(100))
                 }
-                return input
+                return "done"
             }
         }
 
@@ -207,12 +207,12 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Slow")
         } step: {
-            Transform { (input: String) in
+            Transform { (input: Prompt) in
                 for _ in 0..<50 {
                     try TurnCancellationContext.current?.checkCancellation()
                     try await Task.sleep(for: .milliseconds(100))
                 }
-                return input
+                return "done"
             }
         }
 
@@ -249,7 +249,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents
@@ -287,7 +287,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents
@@ -327,9 +327,9 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("CancellationAware")
         } step: {
-            Transform { (input: String) in
+            Transform { (input: Prompt) in
                 try TurnCancellationContext.current?.checkCancellation()
-                return "Done: \(input)"
+                return "Done"
             }
         }
 
@@ -368,12 +368,12 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Slow")
         } step: {
-            Transform { (input: String) in
+            Transform { (input: Prompt) in
                 for _ in 0..<50 {
                     try TurnCancellationContext.current?.checkCancellation()
                     try await Task.sleep(for: .milliseconds(100))
                 }
-                return input
+                return "done"
             }
         }
 
@@ -407,7 +407,7 @@ struct AgentSessionTests {
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
         } step: {
-            Transform { (input: String) in "Echo: \(input)" }
+            Transform { (input: Prompt) in "Echo response" }
         }
 
         let events = transport.collectedEvents

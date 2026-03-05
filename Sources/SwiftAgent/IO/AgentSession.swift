@@ -325,7 +325,7 @@ public final class AgentSession: Sendable {
         pipeline: ToolPipeline = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
-    ) async throws where S.Input == String, S.Output == String {
+    ) async throws where S.Input == Prompt, S.Output == String {
         let wrappedTools = pipeline.wrap(tools)
         let languageModelSession = LanguageModelSession(model: model, tools: wrappedTools) {
             instructions()
@@ -364,7 +364,7 @@ public final class AgentSession: Sendable {
         pipeline: ToolPipeline = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
-    ) async throws where S.Input == String, S.Output == String {
+    ) async throws where S.Input == Prompt, S.Output == String {
         let wrappedTools = pipeline.wrap(tools)
         let languageModelSession = LanguageModelSession(tools: wrappedTools) {
             instructions()

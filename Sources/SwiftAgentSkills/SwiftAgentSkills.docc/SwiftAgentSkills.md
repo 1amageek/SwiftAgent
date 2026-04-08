@@ -1,15 +1,29 @@
 # ``SwiftAgentSkills``
 
-Extensible skill packages for enhancing agent capabilities.
+Local-root skill discovery for enhancing agent capabilities.
 
 ## Overview
 
-SwiftAgentSkills provides a plugin architecture for extending agent functionality
-with reusable, discoverable skill packages.
+SwiftAgentSkills follows the same discovery-first model as `claw-code`.
+Skills are not plugin-managed. They are discovered from local skill roots,
+then activated on demand.
 
 ### Skill Structure
 
-Skills are defined using a `SKILL.md` file with YAML frontmatter:
+Skills can be defined either as:
+
+- A directory containing `SKILL.md`
+- A legacy markdown file discovered from `commands/` roots
+
+YAML frontmatter is optional. Plain markdown files are also supported.
+
+```markdown
+# Git Workflow
+
+Use this when inspecting or modifying git history and branches.
+```
+
+Frontmatter remains supported:
 
 ```yaml
 ---
@@ -32,6 +46,16 @@ let config = CodingConfiguration(
 )
 ```
 
+### Discovery Roots
+
+`SkillDiscovery` searches the same categories of roots as `claw-code`:
+
+- Project ancestors: `.claw/skills`, `.omc/skills`, `.agents/skills`,
+  `.codex/skills`, `.claude/skills`
+- Legacy command roots: `.claw/commands`, `.codex/commands`, `.claude/commands`
+- Config-home roots from `CLAW_CONFIG_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`
+- User roots such as `~/.claw/skills`, `~/.codex/skills`, `~/.claude/skills`
+
 ### Permission Integration
 
 Skills can grant tool permissions via the `allowed-tools` field:
@@ -53,9 +77,9 @@ let pipeline = basePipeline.withDynamicPermissions { permissions.rules }
 
 ### Creating Custom Skills
 
-1. Create a `SKILL.md` file with frontmatter
+1. Create a `SKILL.md` file or legacy markdown command file
 2. Define `allowed-tools` for required permissions
-3. Add instructions and examples in markdown
+3. Add instructions in markdown
 4. Place in a discoverable location
 
 ## Topics

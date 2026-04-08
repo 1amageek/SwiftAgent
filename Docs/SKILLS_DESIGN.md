@@ -3,11 +3,13 @@
 ## 1. Overview
 
 Agent Skills は、AIエージェントに新しい能力を与えるためのシンプルでオープンなフォーマットです。
-SwiftAgent に Skills サポートを追加することで、外部で定義されたスキルを発見・読み込み・実行できるようになります。
+SwiftAgent は `claw-code` と同様に、plugin 管理とは独立した local-root discovery で skills を扱います。
 
 ### 1.1 Goals
 
 - Agent Skills 仕様に準拠した SKILL.md ファイルの読み込み
+- `claw-code` と同じ探索順序での root discovery
+- legacy `commands/` markdown skill の読み込み
 - Progressive Disclosure による効率的なコンテキスト管理
 - 既存の SwiftAgent アーキテクチャとの自然な統合
 - Cursor, Claude Code, VS Code などの Skills 対応ツールとの相互運用性
@@ -29,6 +31,8 @@ skill-name/
 ├── references/       # Optional: 追加ドキュメント
 └── assets/           # Optional: テンプレート、リソース
 ```
+
+legacy `commands/` root では、単一の markdown file も skill として扱います。
 
 ### 2.2 SKILL.md Format
 
@@ -191,7 +195,8 @@ public struct SkillMetadata: Sendable, Codable, Equatable {
 ```
 
 **Validation Rules:**
-- `name`: 1-64文字、`^[a-z0-9]+(-[a-z0-9]+)*$` にマッチ、ディレクトリ名と一致
+- `name`: 1-64文字、`^[a-z0-9]+(-[a-z0-9]+)*$` にマッチ
+- ディレクトリ型 skill の場合はディレクトリ名と一致
 - `description`: 1-1024文字、空でない
 - `compatibility`: 存在する場合 1-500文字
 - `allowedTools`: スペース区切りのツール識別子
@@ -388,12 +393,12 @@ public actor SkillRegistry {
   <skill>
     <name>pdf-processing</name>
     <description>Extract text and tables from PDF files, fill forms, merge documents.</description>
-    <location>/Users/me/.agent/skills/pdf-processing/SKILL.md</location>
+    <location>/Users/me/.claude/skills/pdf-processing/SKILL.md</location>
   </skill>
   <skill>
     <name>data-analysis</name>
     <description>Analyze datasets, generate charts, and create summary reports.</description>
-    <location>/Users/me/.agent/skills/data-analysis/SKILL.md</location>
+    <location>/Users/me/.codex/skills/data-analysis/SKILL.md</location>
   </skill>
 </available_skills>
 ```
@@ -405,12 +410,6 @@ public actor SkillRegistry {
 ```swift
 /// Discovers skills from standard directories.
 public struct SkillDiscovery: Sendable {
-
-    /// Standard skill discovery paths.
-    public static let standardPaths: [String] = [
-        "~/.agent/skills",           // User-level skills
-        "./.agent/skills",           // Project-level skills
-    ]
 
     /// Environment variable for additional paths.
     public static let environmentVariable = "AGENT_SKILLS_PATH"
@@ -440,9 +439,11 @@ public struct SkillDiscovery: Sendable {
 ```
 
 **Search Order:**
-1. `~/.agent/skills/` - ユーザーレベル
-2. `./.agent/skills/` - プロジェクトレベル（カレントディレクトリ基準）
-3. `$AGENT_SKILLS_PATH` - 環境変数で指定（コロン区切り）
+1. Project ancestors: `.claw/skills`, `.omc/skills`, `.agents/skills`, `.codex/skills`, `.claude/skills`
+2. Project ancestor legacy roots: `.claw/commands`, `.codex/commands`, `.claude/commands`
+3. Config homes from `CLAW_CONFIG_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`
+4. User homes: `~/.claw/skills`, `~/.omc/skills`, `~/.codex/skills`, `~/.claude/skills`
+5. `$AGENT_SKILLS_PATH` - 追加 root をコロン区切りで指定
 
 ### 4.6 SkillError
 
@@ -864,7 +865,7 @@ import SwiftAgent
 let config = AgentConfiguration(
     instructions: Instructions("You are a helpful assistant."),
     modelProvider: myModelProvider,
-    autoDiscoverSkills: true  // Discovers from ~/.agent/skills/ etc.
+    autoDiscoverSkills: true  // Discovers from claw-code compatible local roots
 )
 
 // Create session

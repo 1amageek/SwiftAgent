@@ -81,8 +81,8 @@ public struct WebSearchTool: Tool {
         }
 
         // Parse domain filters
-        let allowedDomains = parseDomainList(arguments.allowedDomains)
-        let blockedDomains = parseDomainList(arguments.blockedDomains)
+        let allowedDomains = try parseDomainList(arguments.allowedDomains)
+        let blockedDomains = try parseDomainList(arguments.blockedDomains)
 
         // Perform search
         do {
@@ -109,15 +109,13 @@ public struct WebSearchTool: Tool {
         }
     }
 
-    private func parseDomainList(_ json: String) -> [String] {
+    private func parseDomainList(_ json: String) throws -> [String] {
         guard !json.isEmpty, json != "[]" else { return [] }
 
-        guard let data = json.data(using: .utf8),
-              let domains = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
+        guard let data = json.data(using: .utf8) else {
+            throw WebSearchError.invalidEncoding(json)
         }
-
-        return domains
+        return try JSONDecoder().decode([String].self, from: data)
     }
 }
 
@@ -346,7 +344,7 @@ public struct DuckDuckGoSearchProvider: WebSearchProvider {
         }
 
         // Parse results from HTML (simplified parsing)
-        var results = parseSearchResults(from: fetchResult.output)
+        var results = try parseSearchResults(from: fetchResult.output)
 
         // Filter by blocked domains
         if !blockedDomains.isEmpty {
@@ -358,15 +356,13 @@ public struct DuckDuckGoSearchProvider: WebSearchProvider {
         return Array(results.prefix(limit))
     }
 
-    private func parseSearchResults(from content: String) -> [WebSearchResult] {
+    private func parseSearchResults(from content: String) throws -> [WebSearchResult] {
         var results: [WebSearchResult] = []
 
         // Simple pattern matching for DuckDuckGo results
         // Look for markdown links created by HTML to Markdown conversion
         let linkPattern = "\\[([^\\]]+)\\]\\(([^)]+)\\)"
-        guard let regex = try? NSRegularExpression(pattern: linkPattern, options: []) else {
-            return results
-        }
+        let regex = try NSRegularExpression(pattern: linkPattern, options: [])
 
         let range = NSRange(content.startIndex..., in: content)
         let matches = regex.matches(in: content, options: [], range: range)
@@ -410,6 +406,7 @@ public enum WebSearchError: LocalizedError {
     case parsingFailed
     case rateLimited
     case providerError(String)
+    case invalidEncoding(String)
 
     public var errorDescription: String? {
         switch self {
@@ -421,6 +418,8 @@ public enum WebSearchError: LocalizedError {
             return "Search rate limit exceeded"
         case .providerError(let message):
             return "Search provider error: \(message)"
+        case .invalidEncoding(let input):
+            return "Failed to encode input as UTF-8: \(input)"
         }
     }
 }

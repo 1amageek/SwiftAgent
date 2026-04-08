@@ -228,7 +228,7 @@ public struct URLFetchTool: Tool {
             // Convert HTML to Markdown if content type is HTML
             let isHTML = contentType.lowercased().contains("text/html")
             if isHTML {
-                outputText = HTMLToMarkdown.convert(outputText)
+                outputText = try HTMLToMarkdown.convert(outputText)
             }
 
             if (200..<300).contains(statusCode) {
@@ -377,27 +377,27 @@ actor URLFetchCache {
 /// A simple HTML to Markdown converter.
 enum HTMLToMarkdown {
     /// Converts HTML content to Markdown format.
-    static func convert(_ html: String) -> String {
+    static func convert(_ html: String) throws -> String {
         var result = html
 
         // Remove script and style tags and their content
-        result = removeTag(result, tag: "script")
-        result = removeTag(result, tag: "style")
-        result = removeTag(result, tag: "noscript")
-        result = removeTag(result, tag: "head")
-        result = removeTag(result, tag: "nav")
-        result = removeTag(result, tag: "footer")
+        result = try removeTag(result, tag: "script")
+        result = try removeTag(result, tag: "style")
+        result = try removeTag(result, tag: "noscript")
+        result = try removeTag(result, tag: "head")
+        result = try removeTag(result, tag: "nav")
+        result = try removeTag(result, tag: "footer")
 
         // Convert headers
-        result = replacePattern(result, pattern: "<h1[^>]*>(.*?)</h1>", replacement: "# $1\n\n")
-        result = replacePattern(result, pattern: "<h2[^>]*>(.*?)</h2>", replacement: "## $1\n\n")
-        result = replacePattern(result, pattern: "<h3[^>]*>(.*?)</h3>", replacement: "### $1\n\n")
-        result = replacePattern(result, pattern: "<h4[^>]*>(.*?)</h4>", replacement: "#### $1\n\n")
-        result = replacePattern(result, pattern: "<h5[^>]*>(.*?)</h5>", replacement: "##### $1\n\n")
-        result = replacePattern(result, pattern: "<h6[^>]*>(.*?)</h6>", replacement: "###### $1\n\n")
+        result = try replacePattern(result, pattern: "<h1[^>]*>(.*?)</h1>", replacement: "# $1\n\n")
+        result = try replacePattern(result, pattern: "<h2[^>]*>(.*?)</h2>", replacement: "## $1\n\n")
+        result = try replacePattern(result, pattern: "<h3[^>]*>(.*?)</h3>", replacement: "### $1\n\n")
+        result = try replacePattern(result, pattern: "<h4[^>]*>(.*?)</h4>", replacement: "#### $1\n\n")
+        result = try replacePattern(result, pattern: "<h5[^>]*>(.*?)</h5>", replacement: "##### $1\n\n")
+        result = try replacePattern(result, pattern: "<h6[^>]*>(.*?)</h6>", replacement: "###### $1\n\n")
 
         // Convert paragraphs
-        result = replacePattern(result, pattern: "<p[^>]*>(.*?)</p>", replacement: "$1\n\n")
+        result = try replacePattern(result, pattern: "<p[^>]*>(.*?)</p>", replacement: "$1\n\n")
 
         // Convert line breaks
         result = result.replacingOccurrences(of: "<br>", with: "\n")
@@ -405,49 +405,49 @@ enum HTMLToMarkdown {
         result = result.replacingOccurrences(of: "<br />", with: "\n")
 
         // Convert bold
-        result = replacePattern(result, pattern: "<strong[^>]*>(.*?)</strong>", replacement: "**$1**")
-        result = replacePattern(result, pattern: "<b[^>]*>(.*?)</b>", replacement: "**$1**")
+        result = try replacePattern(result, pattern: "<strong[^>]*>(.*?)</strong>", replacement: "**$1**")
+        result = try replacePattern(result, pattern: "<b[^>]*>(.*?)</b>", replacement: "**$1**")
 
         // Convert italic
-        result = replacePattern(result, pattern: "<em[^>]*>(.*?)</em>", replacement: "*$1*")
-        result = replacePattern(result, pattern: "<i[^>]*>(.*?)</i>", replacement: "*$1*")
+        result = try replacePattern(result, pattern: "<em[^>]*>(.*?)</em>", replacement: "*$1*")
+        result = try replacePattern(result, pattern: "<i[^>]*>(.*?)</i>", replacement: "*$1*")
 
         // Convert code
-        result = replacePattern(result, pattern: "<code[^>]*>(.*?)</code>", replacement: "`$1`")
-        result = replacePattern(result, pattern: "<pre[^>]*>(.*?)</pre>", replacement: "```\n$1\n```\n\n")
+        result = try replacePattern(result, pattern: "<code[^>]*>(.*?)</code>", replacement: "`$1`")
+        result = try replacePattern(result, pattern: "<pre[^>]*>(.*?)</pre>", replacement: "```\n$1\n```\n\n")
 
         // Convert links
-        result = replacePattern(result, pattern: "<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", replacement: "[$2]($1)")
+        result = try replacePattern(result, pattern: "<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", replacement: "[$2]($1)")
 
         // Convert lists
-        result = replacePattern(result, pattern: "<li[^>]*>(.*?)</li>", replacement: "- $1\n")
-        result = replacePattern(result, pattern: "<ul[^>]*>", replacement: "\n")
-        result = replacePattern(result, pattern: "</ul>", replacement: "\n")
-        result = replacePattern(result, pattern: "<ol[^>]*>", replacement: "\n")
-        result = replacePattern(result, pattern: "</ol>", replacement: "\n")
+        result = try replacePattern(result, pattern: "<li[^>]*>(.*?)</li>", replacement: "- $1\n")
+        result = try replacePattern(result, pattern: "<ul[^>]*>", replacement: "\n")
+        result = try replacePattern(result, pattern: "</ul>", replacement: "\n")
+        result = try replacePattern(result, pattern: "<ol[^>]*>", replacement: "\n")
+        result = try replacePattern(result, pattern: "</ol>", replacement: "\n")
 
         // Convert blockquotes
-        result = replacePattern(result, pattern: "<blockquote[^>]*>(.*?)</blockquote>", replacement: "> $1\n\n")
+        result = try replacePattern(result, pattern: "<blockquote[^>]*>(.*?)</blockquote>", replacement: "> $1\n\n")
 
         // Convert divs and spans (just extract content)
-        result = replacePattern(result, pattern: "<div[^>]*>(.*?)</div>", replacement: "$1\n")
-        result = replacePattern(result, pattern: "<span[^>]*>(.*?)</span>", replacement: "$1")
+        result = try replacePattern(result, pattern: "<div[^>]*>(.*?)</div>", replacement: "$1\n")
+        result = try replacePattern(result, pattern: "<span[^>]*>(.*?)</span>", replacement: "$1")
 
         // Remove remaining HTML tags
-        result = replacePattern(result, pattern: "<[^>]+>", replacement: "")
+        result = try replacePattern(result, pattern: "<[^>]+>", replacement: "")
 
         // Decode HTML entities
-        result = decodeHTMLEntities(result)
+        result = try decodeHTMLEntities(result)
 
         // Clean up whitespace
-        result = cleanWhitespace(result)
+        result = try cleanWhitespace(result)
 
         return result
     }
 
-    private static func removeTag(_ html: String, tag: String) -> String {
+    private static func removeTag(_ html: String, tag: String) throws -> String {
         let pattern = "<\(tag)[^>]*>.*?</\(tag)>"
-        return replacePattern(html, pattern: pattern, replacement: "", options: [.caseInsensitive, .dotMatchesLineSeparators])
+        return try replacePattern(html, pattern: pattern, replacement: "", options: [.caseInsensitive, .dotMatchesLineSeparators])
     }
 
     private static func replacePattern(
@@ -455,16 +455,13 @@ enum HTMLToMarkdown {
         pattern: String,
         replacement: String,
         options: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]
-    ) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
-            return string
-        }
-
+    ) throws -> String {
+        let regex = try NSRegularExpression(pattern: pattern, options: options)
         let range = NSRange(string.startIndex..., in: string)
         return regex.stringByReplacingMatches(in: string, options: [], range: range, withTemplate: replacement)
     }
 
-    private static func decodeHTMLEntities(_ string: String) -> String {
+    private static func decodeHTMLEntities(_ string: String) throws -> String {
         var result = string
         let entities: [(String, String)] = [
             ("&nbsp;", " "),
@@ -487,19 +484,19 @@ enum HTMLToMarkdown {
         }
 
         // Handle numeric entities
-        result = replacePattern(result, pattern: "&#(\\d+);", replacement: "") // Simplified - just remove
+        result = try replacePattern(result, pattern: "&#(\\d+);", replacement: "")
 
         return result
     }
 
-    private static func cleanWhitespace(_ string: String) -> String {
+    private static func cleanWhitespace(_ string: String) throws -> String {
         var result = string
 
         // Replace multiple newlines with double newlines
-        result = replacePattern(result, pattern: "\n{3,}", replacement: "\n\n", options: [])
+        result = try replacePattern(result, pattern: "\n{3,}", replacement: "\n\n", options: [])
 
         // Replace multiple spaces with single space
-        result = replacePattern(result, pattern: " {2,}", replacement: " ", options: [])
+        result = try replacePattern(result, pattern: " {2,}", replacement: " ", options: [])
 
         // Trim whitespace from each line
         result = result.components(separatedBy: .newlines)

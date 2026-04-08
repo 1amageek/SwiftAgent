@@ -211,7 +211,13 @@ public struct SandboxExecutor: Sendable {
         }
 
         defer {
-            try? FileManager.default.removeItem(at: profilePath)
+            do {
+                try FileManager.default.removeItem(at: profilePath)
+            } catch {
+                #if DEBUG
+                print("[SandboxExecutor] failed to remove temporary profile at \(profilePath): \(error)")
+                #endif
+            }
         }
 
         // Build sandbox-exec command
@@ -317,7 +323,11 @@ public struct SandboxExecutor: Sendable {
                     process.terminate()
 
                     // Wait briefly for graceful termination
-                    try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+                    do {
+                        try await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+                    } catch {
+                        // Cancelled during termination wait — proceed to force kill
+                    }
 
                     // Force kill if still running
                     if process.isRunning {

@@ -97,7 +97,12 @@ public struct TimedStep<S: Step>: Step {
 
             // Add the timeout task
             group.addTask {
-                try? await Task.sleep(for: duration)
+                do {
+                    try await Task.sleep(for: duration)
+                } catch {
+                    // Sleep was cancelled because the step completed before the timeout
+                    return .timeout
+                }
                 return .timeout
             }
 

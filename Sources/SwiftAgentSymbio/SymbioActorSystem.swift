@@ -390,14 +390,14 @@ extension SymbioActorSystem {
     public func discoverReceivers(
         for perceptionIdentifier: String,
         timeout: Duration = .seconds(5)
-    ) async -> AsyncThrowingStream<DiscoveredPeer, Error> {
+    ) async throws -> AsyncThrowingStream<DiscoveredPeer, Error> {
         guard let connector = peerConnector else {
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: SymbioError.noTransportAvailable)
             }
         }
 
-        return await connector.discoverReceivers(for: perceptionIdentifier, timeout: timeout)
+        return try await connector.discoverReceivers(for: perceptionIdentifier, timeout: timeout)
     }
 
     /// Discover agents that provide a specific capability using PeerConnector

@@ -203,14 +203,60 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
             }
         }
 
-        // 5. Check allow rules
+        // 5. Apply middleware-provided authorization directive
+        if let override = authorizationDecision(for: context) {
+            switch override {
+            case .deny:
+                throw PermissionDenied(
+                    toolName: context.toolName,
+                    reason: authorizationReason(for: context) ?? "Denied by authorization middleware"
+                )
+            case .ask:
+                return try await promptUser(
+                    context: context,
+                    memoryKey: memoryKey,
+                    effectiveConfig: effectiveConfig,
+                    reasonOverride: authorizationReason(for: context) ?? "Approval required by authorization middleware",
+                    next: next
+                )
+            case .allow:
+                return try await next(context)
+            }
+        }
+
+        // 6. Check allow rules
         for rule in effectiveConfig.allow {
             if rule.matches(context) {
                 return try await next(context)
             }
         }
 
-        // 6. Apply default action
+        // 7. Enforce minimum execution mode requirements injected by higher-level runtimes
+        if let requiredMode = minimumPermissionMode(for: context),
+           let currentMode = effectiveConfig.permissionMode {
+            if currentMode == .allow || currentMode >= requiredMode {
+                return try await next(context)
+            }
+
+            if currentMode == .prompt
+                || (currentMode == .workspaceWrite && requiredMode == .dangerFullAccess) {
+                let reason = "tool '\(context.toolName)' requires approval to escalate from \(currentMode.rawValue) to \(requiredMode.rawValue)"
+                return try await promptUser(
+                    context: context,
+                    memoryKey: memoryKey,
+                    effectiveConfig: effectiveConfig,
+                    reasonOverride: reason,
+                    next: next
+                )
+            }
+
+            throw PermissionDenied(
+                toolName: context.toolName,
+                reason: "tool '\(context.toolName)' requires \(requiredMode.rawValue) permission; current mode is \(currentMode.rawValue)"
+            )
+        }
+
+        // 8. Apply default action
         switch effectiveConfig.defaultAction {
         case .allow:
             return try await next(context)
@@ -226,6 +272,7 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
                 context: context,
                 memoryKey: memoryKey,
                 effectiveConfig: effectiveConfig,
+                reasonOverride: nil,
                 next: next
             )
         }
@@ -272,22 +319,30 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
     /// For other tools, uses just the tool name.
     private func generateMemoryKey(for context: ToolContext) -> String {
         // Parse arguments to get more specific key
-        if let data = context.arguments.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-
-            // For Bash, use first word of command
-            if context.toolName == "Bash" || context.toolName == "ExecuteCommand" {
-                if let command = json["command"] as? String {
-                    let firstWord = command.split(separator: " ").first.map(String.init) ?? command
-                    return "\(context.toolName):\(firstWord)"
+        if let data = context.arguments.data(using: .utf8) {
+            let json: [String: Any]? = {
+                do {
+                    return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                } catch {
+                    return nil
                 }
-            }
+            }()
 
-            // For file tools, use the path
-            if let filePath = json["file_path"] as? String ?? json["path"] as? String {
-                // Use directory for grouping
-                let directory = (filePath as NSString).deletingLastPathComponent
-                return "\(context.toolName):\(directory)"
+            if let json {
+                // For Bash, use first word of command
+                if context.toolName == "Bash" || context.toolName == "ExecuteCommand" {
+                    if let command = json["command"] as? String {
+                        let firstWord = command.split(separator: " ").first.map(String.init) ?? command
+                        return "\(context.toolName):\(firstWord)"
+                    }
+                }
+
+                // For file tools, use the path
+                if let filePath = json["file_path"] as? String ?? json["path"] as? String {
+                    // Use directory for grouping
+                    let directory = (filePath as NSString).deletingLastPathComponent
+                    return "\(context.toolName):\(directory)"
+                }
             }
         }
 
@@ -299,6 +354,7 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
         context: ToolContext,
         memoryKey: String,
         effectiveConfig: PermissionConfiguration,
+        reasonOverride: String?,
         next: @escaping Next
     ) async throws -> ToolResult {
         // Check context-injected handler first, then fall back to config handler
@@ -314,7 +370,15 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
             )
         }
 
-        let request = PermissionRequest(from: context)
+        var request = PermissionRequest(from: context)
+        if let reasonOverride {
+            request = PermissionRequest(
+                sessionID: request.sessionID,
+                toolName: request.toolName,
+                toolInput: request.toolInput.merging(["reason": reasonOverride]) { current, _ in current },
+                toolUseID: request.toolUseID
+            )
+        }
         let approvalID = UUID().uuidString
         let response = try await handler.requestApproval(request, approvalID: approvalID)
 
@@ -343,6 +407,24 @@ public struct PermissionMiddleware: ToolMiddleware, Sendable {
                 reason: "User denied permission"
             )
         }
+    }
+
+    private func minimumPermissionMode(for context: ToolContext) -> PermissionMode? {
+        guard let rawValue = context.metadata[ToolAuthorizationMetadata.minimumPermissionModeKey] else {
+            return nil
+        }
+        return PermissionMode(rawValue: rawValue)
+    }
+
+    private func authorizationDecision(for context: ToolContext) -> ToolAuthorizationDecision? {
+        guard let rawValue = context.metadata[ToolAuthorizationMetadata.decisionKey] else {
+            return nil
+        }
+        return ToolAuthorizationDecision(rawValue: rawValue)
+    }
+
+    private func authorizationReason(for context: ToolContext) -> String? {
+        context.metadata[ToolAuthorizationMetadata.reasonKey]
     }
 
     // MARK: - Session Management

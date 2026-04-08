@@ -29,24 +29,25 @@ Create a `.mcp.json` file in your project root:
 ```swift
 // Load from search paths
 let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
-let tools = try await manager.allTools()
+let discoveredTools = try await manager.allTools()
+let tools = try discoveredTools.swiftAgentTools()
 
 // Connect to a single server
 let client = try await MCPClient.connect(config: MCPServerConfig(
     name: "github",
     transport: .stdio(command: "docker", arguments: ["run", "-i", "..."])
 ))
-let mcpTools = try await client.tools()
+let mcpTools = try await client.discoveredTools()
 ```
 
 ### Tool Naming Convention
 
-MCP tools follow the naming pattern: `mcp__servername__toolname`
+MCP tools follow the naming pattern: `mcp:servername:toolname`
 
 ```swift
 // Permission rules for MCP tools
 .allowing(.mcp("github"))           // Allow all tools from github server
-.allowing(.tool("mcp__github__*"))  // Same as above
+.allowing(.tool("mcp:github:*"))    // Same as above
 ```
 
 ### Transport Types
@@ -71,7 +72,8 @@ MCP tools follow the naming pattern: `mcp__servername__toolname`
 
 ### Tools
 
-- ``MCPDynamicTool``
+- ``MCPDiscoveredTool``
+- ``MCPToolAdapter``
 
 ### Authentication
 

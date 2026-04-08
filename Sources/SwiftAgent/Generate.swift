@@ -386,10 +386,13 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step, @unchecke
                             // Pass the snapshot directly to the handler
                             await handler(snapshot)
 
-                            // Try to get the full content from rawContent
-                            // This is needed because snapshot.content is PartiallyGenerated
-                            if let fullContent = try? Out(snapshot.rawContent) {
-                                lastContent = fullContent
+                            // Try to get the full content from rawContent.
+                            // This is expected to fail for partial snapshots during streaming,
+                            // as the generated content is incomplete until the final snapshot.
+                            do {
+                                lastContent = try Out(snapshot.rawContent)
+                            } catch {
+                                // Partial content is not yet parseable — expected during streaming
                             }
                         }
 

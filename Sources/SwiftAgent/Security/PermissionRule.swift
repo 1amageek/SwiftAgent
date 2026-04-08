@@ -14,7 +14,7 @@ import Foundation
 /// - `"Bash(git:*)"` - matches Bash tool with git commands
 /// - `"Bash(git status)"` - matches exact command
 /// - `"Write(/tmp/*)"` - matches Write to /tmp paths
-/// - `"mcp__server__*"` - wildcard for MCP tools
+/// - `"mcp:server:*"` - wildcard for MCP tools
 ///
 /// ## Pattern Syntax
 ///
@@ -54,7 +54,7 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     /// Examples:
     /// - `"Read"` → `"Read"`
     /// - `"Bash(git:*)"` → `"Bash"`
-    /// - `"mcp__server__*"` → `"mcp__server__*"`
+    /// - `"mcp:server:*"` → `"mcp:server:*"`
     public var toolName: String {
         if let parenIndex = pattern.firstIndex(of: "(") {
             return String(pattern[..<parenIndex])
@@ -118,7 +118,13 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     private func matchesArgument(_ argPattern: String, context: ToolContext) -> Bool {
         // Parse the argument JSON
         guard let data = context.arguments.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let json: [String: Any] = {
+                  do {
+                      return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                  } catch {
+                      return nil
+                  }
+              }() else {
             return false
         }
 
@@ -229,17 +235,19 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     /// - Returns: `true` if the pattern matches.
     ///
     /// - Note: Matching is case-sensitive to match exact match behavior.
+    ///   Returns `false` if the regex cannot be compiled (invalid pattern).
     private func matchWildcard(_ pattern: String, against string: String) -> Bool {
         // Convert wildcard pattern to regex
         let escaped = NSRegularExpression.escapedPattern(for: pattern)
         let regexPattern = "^" + escaped.replacingOccurrences(of: "\\*", with: ".*") + "$"
 
-        guard let regex = try? NSRegularExpression(pattern: regexPattern, options: []) else {
+        do {
+            let regex = try NSRegularExpression(pattern: regexPattern, options: [])
+            let range = NSRange(string.startIndex..., in: string)
+            return regex.firstMatch(in: string, options: [], range: range) != nil
+        } catch {
             return false
         }
-
-        let range = NSRange(string.startIndex..., in: string)
-        return regex.firstMatch(in: string, options: [], range: range) != nil
     }
 }
 
@@ -292,7 +300,7 @@ extension PermissionRule {
     /// - Parameter serverName: The MCP server name.
     /// - Returns: A permission rule.
     public static func mcp(_ serverName: String) -> PermissionRule {
-        PermissionRule("mcp__\(serverName)__*")
+        PermissionRule("mcp:\(serverName):*")
     }
 }
 

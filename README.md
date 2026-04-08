@@ -881,7 +881,7 @@ let config = PermissionConfiguration(
 | `"Read"` | Read tool |
 | `"Bash(git:*)"` | git commands |
 | `"Write(/tmp/*)"` | Writes under /tmp/ |
-| `"mcp__*"` | All MCP tools |
+| `"mcp:*"` | All MCP tools |
 
 ### Sandbox (macOS)
 
@@ -943,7 +943,8 @@ MCP (Model Context Protocol) integration with Claude Code-compatible tool naming
 import SwiftAgentMCP
 
 let manager = try await MCPClientManager.loadDefault()  // .mcp.json
-let tools = try await manager.allTools()  // mcp__server__tool format
+let discoveredTools = try await manager.allTools()
+let tools = try discoveredTools.swiftAgentTools()  // mcp:server:tool format
 
 // Permission integration
 .allowing(.mcp("github"))
@@ -981,14 +982,30 @@ See [docs/SYMBIOSIS.md](docs/SYMBIOSIS.md) for protocols and SubAgent spawning.
 
 ### Skills
 
-Portable skill packages with auto-discovery.
+Portable skill packages discovered from local roots, independently of plugins.
 
 ```swift
-let config = AgentConfiguration(...)
-    .withSkills(.autoDiscover())
+let registry = try await SkillRegistry.discover()
+let prompt = await registry.generateAvailableSkillsPrompt()
 ```
 
-See [docs/SKILLS.md](docs/SKILLS.md) for SKILL.md format.
+See [Docs/SKILLS_DESIGN.md](Docs/SKILLS_DESIGN.md) for the discovery model and SKILL.md format.
+
+### Plugins
+
+Runtime plugins compatible with `claw-code` manifests.
+
+```swift
+let manager = PluginManager(
+    configuration: PluginManagerConfig(
+        externalRoots: ["/path/to/plugin"]
+    )
+)
+
+let tools = try manager.aggregatedSwiftAgentTools()
+```
+
+See [Docs/PLUGINS.md](Docs/PLUGINS.md) for the manifest contract and unsupported fields.
 
 ## Architecture
 

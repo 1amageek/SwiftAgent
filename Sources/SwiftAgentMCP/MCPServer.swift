@@ -50,7 +50,7 @@ public protocol MCPServer {
     var version: String { get }
 
     /// The tools to expose via MCP.
-    @ToolsBuilder var tools: [any Tool] { get }
+    @ToolsBuilder var tools: [any SwiftAgent.Tool] { get }
 }
 
 // MARK: - Default Implementations
@@ -72,10 +72,9 @@ extension MCPServer {
         )
 
         let toolList = tools
-        var toolMap: [String: any Tool] = [:]
-        for tool in toolList {
-            toolMap[tool.name] = tool
-        }
+        let toolMap: [String: any SwiftAgent.Tool] = Dictionary(
+            uniqueKeysWithValues: toolList.map { ($0.name, $0) }
+        )
 
         _ = await server
             .withMethodHandler(ListTools.self) { _ in
@@ -129,7 +128,7 @@ extension MCPServer {
 
 // MARK: - Tool Bridge
 
-extension Tool {
+extension SwiftAgent.Tool {
 
     /// Call this tool with a `GeneratedContent` value and return the output as a string.
     ///

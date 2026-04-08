@@ -213,10 +213,11 @@ extension PipelinedTool {
         let args = arguments  // Capture for Sendable
 
         // Create context with JSON if possible, otherwise debug description
-        let argumentsString = _encodeArgumentsToJSON(args) ?? String(describing: args)
+        let argumentsString = try _encodeArgumentsToJSON(args) ?? String(describing: args)
         let context = ToolContext(
             toolName: name,
-            arguments: argumentsString
+            arguments: argumentsString,
+            metadata: _toolContextMetadata(for: tool, argumentsJSON: argumentsString)
         )
 
         // Box to capture the typed output
@@ -226,10 +227,11 @@ extension PipelinedTool {
         let result = try await ToolPipeline.execute(
             context: context,
             middleware: middleware
-        ) { [tool] _ in
+        ) { [tool] ctx in
             // Execute the actual tool (only once)
             do {
-                let output = try await tool.call(arguments: args)
+                let effectiveArgs = try _decodeArguments(ctx.arguments, as: T.Arguments.self, fallback: args)
+                let output = try await tool.call(arguments: effectiveArgs)
                 outputBox.value = output  // Store the typed output
                 let duration = ContinuousClock.now - startTime
                 return .success(serializeOutput(output), duration: duration)
@@ -318,27 +320,24 @@ private func _executeTypedToolWithMiddleware<T: Tool>(
 ) async throws -> String {
     let startTime = ContinuousClock.now
 
-    // Convert GeneratedContent to typed arguments
-    let typedArgs = try T.Arguments(arguments)
-
     // Use GeneratedContent's built-in JSON conversion
     let argumentsJSON = arguments.jsonString
 
     let context = ToolContext(
         toolName: tool.name,
-        arguments: argumentsJSON
+        arguments: argumentsJSON,
+        metadata: _toolContextMetadata(for: tool, argumentsJSON: argumentsJSON)
     )
-
-    // Wrap tool and args for Sendable capture
-    let box = ToolExecutionBox(tool: tool, arguments: typedArgs)
 
     // Execute through middleware chain
     let result = try await ToolPipeline.execute(
         context: context,
         middleware: middleware
-    ) { _ in
+    ) { ctx in
         do {
-            let output = try await box.execute()
+            let effectiveGeneratedContent = try GeneratedContent(json: ctx.arguments)
+            let effectiveArgs = try T.Arguments(effectiveGeneratedContent)
+            let output = try await _executeTool(tool, arguments: effectiveArgs)
             let duration = ContinuousClock.now - startTime
             return .success(output, duration: duration)
         } catch {
@@ -353,25 +352,6 @@ private func _executeTypedToolWithMiddleware<T: Tool>(
 
     return result.output
 }
-
-/// Box for capturing tool and arguments in Sendable closures.
-private final class ToolExecutionBox<T: Tool>: @unchecked Sendable {
-    let tool: T
-    let arguments: T.Arguments
-
-    init(tool: T, arguments: T.Arguments) {
-        self.tool = tool
-        self.arguments = arguments
-    }
-}
-
-extension ToolExecutionBox {
-    func execute() async throws -> String {
-        let output = try await tool.call(arguments: arguments)
-        return String(describing: output)
-    }
-}
-
 /// Errors from the tool pipeline.
 public enum ToolPipelineError: Error, LocalizedError {
     /// Argument type mismatch during deserialization.
@@ -394,23 +374,59 @@ public enum ToolPipelineError: Error, LocalizedError {
     }
 }
 
+private func _executeTool<T: Tool>(
+    _ tool: T,
+    arguments: T.Arguments
+) async throws -> String {
+    let output = try await tool.call(arguments: arguments)
+    return String(describing: output)
+}
+
 /// Attempts to encode typed arguments to JSON if they conform to Encodable.
-private func _encodeArgumentsToJSON<T>(_ arguments: T) -> String? {
+private func _encodeArgumentsToJSON<T>(_ arguments: T) throws -> String? {
     guard let encodable = arguments as? Encodable else {
         return nil
     }
-    return _encodeToJSON(encodable)
+    return try _encodeToJSON(encodable)
 }
 
-private func _encodeToJSON(_ value: Encodable) -> String? {
-    do {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        let data = try encoder.encode(AnyEncodable(value))
-        return String(data: data, encoding: .utf8)
-    } catch {
-        return nil
+private func _encodeToJSON(_ value: Encodable) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let data = try encoder.encode(AnyEncodable(value))
+    guard let json = String(data: data, encoding: .utf8) else {
+        throw ToolPipelineError.argumentTypeMismatch(
+            expected: "UTF-8 JSON",
+            received: "non-UTF-8 data (\(data.count) bytes)"
+        )
     }
+    return json
+}
+
+private func _decodeArguments<T: ConvertibleFromGeneratedContent>(
+    _ argumentsJSON: String,
+    as _: T.Type,
+    fallback: T
+) throws -> T {
+    let generatedContent = try GeneratedContent(json: argumentsJSON)
+    do {
+        return try T(generatedContent)
+    } catch {
+        if argumentsJSON == (try _encodeArgumentsToJSON(fallback) ?? String(describing: fallback)) {
+            return fallback
+        }
+        throw error
+    }
+}
+
+private func _toolContextMetadata(
+    for tool: any Tool,
+    argumentsJSON: String
+) -> [String: String] {
+    guard let provider = tool as? any ToolContextMetadataProvider else {
+        return [:]
+    }
+    return provider.toolContextMetadata(argumentsJSON: argumentsJSON)
 }
 
 /// Type-erased wrapper for Encodable values.

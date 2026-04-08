@@ -170,9 +170,10 @@ public final class AgentSession: Sendable {
 
     /// Runs the agent session loop with a pre-built Conversation.
     ///
-    /// This is an internal entry point used by the public `run(tools:pipeline:instructions:step:)` overloads.
-    /// Use those overloads instead to ensure tools are wrapped with `EventEmittingMiddleware`.
-    private func run(_ conversation: Conversation) async throws {
+    /// Higher-level runtimes can build a `Conversation` themselves and invoke this primitive entry point.
+    /// When using raw tools, prefer `run(tools:pipeline:instructions:step:)` so `EventEmittingMiddleware`
+    /// and the configured pipeline are applied consistently.
+    public func run(_ conversation: Conversation) async throws {
         let (turnStream, turnContinuation) = AsyncStream<RunRequest>.makeStream()
 
         // Create TurnGate only for transports that don't support background receive
@@ -207,6 +208,9 @@ public final class AgentSession: Sendable {
 
                 switch request.input {
                 case .text:
+                    #if DEBUG
+                    print("[AgentSession] queued text turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
+                    #endif
                     turnGate?.enterTurn()
                     turnContinuation.yield(request)
 
@@ -224,7 +228,13 @@ public final class AgentSession: Sendable {
                             sessionID: request.sessionID,
                             turnID: request.turnID
                         )
-                        try? await self.transport.send(.warning(warning))
+                        do {
+                            try await self.transport.send(.warning(warning))
+                        } catch {
+                            #if DEBUG
+                            print("[AgentSession] failed to send warning: \(error)")
+                            #endif
+                        }
                     }
 
                 case .cancel:
@@ -248,6 +258,9 @@ public final class AgentSession: Sendable {
         // Turn processor: runs in the current async context (no Sendable
         // boundary crossing for conversation). Processes turns sequentially.
         for await request in turnStream {
+            #if DEBUG
+            print("[AgentSession] processing turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
+            #endif
             // Definitive idempotency check: the receive loop checks at receive time,
             // but a duplicate may pass if it arrives before the first attempt completes.
             // This check runs after the previous turn finishes (sequential processing).
@@ -265,6 +278,9 @@ public final class AgentSession: Sendable {
                 }
             }
             await executeTurn(conversation: conversation, request: request, cancellationToken: token)
+            #if DEBUG
+            print("[AgentSession] finished turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
+            #endif
             let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
             turnState.withLock { state in
                 if isTerminal {

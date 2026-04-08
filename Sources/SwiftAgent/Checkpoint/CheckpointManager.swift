@@ -273,8 +273,8 @@ public actor CheckpointManager {
         // Check for modified and deleted files
         for snapshot in checkpoint.fileSnapshots {
             if fileManager.fileExists(atPath: snapshot.path) {
-                if let currentContent = try? Data(contentsOf: URL(fileURLWithPath: snapshot.path)),
-                   currentContent != snapshot.content {
+                let currentContent = try Data(contentsOf: URL(fileURLWithPath: snapshot.path))
+                if currentContent != snapshot.content {
                     modified.append(snapshot.path)
                 }
             } else {
@@ -308,7 +308,7 @@ public actor CheckpointManager {
             var isDir: ObjCBool = false
             if fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue {
                 trackedPaths.insert(fullPath)
-                try? captureCurrentState(for: fullPath)
+                try captureCurrentState(for: fullPath)
             }
         }
     }

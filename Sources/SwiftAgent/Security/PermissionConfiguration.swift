@@ -77,6 +77,9 @@ public struct PermissionConfiguration: Sendable {
     /// Whether to remember "always allow" and "block" decisions within the session.
     public var enableSessionMemory: Bool
 
+    /// Optional runtime execution mode used for plugin tool permission escalation.
+    public var permissionMode: PermissionMode?
+
     /// Creates a permission configuration.
     ///
     /// - Parameters:
@@ -94,7 +97,8 @@ public struct PermissionConfiguration: Sendable {
         overrides: [PermissionRule] = [],
         defaultAction: PermissionDecision = .ask,
         handler: (any ApprovalHandler)? = nil,
-        enableSessionMemory: Bool = true
+        enableSessionMemory: Bool = true,
+        permissionMode: PermissionMode? = nil
     ) {
         self.allow = allow
         self.deny = deny
@@ -103,6 +107,7 @@ public struct PermissionConfiguration: Sendable {
         self.defaultAction = defaultAction
         self.handler = handler
         self.enableSessionMemory = enableSessionMemory
+        self.permissionMode = permissionMode
     }
 }
 
@@ -137,7 +142,8 @@ extension PermissionConfiguration {
             overrides: [],
             defaultAction: .allow,
             handler: nil,
-            enableSessionMemory: false
+            enableSessionMemory: false,
+            permissionMode: .allow
         )
     }
 
@@ -188,7 +194,8 @@ extension PermissionConfiguration {
                 .bash("mv /*:*"),
             ],
             defaultAction: .ask,
-            enableSessionMemory: true
+            enableSessionMemory: true,
+            permissionMode: .workspaceWrite
         )
     }
 
@@ -208,7 +215,8 @@ extension PermissionConfiguration {
                 .bash("sudo:*"),
             ],
             defaultAction: .allow,
-            enableSessionMemory: false
+            enableSessionMemory: false,
+            permissionMode: .allow
         )
     }
 
@@ -225,7 +233,8 @@ extension PermissionConfiguration {
             ],
             deny: [],
             defaultAction: .deny,
-            enableSessionMemory: false
+            enableSessionMemory: false,
+            permissionMode: .readOnly
         )
     }
 
@@ -248,7 +257,8 @@ extension PermissionConfiguration {
                 .tool("Git"),
             ],
             defaultAction: .deny,
-            enableSessionMemory: false
+            enableSessionMemory: false,
+            permissionMode: .readOnly
         )
     }
 }
@@ -294,6 +304,13 @@ extension PermissionConfiguration {
     public func withSessionMemory(_ enabled: Bool) -> PermissionConfiguration {
         var copy = self
         copy.enableSessionMemory = enabled
+        return copy
+    }
+
+    /// Returns a copy with a runtime permission mode.
+    public func withPermissionMode(_ mode: PermissionMode?) -> PermissionConfiguration {
+        var copy = self
+        copy.permissionMode = mode
         return copy
     }
 }

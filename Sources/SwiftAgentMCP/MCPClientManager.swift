@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftAgent
 
 // MARK: - MCP Client Manager
 
@@ -15,7 +16,7 @@ import Foundation
 /// - Load configuration from `.mcp.json` files
 /// - Connect to multiple servers simultaneously
 /// - Enable/disable servers dynamically
-/// - Get tools from all connected servers
+/// - Discover MCP-native tools from all connected servers
 /// - OAuth authentication management
 ///
 /// ## Usage
@@ -27,8 +28,9 @@ import Foundation
 /// // Or load from a specific file
 /// let manager = try await MCPClientManager.load(from: URL(fileURLWithPath: ".mcp.json"))
 ///
-/// // Get all tools from all servers
-/// let tools = try await manager.allTools()
+/// // Get all discovered tools from all servers
+/// let discoveredTools = try await manager.allTools()
+/// let tools = try discoveredTools.swiftAgentTools()
 ///
 /// // Use with LanguageModelSession
 /// let session = LanguageModelSession(model: model, tools: tools) {
@@ -206,32 +208,40 @@ public actor MCPClientManager {
 
     // MARK: - Tools
 
-    /// Gets all tools from all connected servers
+    /// Gets all discovered MCP tools from all connected servers.
     ///
-    /// Tool names are prefixed with server name: `mcp__servername__toolname`
-    ///
-    /// - Returns: Array of all tools from all servers
-    public func allTools() async throws -> [MCPDynamicTool] {
-        var tools: [MCPDynamicTool] = []
+    /// - Returns: Array of discovered MCP tools from all servers
+    public func allTools() async throws -> [MCPDiscoveredTool] {
+        var tools: [MCPDiscoveredTool] = []
 
         for (_, client) in clients {
-            let serverTools = try await client.tools()
+            let serverTools = try await client.discoveredTools()
             tools.append(contentsOf: serverTools)
         }
 
         return tools
     }
 
-    /// Gets tools from a specific server
+    /// Gets all connected MCP tools bridged into SwiftAgent's `Tool` runtime.
+    public func allSwiftAgentTools() async throws -> [any SwiftAgent.Tool] {
+        try await allTools().swiftAgentTools()
+    }
+
+    /// Gets discovered MCP tools from a specific server.
     ///
     /// - Parameter serverName: The server name
     /// - Returns: Array of tools from the server
     /// - Throws: If the server is not found
-    public func tools(from serverName: String) async throws -> [MCPDynamicTool] {
+    public func tools(from serverName: String) async throws -> [MCPDiscoveredTool] {
         guard let client = clients[serverName] else {
             throw MCPClientError.serverNotFound(serverName)
         }
-        return try await client.tools()
+        return try await client.discoveredTools()
+    }
+
+    /// Gets SwiftAgent `Tool` adapters for a specific server.
+    public func swiftAgentTools(from serverName: String) async throws -> [any SwiftAgent.Tool] {
+        try await tools(from: serverName).swiftAgentTools()
     }
 
     // MARK: - Server Information

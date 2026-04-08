@@ -33,101 +33,63 @@ public struct SkillLoader: Sendable {
 
     // MARK: - Public Methods
 
-    /// Loads only metadata from a SKILL.md file (discovery phase).
+    /// Loads only metadata from a SKILL.md file or legacy markdown skill (discovery phase).
     ///
     /// This is efficient for startup when we only need name and description
     /// to build the `<available_skills>` prompt.
     ///
-    /// - Parameter directoryPath: Path to the skill directory.
+    /// - Parameter directoryPath: Path to the skill directory or markdown file.
     /// - Returns: Skill with metadata only (instructions = nil).
     /// - Throws: `SkillError` if loading fails.
     public static func loadMetadata(from directoryPath: String) throws -> Skill {
-        let skillFilePath = (directoryPath as NSString).appendingPathComponent("SKILL.md")
-
-        // Check directory exists
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directoryPath, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            throw SkillError.skillDirectoryNotFound(path: directoryPath)
-        }
-
-        // Check SKILL.md exists
-        guard FileManager.default.fileExists(atPath: skillFilePath) else {
-            throw SkillError.skillFileNotFound(path: skillFilePath)
-        }
-
-        // Read file content
-        let content: String
-        do {
-            content = try String(contentsOfFile: skillFilePath, encoding: .utf8)
-        } catch {
-            throw SkillError.fileReadError(path: skillFilePath, underlyingError: error)
-        }
+        let source = try resolveSource(at: directoryPath)
+        let content = try readSkillFile(at: source.promptFilePath)
 
         // Detect format and parse
-        let directoryName = (directoryPath as NSString).lastPathComponent
         let metadata: SkillMetadata
         if hasFrontmatter(content) {
             (metadata, _) = try parseFrontmatter(content)
         } else {
-            (metadata, _) = try parseMarkdownSkill(content, directoryName: directoryName)
+            (metadata, _) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
         }
 
         // Validate metadata
-        try metadata.validate(directoryName: directoryName)
+        try metadata.validate(directoryName: source.expectedDirectoryName)
 
         return Skill(
             metadata: metadata,
             instructions: nil,
-            directoryPath: directoryPath
+            directoryPath: source.directoryPath,
+            promptFilePath: source.promptFilePath
         )
     }
 
     /// Loads full skill including instructions (activation phase).
     ///
-    /// - Parameter directoryPath: Path to the skill directory.
+    /// - Parameter directoryPath: Path to the skill directory or markdown file.
     /// - Returns: Skill with full instructions.
     /// - Throws: `SkillError` if loading fails.
     public static func loadFull(from directoryPath: String) throws -> Skill {
-        let skillFilePath = (directoryPath as NSString).appendingPathComponent("SKILL.md")
-
-        // Check directory exists
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directoryPath, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            throw SkillError.skillDirectoryNotFound(path: directoryPath)
-        }
-
-        // Check SKILL.md exists
-        guard FileManager.default.fileExists(atPath: skillFilePath) else {
-            throw SkillError.skillFileNotFound(path: skillFilePath)
-        }
-
-        // Read file content
-        let content: String
-        do {
-            content = try String(contentsOfFile: skillFilePath, encoding: .utf8)
-        } catch {
-            throw SkillError.fileReadError(path: skillFilePath, underlyingError: error)
-        }
+        let source = try resolveSource(at: directoryPath)
+        let content = try readSkillFile(at: source.promptFilePath)
 
         // Detect format and parse
-        let directoryName = (directoryPath as NSString).lastPathComponent
         let metadata: SkillMetadata
         let body: String
         if hasFrontmatter(content) {
             (metadata, body) = try parseFrontmatter(content)
         } else {
-            (metadata, body) = try parseMarkdownSkill(content, directoryName: directoryName)
+            (metadata, body) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
         }
 
         // Validate metadata
-        try metadata.validate(directoryName: directoryName)
+        try metadata.validate(directoryName: source.expectedDirectoryName)
 
         return Skill(
             metadata: metadata,
             instructions: body.trimmingCharacters(in: .whitespacesAndNewlines),
-            directoryPath: directoryPath
+            directoryPath: source.directoryPath,
+            promptFilePath: source.promptFilePath
         )
     }
 
@@ -140,7 +102,7 @@ public struct SkillLoader: Sendable {
         if skill.isFullyLoaded {
             return skill
         }
-        return try loadFull(from: skill.directoryPath)
+        return try loadFull(from: skill.promptFilePath)
     }
 
     // MARK: - Format Detection
@@ -162,12 +124,12 @@ public struct SkillLoader: Sendable {
     ///
     /// - Parameters:
     ///   - content: Raw SKILL.md file content.
-    ///   - directoryName: Parent directory name used as the skill name.
+    ///   - fallbackName: Directory or file-stem fallback used as the skill name.
     /// - Returns: Tuple of (metadata, body).
     /// - Throws: `SkillError.invalidFormat` if content is empty.
     static func parseMarkdownSkill(
         _ content: String,
-        directoryName: String
+        fallbackName: String
     ) throws -> (metadata: SkillMetadata, body: String) {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -200,11 +162,11 @@ public struct SkillLoader: Sendable {
         }
 
         let description = descriptionLines.isEmpty
-            ? directoryName
+            ? fallbackName
             : descriptionLines.joined(separator: " ")
 
         let metadata = SkillMetadata(
-            name: directoryName,
+            name: fallbackName,
             description: description
         )
 
@@ -343,4 +305,54 @@ public struct SkillLoader: Sendable {
 
         return (key, value)
     }
+
+    private static func readSkillFile(at promptFilePath: String) throws -> String {
+        do {
+            return try String(contentsOfFile: promptFilePath, encoding: .utf8)
+        } catch {
+            throw SkillError.fileReadError(path: promptFilePath, underlyingError: error)
+        }
+    }
+
+    private static func resolveSource(at path: String) throws -> SkillSource {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            throw SkillError.skillDirectoryNotFound(path: path)
+        }
+
+        if isDirectory.boolValue {
+            let promptFilePath = (path as NSString).appendingPathComponent("SKILL.md")
+            guard FileManager.default.fileExists(atPath: promptFilePath) else {
+                throw SkillError.skillFileNotFound(path: promptFilePath)
+            }
+
+            let directoryName = (path as NSString).lastPathComponent
+            return SkillSource(
+                directoryPath: path,
+                promptFilePath: promptFilePath,
+                fallbackName: directoryName,
+                expectedDirectoryName: directoryName
+            )
+        }
+
+        guard path.lowercased().hasSuffix(".md") else {
+            throw SkillError.skillFileNotFound(path: path)
+        }
+
+        let directoryPath = (path as NSString).deletingLastPathComponent
+        let fallbackName = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+        return SkillSource(
+            directoryPath: directoryPath,
+            promptFilePath: path,
+            fallbackName: fallbackName,
+            expectedDirectoryName: nil
+        )
+    }
+}
+
+private struct SkillSource {
+    let directoryPath: String
+    let promptFilePath: String
+    let fallbackName: String
+    let expectedDirectoryName: String?
 }

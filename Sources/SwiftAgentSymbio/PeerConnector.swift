@@ -46,9 +46,9 @@ extension Array where Element == any Perception {
 
 extension Array where Element == String {
     /// Convert perception identifiers to CapabilityIDs
-    public var toCapabilityIDs: [CapabilityID] {
-        compactMap { identifier in
-            try? CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
+    public func toCapabilityIDs() throws -> [CapabilityID] {
+        try map { identifier in
+            try CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
         }
     }
 }
@@ -133,21 +133,17 @@ public actor PeerConnector {
         provideIdentifiers: [String] = [],
         displayName: String? = nil,
         metadata: [String: String] = [:]
-    ) {
+    ) throws {
         // Convert perception identifiers to accepts CapabilitySet
-        let acceptsCapabilities = perceptionIdentifiers.compactMap { identifier -> Capability? in
-            guard let capID = try? CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)") else {
-                return nil
-            }
+        let acceptsCapabilities = try perceptionIdentifiers.map { identifier -> Capability in
+            let capID = try CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
             return Capability(id: capID, description: "Perception: \(identifier)")
         }
         let acceptsSet = CapabilitySet(capabilities: acceptsCapabilities)
 
         // Convert provide identifiers to provides CapabilitySet
-        let providesCapabilities = provideIdentifiers.compactMap { identifier -> Capability? in
-            guard let capID = try? CapabilityID(parsing: identifier) else {
-                return nil
-            }
+        let providesCapabilities = try provideIdentifiers.map { identifier -> Capability in
+            let capID = try CapabilityID(parsing: identifier)
             return Capability(id: capID, description: identifier)
         }
         let providesSet = CapabilitySet(capabilities: providesCapabilities)
@@ -214,10 +210,8 @@ public actor PeerConnector {
     public func discoverReceivers(
         for perceptionIdentifier: String,
         timeout: Duration = .seconds(5)
-    ) async -> AsyncThrowingStream<DiscoveredPeer, Error> {
-        guard let capID = try? CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(perceptionIdentifier)") else {
-            return AsyncThrowingStream { $0.finish() }
-        }
+    ) async throws -> AsyncThrowingStream<DiscoveredPeer, Error> {
+        let capID = try CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(perceptionIdentifier)")
         return await coordinator.discover(accepts: capID, timeout: timeout)
     }
 
@@ -247,7 +241,7 @@ public actor PeerConnector {
                     for try await peer in transport.discoverAll(timeout: timeout) {
                         if !seen.contains(peer.peerID) {
                             seen.insert(peer.peerID)
-                            if let resolved = try? await transport.resolve(peer.peerID) {
+                            if let resolved = try await transport.resolve(peer.peerID) {
                                 continuation.yield(resolved)
                             }
                         }
@@ -301,9 +295,9 @@ public actor PeerConnector {
     /// - Returns: Equivalent accepts capability IDs
     public static func presenceToAccepts<ID: Hashable & Sendable & Codable>(
         _ presence: Presence<ID>
-    ) -> [CapabilityID] {
-        presence.perceptions.compactMap { identifier in
-            try? CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
+    ) throws -> [CapabilityID] {
+        try presence.perceptions.map { identifier in
+            try CapabilityID(parsing: "\(AgentCapabilityNamespace.perception).\(identifier)")
         }
     }
 

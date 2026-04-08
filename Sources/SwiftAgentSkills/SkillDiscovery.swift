@@ -9,69 +9,37 @@ import Foundation
 
 /// Discovers skills from standard directories.
 ///
-/// `SkillDiscovery` searches for skills in the following locations:
-///
-/// 1. `~/.agent/skills/` - User-level skills
-/// 2. `./.agent/skills/` - Project-level skills (relative to current directory)
-/// 3. `$AGENT_SKILLS_PATH` - Additional paths from environment variable (colon-separated)
-///
-/// ## Usage
-///
-/// ```swift
-/// // Discover all skills from standard paths
-/// let skills = try SkillDiscovery.discoverAll()
-///
-/// // Discover from a specific directory
-/// let projectSkills = try SkillDiscovery.discover(in: "/path/to/skills")
-/// ```
+/// `SkillDiscovery` follows the same search strategy as `claw-code`.
+/// Skills are discovered from project ancestors, config-home directories,
+/// user-level directories, and legacy `commands/` roots.
 public struct SkillDiscovery: Sendable {
 
-    // MARK: - Constants
-
-    /// Standard skill discovery paths.
-    public static let standardPaths: [String] = [
-        "~/.agent/skills",      // User-level skills
-        "./.agent/skills"       // Project-level skills
-    ]
-
-    /// Environment variable for additional paths.
+    /// Environment variable for additional skill roots.
     public static let environmentVariable = "AGENT_SKILLS_PATH"
 
-    // MARK: - Discovery Methods
-
-    /// Discovers all skills from standard paths.
-    ///
-    /// Searches in:
-    /// 1. `~/.agent/skills/`
-    /// 2. `./.agent/skills/`
-    /// 3. Paths from `$AGENT_SKILLS_PATH`
-    ///
-    /// - Returns: Array of discovered skills (metadata only).
-    /// - Note: Invalid skills are skipped with a warning.
-    public static func discoverAll() throws -> [Skill] {
+    /// Discovers all skills from ordered roots. Earlier roots win on conflicts.
+    public static func discoverAll(
+        cwd: String = FileManager.default.currentDirectoryPath
+    ) throws -> [Skill] {
         var allSkills: [Skill] = []
         var seenNames: Set<String> = []
 
-        for path in searchPaths() {
-            let expandedPath = expandPath(path)
-
-            guard FileManager.default.fileExists(atPath: expandedPath) else {
+        for root in searchRoots(cwd: cwd) {
+            guard FileManager.default.fileExists(atPath: root.path) else {
                 continue
             }
 
             do {
-                let skills = try discover(in: expandedPath)
+                let skills = try discover(in: root)
                 for skill in skills {
-                    // Skip duplicates (first one wins)
-                    if !seenNames.contains(skill.id) {
-                        seenNames.insert(skill.id)
+                    let key = skill.id.lowercased()
+                    if seenNames.insert(key).inserted {
                         allSkills.append(skill)
                     }
                 }
             } catch {
-                // Log warning but continue with other paths
                 #if DEBUG
-                print("Warning: Failed to discover skills in \(expandedPath): \(error)")
+                print("Warning: Failed to discover skills in \(root.path): \(error)")
                 #endif
             }
         }
@@ -79,51 +47,125 @@ public struct SkillDiscovery: Sendable {
         return allSkills
     }
 
-    /// Discovers skills from a specific directory.
-    ///
-    /// Each subdirectory containing a `SKILL.md` file is treated as a skill.
-    ///
-    /// - Parameter path: Directory to search for skills.
-    /// - Returns: Array of discovered skills (metadata only).
-    /// - Throws: `SkillError.skillDirectoryNotFound` if path doesn't exist.
+    /// Discovers skills from a specific root path using `skills/` semantics.
     public static func discover(in path: String) throws -> [Skill] {
         let expandedPath = expandPath(path)
+        return try discover(in: SkillDiscoveryRoot(path: expandedPath, origin: .skillsDirectory))
+    }
 
-        // Check directory exists
+    /// Ordered list of concrete search paths.
+    public static func searchPaths(
+        cwd: String = FileManager.default.currentDirectoryPath
+    ) -> [String] {
+        searchRoots(cwd: cwd).map(\.path)
+    }
+
+    /// Ordered list of concrete discovery roots.
+    public static func searchRoots(
+        cwd: String = FileManager.default.currentDirectoryPath
+    ) -> [SkillDiscoveryRoot] {
+        var roots: [SkillDiscoveryRoot] = []
+        let cwdURL = URL(fileURLWithPath: expandPath(cwd)).standardizedFileURL
+
+        for ancestor in ancestors(of: cwdURL) {
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".claw/skills").path, origin: .skillsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".omc/skills").path, origin: .skillsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".agents/skills").path, origin: .skillsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".codex/skills").path, origin: .skillsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".claude/skills").path, origin: .skillsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".claw/commands").path, origin: .legacyCommandsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".codex/commands").path, origin: .legacyCommandsDirectory)
+            appendRoot(&roots, path: ancestor.appendingPathComponent(".claude/commands").path, origin: .legacyCommandsDirectory)
+        }
+
+        if let clawConfigHome = ProcessInfo.processInfo.environment["CLAW_CONFIG_HOME"] {
+            appendRoot(&roots, path: (clawConfigHome as NSString).appendingPathComponent("skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (clawConfigHome as NSString).appendingPathComponent("commands"), origin: .legacyCommandsDirectory)
+        }
+
+        if let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"] {
+            appendRoot(&roots, path: (codexHome as NSString).appendingPathComponent("skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (codexHome as NSString).appendingPathComponent("commands"), origin: .legacyCommandsDirectory)
+        }
+
+        if let claudeConfigDir = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] {
+            appendRoot(&roots, path: (claudeConfigDir as NSString).appendingPathComponent("skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (claudeConfigDir as NSString).appendingPathComponent("skills/omc-learned"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (claudeConfigDir as NSString).appendingPathComponent("commands"), origin: .legacyCommandsDirectory)
+        }
+
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".claw/skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".omc/skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".claw/commands"), origin: .legacyCommandsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".codex/skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".codex/commands"), origin: .legacyCommandsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".claude/skills"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".claude/skills/omc-learned"), origin: .skillsDirectory)
+            appendRoot(&roots, path: (home as NSString).appendingPathComponent(".claude/commands"), origin: .legacyCommandsDirectory)
+        }
+
+        if let envPaths = ProcessInfo.processInfo.environment[environmentVariable] {
+            for path in envPaths.split(separator: ":").map(String.init).filter({ !$0.isEmpty }) {
+                appendRoot(&roots, path: path, origin: .skillsDirectory)
+            }
+        }
+
+        return roots
+    }
+
+    /// Checks whether a directory contains a standard `SKILL.md`.
+    public static func isSkillDirectory(_ path: String) -> Bool {
+        let expandedPath = expandPath(path)
+
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory),
               isDirectory.boolValue else {
-            throw SkillError.skillDirectoryNotFound(path: expandedPath)
+            return false
         }
 
-        // List subdirectories
-        let contents: [String]
-        do {
-            contents = try FileManager.default.contentsOfDirectory(atPath: expandedPath)
-        } catch {
-            throw SkillError.fileReadError(path: expandedPath, underlyingError: error)
+        let skillFilePath = (expandedPath as NSString).appendingPathComponent("SKILL.md")
+        return FileManager.default.fileExists(atPath: skillFilePath)
+    }
+
+    /// Expands `~` and resolves relative paths.
+    public static func expandPath(_ path: String) -> String {
+        var expanded = (path as NSString).expandingTildeInPath
+        if !expanded.hasPrefix("/") {
+            expanded = (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(expanded)
+        }
+        return (expanded as NSString).standardizingPath
+    }
+
+    /// Validates that a skill exists at the given path.
+    public static func validateSkill(at path: String) throws {
+        _ = try SkillLoader.loadMetadata(from: expandPath(path))
+    }
+
+    public static func discoverProjectSkills() throws -> [Skill] {
+        try discoverAll(cwd: FileManager.default.currentDirectoryPath)
+    }
+
+    public static func discoverUserSkills() throws -> [Skill] {
+        let roots = searchRoots().filter { root in
+            root.path.contains("/.claw/")
+                || root.path.contains("/.codex/")
+                || root.path.contains("/.claude/")
+                || root.path.contains("/.omc/")
         }
 
         var skills: [Skill] = []
+        var seenNames: Set<String> = []
 
-        for item in contents.sorted() {
-            let itemPath = (expandedPath as NSString).appendingPathComponent(item)
-
-            // Skip hidden files/directories
-            if item.hasPrefix(".") {
+        for root in roots {
+            guard FileManager.default.fileExists(atPath: root.path) else {
                 continue
             }
-
-            // Check if it's a valid skill directory
-            if isSkillDirectory(itemPath) {
-                do {
-                    let skill = try SkillLoader.loadMetadata(from: itemPath)
+            let discovered = try discover(in: root)
+            for skill in discovered {
+                let key = skill.id.lowercased()
+                if seenNames.insert(key).inserted {
                     skills.append(skill)
-                } catch {
-                    // Log warning but continue with other skills
-                    #if DEBUG
-                    print("Warning: Failed to load skill from \(itemPath): \(error)")
-                    #endif
                 }
             }
         }
@@ -131,110 +173,81 @@ public struct SkillDiscovery: Sendable {
         return skills
     }
 
-    /// Gets all configured search paths.
-    ///
-    /// Includes standard paths and paths from environment variable.
-    ///
-    /// - Returns: Array of paths to search.
-    public static func searchPaths() -> [String] {
-        var paths = standardPaths
-
-        // Add paths from environment variable
-        if let envPaths = ProcessInfo.processInfo.environment[environmentVariable] {
-            let additionalPaths = envPaths
-                .split(separator: ":")
-                .map { String($0) }
-                .filter { !$0.isEmpty }
-            paths.append(contentsOf: additionalPaths)
-        }
-
-        return paths
-    }
-
-    /// Checks if a directory is a valid skill directory.
-    ///
-    /// A valid skill directory contains a `SKILL.md` file.
-    ///
-    /// - Parameter path: Directory path to check.
-    /// - Returns: `true` if directory contains SKILL.md.
-    public static func isSkillDirectory(_ path: String) -> Bool {
-        let expandedPath = expandPath(path)
-
-        // Check it's a directory
+    private static func discover(in root: SkillDiscoveryRoot) throws -> [Skill] {
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory),
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
-            return false
+            throw SkillError.skillDirectoryNotFound(path: root.path)
         }
 
-        // Check for SKILL.md
-        let skillFilePath = (expandedPath as NSString).appendingPathComponent("SKILL.md")
-        return FileManager.default.fileExists(atPath: skillFilePath)
+        let contents: [String]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        } catch {
+            throw SkillError.fileReadError(path: root.path, underlyingError: error)
+        }
+
+        var skills: [Skill] = []
+
+        for item in contents.sorted() {
+            if item.hasPrefix(".") {
+                continue
+            }
+
+            let itemPath = (root.path as NSString).appendingPathComponent(item)
+            let candidatePath: String?
+
+            switch root.origin {
+            case .skillsDirectory:
+                candidatePath = isSkillDirectory(itemPath) ? itemPath : nil
+            case .legacyCommandsDirectory:
+                if isSkillDirectory(itemPath) {
+                    candidatePath = itemPath
+                } else if itemPath.lowercased().hasSuffix(".md") {
+                    candidatePath = itemPath
+                } else {
+                    candidatePath = nil
+                }
+            }
+
+            guard let candidatePath else {
+                continue
+            }
+
+            do {
+                skills.append(try SkillLoader.loadMetadata(from: candidatePath))
+            } catch {
+                #if DEBUG
+                print("Warning: Failed to load skill from \(candidatePath): \(error)")
+                #endif
+            }
+        }
+
+        return skills
     }
 
-    // MARK: - Path Helpers
-
-    /// Expands path with tilde and resolves relative paths.
-    ///
-    /// - Parameter path: Path to expand.
-    /// - Returns: Expanded absolute path.
-    public static func expandPath(_ path: String) -> String {
-        var expanded = (path as NSString).expandingTildeInPath
-
-        // Resolve relative paths
-        if !expanded.hasPrefix("/") {
-            let currentDirectory = FileManager.default.currentDirectoryPath
-            expanded = (currentDirectory as NSString).appendingPathComponent(expanded)
+    private static func appendRoot(
+        _ roots: inout [SkillDiscoveryRoot],
+        path: String,
+        origin: SkillOrigin
+    ) {
+        let root = SkillDiscoveryRoot(path: expandPath(path), origin: origin)
+        if !roots.contains(root) {
+            roots.append(root)
         }
-
-        // Standardize path
-        return (expanded as NSString).standardizingPath
     }
 
-    /// Validates that a skill exists at the given path.
-    ///
-    /// - Parameter path: Path to the skill directory.
-    /// - Throws: `SkillError` if the skill is invalid.
-    public static func validateSkill(at path: String) throws {
-        let expandedPath = expandPath(path)
-
-        guard isSkillDirectory(expandedPath) else {
-            throw SkillError.skillDirectoryNotFound(path: expandedPath)
+    private static func ancestors(of url: URL) -> [URL] {
+        var result: [URL] = []
+        var current = url
+        while true {
+            result.append(current)
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path {
+                break
+            }
+            current = parent
         }
-
-        // Try to load metadata to validate format
-        _ = try SkillLoader.loadMetadata(from: expandedPath)
-    }
-}
-
-// MARK: - Convenience Extensions
-
-extension SkillDiscovery {
-
-    /// Discovers skills from the current working directory's `.agent/skills/` folder.
-    ///
-    /// - Returns: Array of project-level skills.
-    public static func discoverProjectSkills() throws -> [Skill] {
-        let projectPath = FileManager.default.currentDirectoryPath
-        let skillsPath = (projectPath as NSString).appendingPathComponent(".agent/skills")
-
-        guard FileManager.default.fileExists(atPath: skillsPath) else {
-            return []
-        }
-
-        return try discover(in: skillsPath)
-    }
-
-    /// Discovers skills from the user's home directory `~/.agent/skills/` folder.
-    ///
-    /// - Returns: Array of user-level skills.
-    public static func discoverUserSkills() throws -> [Skill] {
-        let userPath = ("~/.agent/skills" as NSString).expandingTildeInPath
-
-        guard FileManager.default.fileExists(atPath: userPath) else {
-            return []
-        }
-
-        return try discover(in: userPath)
+        return result
     }
 }

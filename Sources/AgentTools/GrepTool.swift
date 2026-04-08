@@ -142,13 +142,18 @@ public struct GrepTool: Tool {
         var filesSearched = 0
         var filesWithMatches: [String] = []
         var matchCountsByFile: [String: Int] = [:]
+        var readErrors: [String] = []
 
         // Pagination
         let headLimit = max(0, arguments.head_limit)
         let offset = max(0, arguments.offset)
 
         for filePath in filesToSearch {
-            guard let fileContent = try? await fsActor.readFile(atPath: filePath) else {
+            let fileContent: String
+            do {
+                fileContent = try await fsActor.readFile(atPath: filePath)
+            } catch {
+                readErrors.append("\(filePath): \(error.localizedDescription)")
                 continue
             }
 
@@ -214,7 +219,8 @@ public struct GrepTool: Tool {
             basePath: normalizedBasePath,
             outputMode: outputMode.rawValue,
             filesWithMatches: paginatedFiles,
-            matchCounts: paginatedCounts
+            matchCounts: paginatedCounts,
+            readErrors: readErrors
         )
     }
 
@@ -513,6 +519,9 @@ public struct GrepOutput: Sendable {
     /// Match counts by file (when outputMode is "count").
     public let matchCounts: [String: Int]
 
+    /// Files that could not be read during the search.
+    public let readErrors: [String]
+
     public init(
         matches: [GrepMatch],
         filesSearched: Int,
@@ -521,7 +530,8 @@ public struct GrepOutput: Sendable {
         basePath: String,
         outputMode: String = "files_with_matches",
         filesWithMatches: [String] = [],
-        matchCounts: [String: Int] = [:]
+        matchCounts: [String: Int] = [:],
+        readErrors: [String] = []
     ) {
         self.matches = matches
         self.filesSearched = filesSearched
@@ -531,6 +541,7 @@ public struct GrepOutput: Sendable {
         self.outputMode = outputMode
         self.filesWithMatches = filesWithMatches
         self.matchCounts = matchCounts
+        self.readErrors = readErrors
     }
 }
 
@@ -549,25 +560,32 @@ extension GrepOutput: CustomStringConvertible {
         Mode: \(outputMode)
         """
 
+        let errorSuffix: String
+        if readErrors.isEmpty {
+            errorSuffix = ""
+        } else {
+            errorSuffix = "\n\nRead errors (\(readErrors.count)):\n" + readErrors.joined(separator: "\n")
+        }
+
         switch outputMode {
         case "files_with_matches":
             if filesWithMatches.isEmpty {
-                return header + "\n\nNo matches found"
+                return header + "\n\nNo matches found" + errorSuffix
             }
-            return header + "\n\n" + filesWithMatches.joined(separator: "\n")
+            return header + "\n\n" + filesWithMatches.joined(separator: "\n") + errorSuffix
 
         case "count":
             if matchCounts.isEmpty {
-                return header + "\n\nNo matches found"
+                return header + "\n\nNo matches found" + errorSuffix
             }
             let counts = matchCounts.sorted { $0.key < $1.key }
                 .map { "\($0.key): \($0.value)" }
                 .joined(separator: "\n")
-            return header + "\n\n" + counts
+            return header + "\n\n" + counts + errorSuffix
 
         case "content":
             if matches.isEmpty {
-                return header + "\n\nNo matches found"
+                return header + "\n\nNo matches found" + errorSuffix
             }
 
             var output = header + "\n"
@@ -582,10 +600,10 @@ extension GrepOutput: CustomStringConvertible {
                 }
             }
 
-            return output
+            return output + errorSuffix
 
         default:
-            return header
+            return header + errorSuffix
         }
     }
 }

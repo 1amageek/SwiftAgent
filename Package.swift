@@ -1,5 +1,4 @@
 // swift-tools-version: 6.2
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 import CompilerPluginSupport
@@ -12,6 +11,7 @@ let package = Package(
         .library(name: "SwiftAgentSkills", targets: ["SwiftAgentSkills"]),
         .library(name: "SwiftAgentSymbio", targets: ["SwiftAgentSymbio"]),
         .library(name: "SwiftAgentMCP", targets: ["SwiftAgentMCP"]),
+        .library(name: "SwiftAgentPlugins", targets: ["SwiftAgentPlugins"]),
         .library(name: "AgentTools", targets: ["AgentTools"]),
     ],
     traits: [
@@ -83,6 +83,15 @@ let package = Package(
             ]
         ),
         .target(
+            name: "SwiftAgentPlugins",
+            dependencies: [
+                "SwiftAgent",
+            ],
+            swiftSettings: [
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
+            ]
+        ),
+        .target(
             name: "AgentTools",
             dependencies: [
                 "SwiftAgent",
@@ -96,6 +105,7 @@ let package = Package(
             name: "SwiftAgentTests",
             dependencies: [
                 "SwiftAgent",
+                "SwiftAgentPlugins",
                 "AgentTools",
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],

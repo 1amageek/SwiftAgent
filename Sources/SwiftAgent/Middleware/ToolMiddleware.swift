@@ -78,6 +78,26 @@ public struct ToolContext: Sendable {
     ) async rethrows -> T {
         try await ToolContext.$current.withValue(self, operation: operation)
     }
+
+    public func updating(arguments: String) -> ToolContext {
+        ToolContext(
+            toolName: toolName,
+            arguments: arguments,
+            toolUseID: toolUseID,
+            sessionID: sessionID,
+            metadata: metadata
+        )
+    }
+
+    public func mergingMetadata(_ additionalMetadata: [String: String]) -> ToolContext {
+        ToolContext(
+            toolName: toolName,
+            arguments: arguments,
+            toolUseID: toolUseID,
+            sessionID: sessionID,
+            metadata: metadata.merging(additionalMetadata) { _, new in new }
+        )
+    }
 }
 
 /// Result of tool execution passed back through the middleware chain.

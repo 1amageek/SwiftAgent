@@ -40,9 +40,14 @@ public struct SkillsConfiguration: Sendable {
     /// Whether to automatically discover skills from standard paths.
     ///
     /// Standard paths include:
-    /// - `~/.agent/skills/` (user-level)
-    /// - `./.agent/skills/` (project-level)
-    /// - `$AGENT_SKILLS_PATH` (environment variable)
+    /// - Project ancestor roots such as `.claw/skills`, `.omc/skills`,
+    ///   `.agents/skills`, `.codex/skills`, `.claude/skills`
+    /// - Legacy command roots such as `.claw/commands`, `.codex/commands`,
+    ///   `.claude/commands`
+    /// - Config-home roots from `CLAW_CONFIG_HOME`, `CODEX_HOME`,
+    ///   and `CLAUDE_CONFIG_DIR`
+    /// - User-level roots under `~/.claw`, `~/.omc`, `~/.codex`, and `~/.claude`
+    /// - `$AGENT_SKILLS_PATH` for extra `:`-delimited roots
     public var autoDiscover: Bool
 
     /// Additional paths to search for skills.

@@ -88,7 +88,12 @@ public struct Race<Input: Sendable, Output: Sendable>: Step {
             // Add a timeout task if needed
             if let t = timeout {
                 group.addTask {
-                    try? await Task.sleep(for: t)
+                    do {
+                        try await Task.sleep(for: t)
+                    } catch {
+                        // Sleep was cancelled because another task won the race
+                        return .timeout
+                    }
                     return .timeout
                 }
             }

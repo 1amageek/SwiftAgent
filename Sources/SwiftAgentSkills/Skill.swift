@@ -44,11 +44,14 @@ public struct Skill: Identifiable, Sendable, Equatable {
     /// Absolute path to the skill directory.
     public let directoryPath: String
 
+    /// Absolute path to the prompt markdown file backing this skill.
+    public let promptFilePath: String
+
     // MARK: - Computed Properties
 
     /// Path to SKILL.md file.
     public var skillFilePath: String {
-        (directoryPath as NSString).appendingPathComponent("SKILL.md")
+        promptFilePath
     }
 
     /// Path to scripts directory.
@@ -94,14 +97,17 @@ public struct Skill: Identifiable, Sendable, Equatable {
     ///   - metadata: The skill metadata.
     ///   - instructions: The full instructions (nil for discovery phase).
     ///   - directoryPath: Absolute path to the skill directory.
+    ///   - promptFilePath: Absolute path to the markdown prompt file.
     public init(
         metadata: SkillMetadata,
         instructions: String? = nil,
-        directoryPath: String
+        directoryPath: String,
+        promptFilePath: String? = nil
     ) {
         self.metadata = metadata
         self.instructions = instructions
         self.directoryPath = directoryPath
+        self.promptFilePath = promptFilePath ?? (directoryPath as NSString).appendingPathComponent("SKILL.md")
     }
 
     // MARK: - Resource Access
@@ -126,11 +132,9 @@ public struct Skill: Identifiable, Sendable, Equatable {
     ///
     /// - Parameter subdirectory: The subdirectory name (e.g., "scripts", "references").
     /// - Returns: Array of file names in the subdirectory.
-    public func listResources(in subdirectory: String) -> [String] {
+    public func listResources(in subdirectory: String) throws -> [String] {
         let path = resourcePath(subdirectory)
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: path) else {
-            return []
-        }
+        let contents = try FileManager.default.contentsOfDirectory(atPath: path)
         return contents.sorted()
     }
 
@@ -139,7 +143,8 @@ public struct Skill: Identifiable, Sendable, Equatable {
     public static func == (lhs: Skill, rhs: Skill) -> Bool {
         lhs.metadata == rhs.metadata &&
         lhs.instructions == rhs.instructions &&
-        lhs.directoryPath == rhs.directoryPath
+        lhs.directoryPath == rhs.directoryPath &&
+        lhs.promptFilePath == rhs.promptFilePath
     }
 }
 
@@ -160,5 +165,6 @@ extension Skill: Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(directoryPath)
+        hasher.combine(promptFilePath)
     }
 }

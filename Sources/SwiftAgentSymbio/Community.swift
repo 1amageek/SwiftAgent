@@ -218,9 +218,8 @@ public actor Community {
                 }
 
                 // Remove from actor system registry
-                if let address = try? Address(hexString: agentID) {
-                    actorSystem.resignID(address)
-                }
+                let address = try Address(hexString: agentID)
+                actorSystem.resignID(address)
 
                 changeContinuation?.yield(.left(member))
             }
@@ -323,7 +322,10 @@ public actor Community {
         let peerID = PeerID(member.id)
 
         let capabilityString = "\(AgentCapabilityNamespace.perception).\(perception)"
-        guard let capabilityID = try? CapabilityID(parsing: capabilityString) else {
+        let capabilityID: CapabilityID
+        do {
+            capabilityID = try CapabilityID(parsing: capabilityString)
+        } catch {
             throw CommunityError.invalidCapability(capabilityString)
         }
 
@@ -364,7 +366,10 @@ public actor Community {
 
         let peerID = PeerID(member.id)
 
-        guard let capabilityID = try? CapabilityID(parsing: capability) else {
+        let capabilityID: CapabilityID
+        do {
+            capabilityID = try CapabilityID(parsing: capability)
+        } catch {
             throw CommunityError.invalidCapability(capability)
         }
 
@@ -494,9 +499,8 @@ public actor Community {
         registeredMethods.removeValue(forKey: agentID)
 
         // Remove from actor system registry
-        if let address = try? Address(hexString: agentID) {
-            actorSystem.resignID(address)
-        }
+        let address = try Address(hexString: agentID)
+        actorSystem.resignID(address)
 
         // Remove from storage
         localAgentIDs.remove(agentID)
@@ -542,7 +546,11 @@ public actor Community {
             // Periodically refresh discovered peers
             while !Task.isCancelled {
                 await self.refreshMembers()
-                try? await Task.sleep(for: .seconds(5))
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    break
+                }
             }
         }
     }

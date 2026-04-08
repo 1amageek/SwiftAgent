@@ -60,17 +60,27 @@ public struct PermissionRequest: Sendable {
         self.toolUseID = context.toolUseID
 
         // Parse arguments JSON
-        if let data = context.arguments.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            var stringDict: [String: String] = [:]
-            for (key, value) in json {
-                if let stringValue = value as? String {
-                    stringDict[key] = stringValue
-                } else {
-                    stringDict[key] = String(describing: value)
+        if let data = context.arguments.data(using: .utf8) {
+            let json: [String: Any]? = {
+                do {
+                    return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                } catch {
+                    return nil
                 }
+            }()
+            if let json {
+                var stringDict: [String: String] = [:]
+                for (key, value) in json {
+                    if let stringValue = value as? String {
+                        stringDict[key] = stringValue
+                    } else {
+                        stringDict[key] = String(describing: value)
+                    }
+                }
+                self.toolInput = stringDict
+            } else {
+                self.toolInput = [:]
             }
-            self.toolInput = stringDict
         } else {
             self.toolInput = [:]
         }

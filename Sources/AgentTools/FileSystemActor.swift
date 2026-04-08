@@ -92,16 +92,16 @@ public actor FileSystemActor {
     ///
     /// - Parameter path: The file path.
     /// - Returns: A dictionary of file attributes, or nil if the file doesn't exist.
-    public func fileAttributes(atPath path: String) -> [FileAttributeKey: Any]? {
-        try? FileManager.default.attributesOfItem(atPath: path)
+    public func fileAttributes(atPath path: String) throws -> [FileAttributeKey: Any] {
+        try FileManager.default.attributesOfItem(atPath: path)
     }
     
     /// Gets the file size for the given path.
     ///
     /// - Parameter path: The file path.
     /// - Returns: The file size in bytes, or nil if the file doesn't exist.
-    public func fileSize(atPath path: String) -> Int64? {
-        fileAttributes(atPath: path)?[.size] as? Int64
+    public func fileSize(atPath path: String) throws -> Int64? {
+        try fileAttributes(atPath: path)[.size] as? Int64
     }
     
     /// Checks if a file is a binary file by examining its contents.
@@ -148,38 +148,33 @@ public actor FileSystemActor {
     ///
     /// - Parameter path: The file or directory path.
     /// - Returns: A formatted string with file information.
-    public func getFileInfo(atPath path: String) -> String {
+    public func getFileInfo(atPath path: String) throws -> String {
         let fileManager = FileManager.default
-        
-        do {
-            let attributes = try fileManager.attributesOfItem(atPath: path)
-            let fileName = URL(fileURLWithPath: path).lastPathComponent
-            
-            let fileType = attributes[.type] as? FileAttributeType
-            let fileSize = attributes[.size] as? Int64 ?? 0
-            let modificationDate = attributes[.modificationDate] as? Date
-            
-            let typeString: String
-            switch fileType {
-            case .typeDirectory:
-                typeString = "d"
-            case .typeRegular:
-                typeString = "-"
-            case .typeSymbolicLink:
-                typeString = "l"
-            default:
-                typeString = "?"
-            }
-            
-            let sizeString = fileType == .typeDirectory ? "-" : formatFileSize(fileSize)
-            let dateString = modificationDate?.formatted(
-                .dateTime.year().month().day().hour().minute()
-            ) ?? "Unknown"
-            
-            return "\(typeString) \(sizeString.padding(toLength: 10, withPad: " ", startingAt: 0)) \(dateString) \(fileName)"
-        } catch {
-            return "? Error \(URL(fileURLWithPath: path).lastPathComponent)"
+        let attributes = try fileManager.attributesOfItem(atPath: path)
+        let fileName = URL(fileURLWithPath: path).lastPathComponent
+
+        let fileType = attributes[.type] as? FileAttributeType
+        let fileSize = attributes[.size] as? Int64 ?? 0
+        let modificationDate = attributes[.modificationDate] as? Date
+
+        let typeString: String
+        switch fileType {
+        case .typeDirectory:
+            typeString = "d"
+        case .typeRegular:
+            typeString = "-"
+        case .typeSymbolicLink:
+            typeString = "l"
+        default:
+            typeString = "?"
         }
+
+        let sizeString = fileType == .typeDirectory ? "-" : formatFileSize(fileSize)
+        let dateString = modificationDate?.formatted(
+            .dateTime.year().month().day().hour().minute()
+        ) ?? "Unknown"
+
+        return "\(typeString) \(sizeString.padding(toLength: 10, withPad: " ", startingAt: 0)) \(dateString) \(fileName)"
     }
     
     /// Formats a file size for display.

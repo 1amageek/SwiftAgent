@@ -89,11 +89,11 @@ public struct MCPConfiguration: Codable, Sendable {
     /// with their values from the current process environment.
     ///
     /// - Returns: A new configuration with expanded values
-    public func expandEnvironmentVariables() -> MCPConfiguration {
+    public func expandEnvironmentVariables() throws -> MCPConfiguration {
         var expandedServers: [String: MCPServerEntry] = [:]
 
         for (name, entry) in mcpServers {
-            expandedServers[name] = entry.expandEnvironmentVariables()
+            expandedServers[name] = try entry.expandEnvironmentVariables()
         }
 
         return MCPConfiguration(mcpServers: expandedServers)
@@ -199,16 +199,16 @@ extension MCPConfiguration {
 
         // MARK: - Environment Expansion
 
-        func expandEnvironmentVariables() -> MCPServerEntry {
+        func expandEnvironmentVariables() throws -> MCPServerEntry {
             MCPServerEntry(
-                command: command?.expandingEnvironmentVariables(),
-                args: args?.map { $0.expandingEnvironmentVariables() },
-                env: env?.mapValues { $0.expandingEnvironmentVariables() },
-                workingDirectory: workingDirectory?.expandingEnvironmentVariables(),
-                url: url?.expandingEnvironmentVariables(),
+                command: try command?.expandingEnvironmentVariables(),
+                args: try args?.map { try $0.expandingEnvironmentVariables() },
+                env: try env?.mapValues { try $0.expandingEnvironmentVariables() },
+                workingDirectory: try workingDirectory?.expandingEnvironmentVariables(),
+                url: try url?.expandingEnvironmentVariables(),
                 transport: transport,
-                auth: auth?.expandEnvironmentVariables(),
-                headers: headers?.mapValues { $0.expandingEnvironmentVariables() },
+                auth: try auth?.expandEnvironmentVariables(),
+                headers: try headers?.mapValues { try $0.expandingEnvironmentVariables() },
                 disabled: disabled,
                 timeout: timeout,
                 toolTimeout: toolTimeout
@@ -327,17 +327,17 @@ extension MCPConfiguration {
             self.password = password
         }
 
-        func expandEnvironmentVariables() -> MCPAuthConfig {
+        func expandEnvironmentVariables() throws -> MCPAuthConfig {
             MCPAuthConfig(
                 type: type,
-                authorizationUrl: authorizationUrl?.expandingEnvironmentVariables(),
-                tokenUrl: tokenUrl?.expandingEnvironmentVariables(),
+                authorizationUrl: try authorizationUrl?.expandingEnvironmentVariables(),
+                tokenUrl: try tokenUrl?.expandingEnvironmentVariables(),
                 scopes: scopes,
-                clientId: clientId?.expandingEnvironmentVariables(),
-                clientSecret: clientSecret?.expandingEnvironmentVariables(),
-                token: token?.expandingEnvironmentVariables(),
-                username: username?.expandingEnvironmentVariables(),
-                password: password?.expandingEnvironmentVariables()
+                clientId: try clientId?.expandingEnvironmentVariables(),
+                clientSecret: try clientSecret?.expandingEnvironmentVariables(),
+                token: try token?.expandingEnvironmentVariables(),
+                username: try username?.expandingEnvironmentVariables(),
+                password: try password?.expandingEnvironmentVariables()
             )
         }
     }
@@ -348,13 +348,11 @@ extension MCPConfiguration {
 private extension String {
 
     /// Expands environment variables in the format `${VAR_NAME}`
-    func expandingEnvironmentVariables() -> String {
+    func expandingEnvironmentVariables() throws -> String {
         var result = self
         let pattern = #"\$\{([^}]+)\}"#
 
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return self
-        }
+        let regex = try NSRegularExpression(pattern: pattern)
 
         let range = NSRange(startIndex..., in: self)
         let matches = regex.matches(in: self, range: range)

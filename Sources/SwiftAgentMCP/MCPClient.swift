@@ -389,9 +389,7 @@ public actor MCPClient {
         guard isConnected else {
             throw MCPClientError.notConnected
         }
-        // Convert [String: String] to [String: Value]
-        let valueArgs: [String: Value]? = arguments?.mapValues { .string($0) }
-        return try await client.getPrompt(name: name, arguments: valueArgs)
+        return try await client.getPrompt(name: name, arguments: arguments)
     }
 
     /// The server name

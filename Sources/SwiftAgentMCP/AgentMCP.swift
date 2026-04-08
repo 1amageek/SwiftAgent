@@ -19,7 +19,7 @@
 ///
 /// ## Features
 ///
-/// - **Standard naming**: Tool names use `mcp__servername__toolname` format
+/// - **Standard naming**: Tool names use `mcp:servername:toolname` format
 /// - **Configuration file support**: Load from `.mcp.json` files with `${VAR}` expansion
 /// - **Multiple server management**: Connect to multiple MCP servers via `MCPClientManager`
 /// - **Transport options**: stdio, HTTP, SSE (Server-Sent Events)
@@ -36,8 +36,9 @@
 /// // Load from search paths
 /// let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
 ///
-/// // Get all tools from all connected servers
-/// let tools = try await manager.allTools()
+/// // Get all MCP-native tool descriptors from all connected servers
+/// let discoveredTools = try await manager.allTools()
+/// let tools = try discoveredTools.swiftAgentTools()
 ///
 /// // Use with LanguageModelSession
 /// let session = LanguageModelSession(model: model, tools: tools) {
@@ -78,8 +79,9 @@
 /// ))
 ///
 /// // Get tools
-/// let tools = try await manager.allTools()
-/// // Tool names: mcp__github__get_issue, mcp__slack__send_message, etc.
+/// let discoveredTools = try await manager.allTools()
+/// let tools = try discoveredTools.swiftAgentTools()
+/// // Tool names: mcp:github:get_issue, mcp:slack:send_message, etc.
 /// ```
 ///
 /// ## Configuration File (.mcp.json)
@@ -148,13 +150,13 @@
 ///
 /// ## Permission Integration
 ///
-/// MCP tool names follow the format `mcp__servername__toolname`, enabling
+/// MCP tool names follow the format `mcp:servername:toolname`, enabling
 /// per-server permission rules:
 ///
 /// ```swift
 /// let security = SecurityConfiguration.standard
-///     .allowing(.mcp("github"))      // Allow all GitHub tools (mcp__github__*)
-///     .denying(.mcp("filesystem"))   // Deny filesystem tools (mcp__filesystem__*)
+///     .allowing(.mcp("github"))      // Allow all GitHub tools (mcp:github:*)
+///     .denying(.mcp("filesystem"))   // Deny filesystem tools (mcp:filesystem:*)
 /// ```
 ///
 /// ## Single Server Usage
@@ -174,7 +176,8 @@
 /// let mcpClient = try await MCPClient.connect(config: config)
 /// defer { Task { await mcpClient.disconnect() } }
 ///
-/// let mcpTools = try await mcpClient.tools()
+/// let discoveredTools = try await mcpClient.discoveredTools()
+/// let mcpTools = try discoveredTools.swiftAgentTools()
 /// ```
 ///
 /// ## Resources and Prompts

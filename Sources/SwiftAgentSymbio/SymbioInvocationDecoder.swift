@@ -136,10 +136,10 @@ extension SymbioInvocationDecoder {
 
     /// Peek at the next argument without consuming it
     /// - Returns: The decoded argument, or nil if no more arguments
-    public func peekNextArgument<Argument: Codable>() -> Argument? {
+    public func peekNextArgument<Argument: Codable>() throws -> Argument? {
         guard currentIndex < arguments.count else { return nil }
         let data = arguments[currentIndex]
-        return try? JSONDecoder().decode(Argument.self, from: data)
+        return try JSONDecoder().decode(Argument.self, from: data)
     }
 
     /// Decode all remaining arguments as an array

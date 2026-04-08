@@ -78,8 +78,8 @@ let config = PermissionConfiguration(
 | `"Bash(git:*)"` | git commands (git, git status, git-flow) |
 | `"Bash(git status)"` | Exact command |
 | `"Write(/tmp/*)"` | Write to /tmp paths |
-| `"mcp__*"` | All MCP tools |
-| `"mcp__github__*"` | GitHub MCP server tools |
+| `"mcp:*"` | All MCP tools |
+| `"mcp:github:*"` | GitHub MCP server tools |
 
 The `prefix:*` pattern requires a separator character (space, dash, tab, etc.) after the prefix. `git:*` matches `git status` but not `gitsomething`.
 
@@ -91,7 +91,7 @@ The `prefix:*` pattern requires a separator character (space, dash, tab, etc.) a
 .write("/tmp/*")        // Write(/tmp/*)
 .edit("/src/*")         // Edit(/src/*)
 .read("/secrets/*")     // Read(/secrets/*)
-.mcp("github")          // mcp__github__*
+.mcp("github")          // mcp:github:*
 ```
 
 ### Loading from File

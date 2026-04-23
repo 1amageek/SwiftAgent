@@ -470,8 +470,8 @@ public final class AgentSession: Sendable {
                 }
             }
 
-            // Emit final content
-            if !response.content.isEmpty {
+            // Emit final content only when no custom streaming deltas were produced.
+            if !response.content.isEmpty && !sink.hasTextualStream {
                 await sink.emitTokenDelta(
                     delta: response.content,
                     accumulated: response.content,

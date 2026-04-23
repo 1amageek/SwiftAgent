@@ -34,7 +34,12 @@ public final class EventSink: @unchecked Sendable {
 
     private let _continuation: AsyncStream<RunEvent>.Continuation?
     private let handler: @Sendable (RunEvent) async -> Void
-    private let _isFinished: Mutex<Bool>
+    private let state: Mutex<State>
+
+    private struct State {
+        var isFinished = false
+        var hasTextualStream = false
+    }
 
     /// Creates an EventSink backed by an AsyncStream continuation.
     ///
@@ -42,7 +47,7 @@ public final class EventSink: @unchecked Sendable {
     /// be consumed by the transport adapter.
     public init(continuation: AsyncStream<RunEvent>.Continuation) {
         self._continuation = continuation
-        self._isFinished = Mutex(false)
+        self.state = Mutex(State())
         self.handler = { event in
             continuation.yield(event)
         }
@@ -51,7 +56,7 @@ public final class EventSink: @unchecked Sendable {
     /// Creates an EventSink backed by a closure.
     public init(handler: @escaping @Sendable (RunEvent) async -> Void) {
         self._continuation = nil
-        self._isFinished = Mutex(false)
+        self.state = Mutex(State())
         self.handler = handler
     }
 
@@ -60,7 +65,15 @@ public final class EventSink: @unchecked Sendable {
 
     /// Emits an event to the sink. No-op after `finish()` has been called.
     public func emit(_ event: RunEvent) async {
-        let finished = _isFinished.withLock { $0 }
+        let finished = state.withLock { state -> Bool in
+            if case .tokenDelta = event {
+                state.hasTextualStream = true
+            }
+            if case .reasoningDelta = event {
+                state.hasTextualStream = true
+            }
+            return state.isFinished
+        }
         guard !finished else { return }
         await handler(event)
     }
@@ -76,9 +89,23 @@ public final class EventSink: @unchecked Sendable {
         )))
     }
 
+    /// Emits a reasoning delta event.
+    public func emitReasoningDelta(delta: String, accumulated: String, isComplete: Bool = false) async {
+        await emit(.reasoningDelta(RunEvent.TokenDelta(
+            delta: delta,
+            accumulated: accumulated,
+            isComplete: isComplete
+        )))
+    }
+
+    /// Returns whether any answer/reasoning stream event has been emitted.
+    public var hasTextualStream: Bool {
+        state.withLock(\.hasTextualStream)
+    }
+
     /// Signals that the event stream for this turn is finished.
     public func finish() {
-        _isFinished.withLock { $0 = true }
+        state.withLock { $0.isFinished = true }
         _continuation?.finish()
     }
 }

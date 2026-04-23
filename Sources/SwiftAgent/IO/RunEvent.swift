@@ -28,6 +28,9 @@ public enum RunEvent: Sendable, Codable {
     /// A token (or chunk of text) has been generated.
     case tokenDelta(TokenDelta)
 
+    /// A reasoning token (or chunk of text) has been generated.
+    case reasoningDelta(TokenDelta)
+
     /// The LLM is requesting a tool call.
     case toolCall(ToolCallEvent)
 
@@ -59,7 +62,7 @@ extension RunEvent {
     }
 
     private enum EventType: String, Codable {
-        case runStarted, tokenDelta, toolCall, toolResult
+        case runStarted, tokenDelta, reasoningDelta, toolCall, toolResult
         case approvalRequired, approvalResolved
         case warning, error, runCompleted
     }
@@ -72,6 +75,8 @@ extension RunEvent {
             self = .runStarted(try container.decode(RunStarted.self, forKey: .payload))
         case .tokenDelta:
             self = .tokenDelta(try container.decode(TokenDelta.self, forKey: .payload))
+        case .reasoningDelta:
+            self = .reasoningDelta(try container.decode(TokenDelta.self, forKey: .payload))
         case .toolCall:
             self = .toolCall(try container.decode(ToolCallEvent.self, forKey: .payload))
         case .toolResult:
@@ -97,6 +102,9 @@ extension RunEvent {
             try container.encode(payload, forKey: .payload)
         case .tokenDelta(let payload):
             try container.encode(EventType.tokenDelta, forKey: .type)
+            try container.encode(payload, forKey: .payload)
+        case .reasoningDelta(let payload):
+            try container.encode(EventType.reasoningDelta, forKey: .type)
             try container.encode(payload, forKey: .payload)
         case .toolCall(let payload):
             try container.encode(EventType.toolCall, forKey: .type)

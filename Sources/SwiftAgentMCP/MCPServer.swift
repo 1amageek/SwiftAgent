@@ -46,7 +46,7 @@ public protocol MCPServer {
     /// Server name reported to MCP clients. Defaults to the type name.
     var name: String { get }
 
-    /// Server version reported to MCP clients. Defaults to "1.0.0".
+    /// Server version reported to MCP clients. Defaults to `SwiftAgent.Info.version`.
     var version: String { get }
 
     /// The tools to expose via MCP.
@@ -59,7 +59,7 @@ extension MCPServer {
 
     public var name: String { String(describing: Self.self) }
 
-    public var version: String { "1.0.0" }
+    public var version: String { SwiftAgent.Info.version }
 
     /// Start serving tools over the given transport.
     ///

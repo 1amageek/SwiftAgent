@@ -20,5 +20,5 @@ public enum Info {
     public static let name = "SwiftAgent"
 
     /// The version of the framework
-    public static let version = "1.0.0"
+    public static let version = "1.1.0"
 }

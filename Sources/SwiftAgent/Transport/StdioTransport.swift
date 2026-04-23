@@ -89,6 +89,11 @@ public final class StdioTransport: AgentTransport, @unchecked Sendable {
             print(delta.delta, terminator: "")
             fflush(stdout)
 
+        case .reasoningDelta(let delta):
+            if verbose {
+                FileHandle.standardError.write(Data("[thinking] \(delta.delta)".utf8))
+            }
+
         case .runCompleted:
             print()
             fflush(stdout)

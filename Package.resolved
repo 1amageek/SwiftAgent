@@ -1,5 +1,5 @@
 {
-  "originHash" : "21a10d290f6ee8a186b9e84426befcdd9f7f1b7353392156b0c36c51f170dbd1",
+  "originHash" : "d3daf443f88fb997173cdceeabda84bb6bcc12efc992e1db0b18cff33f96e84a",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/OpenFoundationModels.git",
       "state" : {
-        "revision" : "5f8018ac86975fd5d7947492812b8d5f8235c8da",
-        "version" : "1.17.0"
+        "revision" : "be5548fa184c61b0c06b8601a4e63e6393af65b9",
+        "version" : "1.18.0"
       }
     },
     {
@@ -125,6 +125,15 @@
       "state" : {
         "revision" : "5073617dac96330a486245e4c0179cb0a6fd2256",
         "version" : "1.12.0"
+      }
+    },
+    {
+      "identity" : "swift-metrics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-metrics.git",
+      "state" : {
+        "revision" : "d51c8d13fa366eec807eedb4e37daa60ff5bfdd5",
+        "version" : "2.10.1"
       }
     },
     {

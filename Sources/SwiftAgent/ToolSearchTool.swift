@@ -147,13 +147,14 @@ public struct ToolSearchTool: Tool {
             throw ToolSearchToolError.missingArgumentsJSON(toolName: toolName)
         }
 
+        guard let tool = innerTools.first(where: { $0.name == toolName }) else {
+            throw ToolRuntimeError.unknownTool(toolName)
+        }
+
         if let executor = ToolExecutorContext.current {
             return try await executor.execute(toolName: toolName, argumentsJSON: argumentsJSON)
         }
 
-        guard let tool = innerTools.first(where: { $0.name == toolName }) else {
-            throw ToolRuntimeError.unknownTool(toolName)
-        }
         return try await Self.callDirect(tool: tool, argumentsJSON: argumentsJSON)
     }
 

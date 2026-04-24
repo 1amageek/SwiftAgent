@@ -16,7 +16,7 @@ import Foundation
 /// ```
 /// runStarted
 ///   → tokenDelta (repeated)
-///   → toolCall → approvalRequired → approvalResolved → toolResult
+///   → toolStarted → toolCall → approvalRequired → approvalResolved → toolFinished → toolResult
 ///   → tokenDelta (repeated)
 /// runCompleted
 /// ```
@@ -36,6 +36,18 @@ public enum RunEvent: Sendable, Codable {
 
     /// A tool call has completed.
     case toolResult(ToolResultEvent)
+
+    /// Runtime tool execution has started.
+    ///
+    /// This is the machine-readable lifecycle event emitted by the tool runtime.
+    /// `toolCall` is retained as a compatibility event for existing consumers.
+    case toolStarted(ToolCallEvent)
+
+    /// Runtime tool execution has finished.
+    ///
+    /// This is the machine-readable lifecycle event emitted by the tool runtime.
+    /// `toolResult` is retained as a compatibility event for existing consumers.
+    case toolFinished(ToolResultEvent)
 
     /// A tool call requires user approval before proceeding.
     case approvalRequired(ApprovalRequestEvent)
@@ -63,6 +75,7 @@ extension RunEvent {
 
     private enum EventType: String, Codable {
         case runStarted, tokenDelta, reasoningDelta, toolCall, toolResult
+        case toolStarted, toolFinished
         case approvalRequired, approvalResolved
         case warning, error, runCompleted
     }
@@ -81,6 +94,10 @@ extension RunEvent {
             self = .toolCall(try container.decode(ToolCallEvent.self, forKey: .payload))
         case .toolResult:
             self = .toolResult(try container.decode(ToolResultEvent.self, forKey: .payload))
+        case .toolStarted:
+            self = .toolStarted(try container.decode(ToolCallEvent.self, forKey: .payload))
+        case .toolFinished:
+            self = .toolFinished(try container.decode(ToolResultEvent.self, forKey: .payload))
         case .approvalRequired:
             self = .approvalRequired(try container.decode(ApprovalRequestEvent.self, forKey: .payload))
         case .approvalResolved:
@@ -111,6 +128,12 @@ extension RunEvent {
             try container.encode(payload, forKey: .payload)
         case .toolResult(let payload):
             try container.encode(EventType.toolResult, forKey: .type)
+            try container.encode(payload, forKey: .payload)
+        case .toolStarted(let payload):
+            try container.encode(EventType.toolStarted, forKey: .type)
+            try container.encode(payload, forKey: .payload)
+        case .toolFinished(let payload):
+            try container.encode(EventType.toolFinished, forKey: .type)
             try container.encode(payload, forKey: .payload)
         case .approvalRequired(let payload):
             try container.encode(EventType.approvalRequired, forKey: .type)

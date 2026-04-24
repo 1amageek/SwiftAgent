@@ -194,7 +194,7 @@ private struct PublicToolDescriptor: Sendable {
 /// All invocations are routed back through `ToolRuntime.execute` so that
 /// the middleware chain always runs and `ToolExecutorContext.current` is
 /// installed for Gateway tools that dispatch further tool calls.
-private struct PublicForwarderTool: Tool, @unchecked Sendable {
+private struct PublicForwarderTool: Tool, Sendable {
     typealias Arguments = GeneratedContent
     typealias Output = String
 

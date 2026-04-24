@@ -25,6 +25,27 @@ struct FoundationModelsToolSearchE2ETests {
         var calls: [String] { cities.withLock { $0 } }
     }
 
+    final class MiddlewareLog: Sendable {
+        private let names: Mutex<[String]> = Mutex([])
+
+        var calls: [String] {
+            names.withLock { $0 }
+        }
+
+        func append(_ name: String) {
+            names.withLock { $0.append(name) }
+        }
+    }
+
+    struct RecordingMiddleware: ToolMiddleware {
+        let log: MiddlewareLog
+
+        func handle(_ context: ToolContext, next: @escaping Next) async throws -> ToolResult {
+            log.append(context.toolName)
+            return try await next(context)
+        }
+    }
+
     struct WeatherTool: Tool {
         let name = "Weather"
         let description = "Get the current weather for a given city"
@@ -111,16 +132,74 @@ struct FoundationModelsToolSearchE2ETests {
                 "ToolSearch gateway did not dispatch to the inner Weather tool. Cities logged: \(log.calls).\n\n=== Transcript ===\n\(dump)")
     }
 
+    @Test(
+        "SystemLanguageModel completes ToolSearch through ToolRuntime middleware",
+        .enabled(if: SystemLanguageModel.default.isAvailable),
+        .timeLimit(.minutes(2))
+    )
+    func progressiveDisclosureViaToolRuntime() async throws {
+        let weatherLog = CallLog()
+        let middlewareLog = MiddlewareLog()
+        let search = ToolSearchTool {
+            WeatherTool(log: weatherLog)
+        }
+
+        var configuration = ToolRuntimeConfiguration.empty
+        configuration.use(RecordingMiddleware(log: middlewareLog))
+        configuration.register(search)
+        let runtime = ToolRuntime(configuration: configuration)
+
+        let session = LanguageModelSession(
+            model: SystemLanguageModel.default,
+            tools: runtime.publicTools()
+        ) {
+            Instructions("You are a helpful assistant.")
+        }
+
+        let response = try await session.respond(to: "What is the weather in Tokyo right now?")
+
+        let dump = Self.dumpTranscript(session.transcript)
+        print(dump)
+
+        #expect(!response.content.isEmpty, "Empty response.\n\n=== Transcript ===\n\(dump)")
+
+        let instructions = try #require(session.transcript.compactMap { entry -> Transcript.Instructions? in
+            if case .instructions(let instructions) = entry {
+                return instructions
+            }
+            return nil
+        }.first)
+
+        let initialToolNames = instructions.toolDefinitions.map(\.name)
+        #expect(initialToolNames == ["ToolSearch"], "Runtime public tools should expose only ToolSearch, got: \(initialToolNames).\n\n=== Transcript ===\n\(dump)")
+
+        #expect(weatherLog.calls.contains("Tokyo"),
+                "ToolRuntime-backed ToolSearch did not dispatch to Weather. Cities logged: \(weatherLog.calls).\n\n=== Transcript ===\n\(dump)")
+
+        #expect(
+            middlewareLog.calls.contains("ToolSearch"),
+            "Middleware did not observe the public ToolSearch call. Middleware calls: \(middlewareLog.calls).\n\n=== Transcript ===\n\(dump)"
+        )
+        #expect(
+            middlewareLog.calls.contains("Weather"),
+            "Middleware did not observe the hidden inner Weather call. Middleware calls: \(middlewareLog.calls).\n\n=== Transcript ===\n\(dump)"
+        )
+    }
+
     // MARK: - Transcript Diagnostics
 
     static func schemaSummary(_ schema: GenerationSchema) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(schema),
-              let text = String(data: data, encoding: .utf8) else {
+        do {
+            let data = try encoder.encode(schema)
+            guard let text = String(data: data, encoding: .utf8) else {
+                return String(describing: schema)
+            }
+            return text
+        } catch {
             return String(describing: schema)
         }
-        return text
     }
 
     static func dumpTranscript(_ transcript: Transcript) -> String {

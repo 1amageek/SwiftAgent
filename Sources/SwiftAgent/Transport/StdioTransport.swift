@@ -120,6 +120,17 @@ public final class StdioTransport: AgentTransport, @unchecked Sendable {
                 print("[Tool Result] \(result.toolName): \(status) (\(result.duration))")
             }
 
+        case .toolStarted(let call):
+            if verbose {
+                print("[Tool Started] \(call.toolName)")
+            }
+
+        case .toolFinished(let result):
+            if verbose {
+                let status = result.success ? "OK" : "FAIL"
+                print("[Tool Finished] \(result.toolName): \(status) (\(result.duration))")
+            }
+
         case .runStarted, .approvalResolved:
             if verbose {
                 print("[Event] \(event)")

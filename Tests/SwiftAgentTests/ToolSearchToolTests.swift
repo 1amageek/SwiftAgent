@@ -69,6 +69,23 @@ struct ToolSearchToolTests {
         }
     }
 
+    struct SecretTool: Tool {
+        let name = "Secret"
+        let description = "A tool that is registered in the runtime but not grouped in ToolSearch"
+
+        @Generable
+        struct Arguments {
+            @Guide(description: "The secret input")
+            let value: String
+        }
+
+        typealias Output = String
+
+        func call(arguments: Arguments) async throws -> String {
+            "Secret: \(arguments.value)"
+        }
+    }
+
     final class ToolCallRecorder: Sendable {
         private let storage = Mutex<[String]>([])
 
@@ -285,6 +302,33 @@ struct ToolSearchToolTests {
         #expect(output == "Weather in Tokyo: sunny")
         #expect(recorder.names == ["ToolSearch", "Weather"])
         #expect(runtime.publicTools().map(\.name) == ["ToolSearch"])
+    }
+
+    @Test("ToolSearch cannot dispatch runtime tools outside its group")
+    func toolSearchCannotDispatchOutsideGroup() async throws {
+        let recorder = ToolCallRecorder()
+        let search = ToolSearchTool {
+            WeatherTool()
+        }
+
+        var configuration = ToolRuntimeConfiguration.empty
+        configuration.use(RecordingMiddleware(recorder: recorder))
+        configuration.register(search)
+        configuration.register(SecretTool(), public: false)
+        let runtime = ToolRuntime(configuration: configuration)
+
+        await #expect(throws: ToolRuntimeError.self) {
+            _ = try await runtime.execute(
+                toolName: "ToolSearch",
+                argumentsJSON: GeneratedContent(properties: [
+                    "operation": "call",
+                    "toolName": "Secret",
+                    "argumentsJSON": #"{"value":"classified"}"#,
+                ]).jsonString
+            )
+        }
+
+        #expect(recorder.names == ["ToolSearch"])
     }
 
     // MARK: - Container integration with LanguageModelSession (OFM trait only)

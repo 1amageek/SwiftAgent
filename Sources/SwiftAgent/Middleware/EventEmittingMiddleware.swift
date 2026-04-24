@@ -5,8 +5,8 @@
 
 import Foundation
 
-/// Middleware that emits `RunEvent.toolCall` and `RunEvent.toolResult` events
-/// to the `EventSink` during tool execution.
+/// Middleware that emits runtime tool lifecycle events to the `EventSink`
+/// during tool execution.
 ///
 /// This middleware provides real-time tool execution monitoring as a default
 /// feature of `AgentSession`. It reads two TaskLocal contexts:
@@ -19,11 +19,11 @@ import Foundation
 /// ## Event Flow
 ///
 /// ```
-/// .toolCall(toolName, .running)   ← emitted before tool execution
+/// .toolStarted(toolName, .running) ← emitted before tool execution
 ///     ↓
 ///   actual tool execution
 ///     ↓
-/// .toolResult(toolName, result)   ← emitted after tool execution
+/// .toolFinished(toolName, result)  ← emitted after tool execution
 /// ```
 ///
 /// ## Integration
@@ -55,19 +55,21 @@ public struct EventEmittingMiddleware: ToolMiddleware {
         print("[EventEmittingMiddleware] toolCall \(context.toolName) id=\(toolUseID)")
         #endif
 
-        await sink.emit(.toolCall(RunEvent.ToolCallEvent(
+        let started = RunEvent.ToolCallEvent(
             toolUseID: toolUseID,
             toolName: context.toolName,
             arguments: context.arguments,
             sessionID: sessionContext.sessionID,
             turnID: sessionContext.turnID
-        )))
+        )
+        await sink.emit(.toolStarted(started))
+        await sink.emit(.toolCall(started))
 
         let result: ToolResult
         do {
             result = try await next(context)
         } catch {
-            await sink.emit(.toolResult(RunEvent.ToolResultEvent(
+            let finished = RunEvent.ToolResultEvent(
                 toolUseID: toolUseID,
                 toolName: context.toolName,
                 output: error.localizedDescription,
@@ -75,7 +77,9 @@ public struct EventEmittingMiddleware: ToolMiddleware {
                 duration: .zero,
                 sessionID: sessionContext.sessionID,
                 turnID: sessionContext.turnID
-            )))
+            )
+            await sink.emit(.toolFinished(finished))
+            await sink.emit(.toolResult(finished))
             throw error
         }
 
@@ -83,7 +87,7 @@ public struct EventEmittingMiddleware: ToolMiddleware {
         print("[EventEmittingMiddleware] toolResult \(context.toolName) success=\(result.success) duration=\(result.duration)")
         #endif
 
-        await sink.emit(.toolResult(RunEvent.ToolResultEvent(
+        let finished = RunEvent.ToolResultEvent(
             toolUseID: toolUseID,
             toolName: context.toolName,
             output: result.output,
@@ -91,7 +95,9 @@ public struct EventEmittingMiddleware: ToolMiddleware {
             duration: result.duration,
             sessionID: sessionContext.sessionID,
             turnID: sessionContext.turnID
-        )))
+        )
+        await sink.emit(.toolFinished(finished))
+        await sink.emit(.toolResult(finished))
 
         return result
     }

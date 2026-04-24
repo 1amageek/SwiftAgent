@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Metrics
 
 /// Builder-style configuration for `ToolRuntime`.
 ///
@@ -172,6 +173,29 @@ public struct ToolRuntimeConfiguration: Sendable {
                 )
             }
             return mw
+        }
+        return copy
+    }
+
+    /// Returns a new configuration with SwiftMetrics emission enabled.
+    ///
+    /// Metrics are opt-in and low-cardinality. The returned configuration
+    /// inserts ``MetricsEmittingMiddleware`` before `PermissionMiddleware`
+    /// when present so permission denials are counted as failed tool
+    /// executions. If no permission middleware exists, metrics are appended.
+    ///
+    /// SwiftAgent does not bootstrap a metrics backend. Applications should
+    /// call `MetricsSystem.bootstrap(...)` at startup or pass an explicit
+    /// factory, which is especially useful in tests.
+    public func withMetrics(
+        factory: MetricsFactory = MetricsSystem.factory
+    ) -> ToolRuntimeConfiguration {
+        var copy = self
+        let metrics = MetricsEmittingMiddleware(factory: factory)
+        if let index = copy.middleware.firstIndex(where: { $0 is PermissionMiddleware }) {
+            copy.middleware.insert(metrics, at: index)
+        } else {
+            copy.middleware.append(metrics)
         }
         return copy
     }

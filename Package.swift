@@ -21,12 +21,13 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
+        .package(url: "https://github.com/apple/swift-metrics.git", "1.0.0" ..< "3.0.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", branch: "1.6.1"),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
         .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.17.0"),
+        .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.18.0"),
     ],
     targets: [
         .macro(
@@ -43,6 +44,7 @@ let package = Package(
                 "SwiftAgentMacros",
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
+                .product(name: "Metrics", package: "swift-metrics"),
                 .product(name: "ActorRuntime", package: "swift-actor-runtime"),
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
                 .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
@@ -107,6 +109,7 @@ let package = Package(
                 "SwiftAgent",
                 "SwiftAgentPlugins",
                 "AgentTools",
+                .product(name: "MetricsTestKit", package: "swift-metrics"),
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [

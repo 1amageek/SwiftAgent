@@ -277,10 +277,13 @@ public final class AgentSession: Sendable {
                     token.cancel()
                 }
             }
-            await executeTurn(conversation: conversation, request: request, cancellationToken: token)
+            let result = await executeTurn(conversation: conversation, request: request, cancellationToken: token)
             #if DEBUG
             print("[AgentSession] finished turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
             #endif
+            if result.status != .cancelled {
+                completedTurns.withLock { _ = $0.insert(request.turnID) }
+            }
             let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
             turnState.withLock { state in
                 if isTerminal {
@@ -400,126 +403,23 @@ public final class AgentSession: Sendable {
 
     // MARK: - Turn Execution
 
-    /// Executes a single turn: creates event stream, delegates to Conversation, forwards events.
-    ///
-    /// The `TurnCancellationToken` is injected into the execution context via
-    /// `TurnCancellationContext`, making it available at checkpoints within
-    /// `Generate` and `Loop`.
-    ///
-    /// Error handling:
-    /// - `CancellationError` (from `.cancel`) emits `.runCompleted(.cancelled)`.
-    ///   Cancelled turns are NOT marked as completed (allowing retry).
-    /// - Other errors emit `.error` and `.runCompleted(.failed)`.
     private func executeTurn(
         conversation: Conversation,
         request: RunRequest,
         cancellationToken: TurnCancellationToken
-    ) async {
-        let (eventStream, continuation) = AsyncStream<RunEvent>.makeStream()
-        let sink = EventSink(continuation: continuation)
-
-        // Forward events to transport in background
+    ) async -> RunResult {
         let transport = self.transport
-        let forwardTask = Task {
-            for await event in eventStream {
-                do {
-                    try await transport.send(event)
-                } catch {
-                    break
-                }
+        let executor = AgentTurnExecutor(
+            conversation: conversation,
+            approvalHandler: approvalHandler
+        ) { event in
+            do {
+                try await transport.send(event)
+            } catch {
+                // The session loop will observe transport closure separately.
             }
         }
-
-        // Create approval bridge if handler is provided
-        let bridge: (any ApprovalHandler)? = approvalHandler.map { handler in
-            ApprovalBridgeHandler(
-                inner: handler,
-                eventSink: sink,
-                sessionID: request.sessionID,
-                turnID: request.turnID
-            )
-        }
-
-        guard case .text(let text) = request.input else {
-            await sink.emit(.runCompleted(RunEvent.RunCompleted(
-                sessionID: request.sessionID,
-                turnID: request.turnID,
-                status: .failed
-            )))
-            sink.finish()
-            _ = await forwardTask.result
-            completedTurns.withLock { _ = $0.insert(request.turnID) }
-            return
-        }
-
-        // Apply steering from request context
-        if let steering = request.context?.steering {
-            for s in steering { conversation.steer(s) }
-        }
-
-        await sink.emit(.runStarted(RunEvent.RunStarted(
-            sessionID: request.sessionID,
-            turnID: request.turnID
-        )))
-
-        let sessionContext = AgentSessionContext(
-            sessionID: request.sessionID,
-            turnID: request.turnID
-        )
-
-        do {
-            let response = try await AgentSessionContext.$current.withValue(sessionContext) {
-                try await TurnCancellationContext.withValue(cancellationToken) {
-                    try await ApprovalHandlerContext.withValue(bridge) {
-                        try await EventSinkContext.withValue(sink) {
-                            try await conversation.send(text)
-                        }
-                    }
-                }
-            }
-
-            // Emit final content only when no custom streaming deltas were produced.
-            if !response.content.isEmpty && !sink.hasTextualStream {
-                await sink.emitTokenDelta(
-                    delta: response.content,
-                    accumulated: response.content,
-                    isComplete: true
-                )
-            }
-
-            await sink.emit(.runCompleted(RunEvent.RunCompleted(
-                sessionID: request.sessionID,
-                turnID: request.turnID,
-                status: .completed
-            )))
-            completedTurns.withLock { _ = $0.insert(request.turnID) }
-        } catch is CancellationError {
-            await sink.emit(.runCompleted(RunEvent.RunCompleted(
-                sessionID: request.sessionID,
-                turnID: request.turnID,
-                status: .cancelled
-            )))
-        } catch {
-            let runError = RunEvent.RunError(
-                message: error.localizedDescription,
-                isFatal: true,
-                underlyingError: error,
-                sessionID: request.sessionID,
-                turnID: request.turnID
-            )
-            await sink.emit(.error(runError))
-            await sink.emit(.runCompleted(RunEvent.RunCompleted(
-                sessionID: request.sessionID,
-                turnID: request.turnID,
-                status: .failed
-            )))
-            completedTurns.withLock { _ = $0.insert(request.turnID) }
-        }
-
-        sink.finish()
-
-        // Wait for event forwarding to drain
-        _ = await forwardTask.result
+        return await executor.execute(request: request, cancellationToken: cancellationToken)
     }
 
     // MARK: - Helpers

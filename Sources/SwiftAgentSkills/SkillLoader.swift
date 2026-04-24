@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftSkill
 
 /// Loads and parses SKILL.md files.
 ///
@@ -181,129 +182,12 @@ public struct SkillLoader: Sendable {
     /// - Returns: Tuple of (metadata, body).
     /// - Throws: `SkillError.invalidFormat` if parsing fails.
     public static func parseFrontmatter(_ content: String) throws -> (metadata: SkillMetadata, body: String) {
-        let lines = content.components(separatedBy: .newlines)
-
-        // Find frontmatter delimiters
-        guard let firstLine = lines.first, firstLine.trimmingCharacters(in: .whitespaces) == "---" else {
-            throw SkillError.invalidFormat(reason: "SKILL.md must start with '---'")
+        do {
+            let skill = try SkillParser().parse(content)
+            return (metadata: SkillMetadata(skill: skill), body: skill.body)
+        } catch {
+            throw SkillError.frontmatterParsingError(reason: error.localizedDescription)
         }
-
-        // Find closing delimiter
-        var endIndex: Int?
-        for (index, line) in lines.enumerated() where index > 0 {
-            if line.trimmingCharacters(in: .whitespaces) == "---" {
-                endIndex = index
-                break
-            }
-        }
-
-        guard let closingIndex = endIndex else {
-            throw SkillError.invalidFormat(reason: "Missing closing '---' for frontmatter")
-        }
-
-        // Extract frontmatter lines
-        let frontmatterLines = Array(lines[1..<closingIndex])
-
-        // Extract body
-        let bodyLines = Array(lines[(closingIndex + 1)...])
-        let body = bodyLines.joined(separator: "\n")
-
-        // Parse frontmatter
-        let metadata = try parseYAMLFrontmatter(frontmatterLines)
-
-        return (metadata, body)
-    }
-
-    // MARK: - Simple YAML Parser
-
-    /// Parses simple YAML frontmatter.
-    ///
-    /// Supports:
-    /// - Simple key: value pairs
-    /// - Nested metadata block (one level deep)
-    /// - String values (with or without quotes)
-    ///
-    /// - Parameter lines: Lines of YAML content (without delimiters).
-    /// - Returns: Parsed SkillMetadata.
-    /// - Throws: `SkillError.frontmatterParsingError` if parsing fails.
-    private static func parseYAMLFrontmatter(_ lines: [String]) throws -> SkillMetadata {
-        var values: [String: String] = [:]
-        var metadataDict: [String: String] = [:]
-        var inMetadataBlock = false
-
-        for line in lines {
-            // Skip empty lines
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                continue
-            }
-
-            // Check if this is an indented line (part of metadata block)
-            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-            let leadingSpaces = line.prefix(while: { $0 == " " || $0 == "\t" }).count
-
-            if inMetadataBlock && leadingSpaces > 0 {
-                // Parse nested key-value pair
-                if let (key, value) = parseKeyValue(trimmedLine) {
-                    metadataDict[key] = value
-                }
-                continue
-            }
-
-            // Check if we're entering the metadata block
-            if trimmedLine == "metadata:" {
-                inMetadataBlock = true
-                continue
-            }
-
-            // Regular key-value pair
-            inMetadataBlock = false
-            if let (key, value) = parseKeyValue(trimmedLine) {
-                values[key] = value
-            }
-        }
-
-        // Validate required fields
-        guard let name = values["name"], !name.isEmpty else {
-            throw SkillError.frontmatterParsingError(reason: "Missing required field 'name'")
-        }
-
-        guard let description = values["description"], !description.isEmpty else {
-            throw SkillError.frontmatterParsingError(reason: "Missing required field 'description'")
-        }
-
-        return SkillMetadata(
-            name: name,
-            description: description,
-            license: values["license"],
-            compatibility: values["compatibility"],
-            metadata: metadataDict.isEmpty ? nil : metadataDict,
-            allowedTools: values["allowed-tools"]
-        )
-    }
-
-    /// Parses a single key: value line.
-    ///
-    /// - Parameter line: A single YAML line.
-    /// - Returns: Tuple of (key, value) or nil if invalid.
-    private static func parseKeyValue(_ line: String) -> (String, String)? {
-        guard let colonIndex = line.firstIndex(of: ":") else {
-            return nil
-        }
-
-        let key = String(line[..<colonIndex]).trimmingCharacters(in: .whitespaces)
-        var value = String(line[line.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
-
-        // Remove surrounding quotes if present
-        if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-           (value.hasPrefix("'") && value.hasSuffix("'")) {
-            value = String(value.dropFirst().dropLast())
-        }
-
-        guard !key.isEmpty else {
-            return nil
-        }
-
-        return (key, value)
     }
 
     private static func readSkillFile(at promptFilePath: String) throws -> String {
@@ -346,6 +230,19 @@ public struct SkillLoader: Sendable {
             promptFilePath: path,
             fallbackName: fallbackName,
             expectedDirectoryName: nil
+        )
+    }
+}
+
+private extension SkillMetadata {
+    init(skill: SwiftSkill.Skill) {
+        self.init(
+            name: skill.name,
+            description: skill.description,
+            license: skill.license,
+            compatibility: skill.compatibility,
+            metadata: skill.metadata,
+            allowedTools: skill.allowedTools?.joined(separator: " ")
         )
     }
 }

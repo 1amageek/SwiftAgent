@@ -1,5 +1,5 @@
 {
-  "originHash" : "d3daf443f88fb997173cdceeabda84bb6bcc12efc992e1db0b18cff33f96e84a",
+  "originHash" : "4e4567408c9d5f4c55eadd5227018fadc364ff64355034f0ae2d3d4c9fe7aeae",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -164,6 +164,15 @@
       }
     },
     {
+      "identity" : "swift-skills",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1amageek/swift-skills.git",
+      "state" : {
+        "revision" : "61c4bda16cb04d7e7fa54623c19297833c720bda",
+        "version" : "0.2.1"
+      }
+    },
+    {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
@@ -179,6 +188,15 @@
       "state" : {
         "revision" : "7c6ad0fc39d0763e0b699210e4124afd5041c5df",
         "version" : "1.6.4"
+      }
+    },
+    {
+      "identity" : "swift-yaml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1amageek/swift-yaml.git",
+      "state" : {
+        "revision" : "8a33d36bca390d9518d5f7e483cbbaa011da5f76",
+        "version" : "1.0.1"
       }
     }
   ],

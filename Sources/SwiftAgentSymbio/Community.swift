@@ -134,6 +134,9 @@ public actor Community {
     /// Cached members
     private var memberCache: [String: Member] = [:]
 
+    /// Local view records for discovered and spawned peers.
+    private var peerRecords: [String: PeerRecord] = [:]
+
     /// Local agent IDs (for tracking which members are local)
     private var localAgentIDs: Set<String> = []
 
@@ -229,6 +232,7 @@ public actor Community {
         localAgentRefs.removeAll()
         registeredMethods.removeAll()
         memberCache.removeAll()
+        peerRecords.removeAll()
 
         try await connector.stop()
     }
@@ -250,7 +254,7 @@ public actor Community {
     /// - Returns: Array of available members who can receive this signal
     public func whoCanReceive(_ perception: String) -> [Member] {
         memberCache.values
-            .filter { $0.isAvailable && $0.canReceive(perception) }
+            .filter { isRoutable($0) && $0.canReceive(perception) }
             .sorted { $0.id < $1.id }
     }
 
@@ -259,7 +263,7 @@ public actor Community {
     /// - Returns: Array of available members who provide this capability
     public func whoProvides(_ capability: String) -> [Member] {
         memberCache.values
-            .filter { $0.isAvailable && $0.canProvide(capability) }
+            .filter { isRoutable($0) && $0.canProvide(capability) }
             .sorted { $0.id < $1.id }
     }
 
@@ -278,8 +282,90 @@ public actor Community {
     /// All available members
     public var availableMembers: [Member] {
         memberCache.values
-            .filter { $0.isAvailable }
+            .filter { isRoutable($0) }
             .sorted { $0.id < $1.id }
+    }
+
+    /// Read-only snapshots of this community's local peer view.
+    public var peerViews: [CommunityPeerView] {
+        peerRecords.values
+            .map { peerView(from: $0) }
+            .sorted { $0.member.id < $1.member.id }
+    }
+
+    /// Read this community's local view for a specific member.
+    public func peerView(for member: Member) -> CommunityPeerView? {
+        guard let record = peerRecords[member.id] else {
+            return nil
+        }
+        return peerView(from: record)
+    }
+
+    /// Route a task envelope to candidate members using this community's local view.
+    ///
+    /// This is intentionally scored rather than a simple lookup. Capability and
+    /// perception matches are filters, while locality, trust, latency, and
+    /// observed availability affect ranking.
+    public func route(
+        _ envelope: AgentTaskEnvelope,
+        topN: Int = 3
+    ) -> [RouteCandidate] {
+        let requiredCapabilities = Set(envelope.policy.requiredCapabilities)
+        let requiredPerceptions = Set(envelope.policy.requiredPerceptions)
+
+        let candidates = memberCache.values.compactMap { member -> RouteCandidate? in
+            guard isRoutable(member) else { return nil }
+            if let assigneeID = envelope.assigneeID, member.id != assigneeID {
+                return nil
+            }
+            guard requiredCapabilities.allSatisfy({ member.canProvide($0) }) else {
+                return nil
+            }
+            guard requiredPerceptions.allSatisfy({ member.canReceive($0) }) else {
+                return nil
+            }
+            return routeCandidate(
+                member: member,
+                requiredCapabilities: requiredCapabilities,
+                requiredPerceptions: requiredPerceptions
+            )
+        }
+
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.member.id < rhs.member.id
+                }
+                return lhs.score > rhs.score
+            }
+            .prefix(max(0, topN))
+            .map { $0 }
+    }
+
+    /// Block a member in this local community view.
+    ///
+    /// Blocking does not terminate the peer. It only removes the member from
+    /// local routing and discovery shortcuts.
+    public func block(_ member: Member, reason: String? = nil) {
+        updateRecord(for: member) { record in
+            record.isBlocked = true
+            record.observe(.blocked, message: reason)
+        }
+    }
+
+    /// Forget a remote member from this local community view.
+    ///
+    /// Local agents are owned resources and must be terminated instead.
+    public func forget(_ member: Member) throws {
+        guard !localAgentIDs.contains(member.id) else {
+            throw CommunityError.cannotForgetLocal(member.id)
+        }
+        updateRecord(for: member) { record in
+            record.observe(.forgotten)
+        }
+        memberCache.removeValue(forKey: member.id)
+        peerRecords.removeValue(forKey: member.id)
+        changeContinuation?.yield(.left(member))
     }
 
     // MARK: - Communication
@@ -305,6 +391,10 @@ public actor Community {
             throw CommunityError.memberUnavailable(member.id)
         }
 
+        guard peerRecords[member.id]?.isBlocked != true else {
+            throw CommunityError.memberBlocked(member.id)
+        }
+
         guard member.canReceive(perception) else {
             throw CommunityError.noAcceptedPerceptions(member.id)
         }
@@ -315,7 +405,14 @@ public actor Community {
         // Path 1: Local agent - direct call
         if localAgentIDs.contains(member.id),
            let agent = localAgentRefs[member.id] as? any Communicable {
-            return try await agent.receive(data, perception: perception)
+            do {
+                let response = try await agent.receive(data, perception: perception)
+                observe(member.id, .invocationSucceeded)
+                return response
+            } catch {
+                observe(member.id, .invocationFailed, message: error.localizedDescription)
+                throw error
+            }
         }
 
         // Path 2: Remote agent - via PeerConnector
@@ -337,10 +434,13 @@ public actor Community {
         )
 
         if result.success {
+            observe(member.id, .invocationSucceeded)
             return result.data
         } else if let error = result.error {
+            observe(member.id, .invocationFailed, message: error.message)
             throw CommunityError.invocationFailed(error.message)
         } else {
+            observe(member.id, .invocationFailed, message: "Unknown error")
             throw CommunityError.invocationFailed("Unknown error")
         }
     }
@@ -358,6 +458,10 @@ public actor Community {
     ) async throws -> Data {
         guard member.isAvailable else {
             throw CommunityError.memberUnavailable(member.id)
+        }
+
+        guard peerRecords[member.id]?.isBlocked != true else {
+            throw CommunityError.memberBlocked(member.id)
         }
 
         guard member.canProvide(capability) else {
@@ -381,10 +485,13 @@ public actor Community {
         )
 
         if result.success, let data = result.data {
+            observe(member.id, .invocationSucceeded)
             return data
         } else if let error = result.error {
+            observe(member.id, .invocationFailed, message: error.message)
             throw CommunityError.invocationFailed(error.message)
         } else {
+            observe(member.id, .invocationFailed, message: "Unknown error")
             throw CommunityError.invocationFailed("Unknown error")
         }
     }
@@ -445,6 +552,15 @@ public actor Community {
 
         // 7. Add to member cache
         memberCache[agentID] = member
+        peerRecords[agentID] = PeerRecord(
+            member: member,
+            location: .local,
+            claims: claims(for: member, issuer: agentID),
+            observations: [
+                PeerObservation(peerID: agentID, kind: .discovered),
+            ],
+            trustScore: 1
+        )
 
         // 8. Broadcast .joined event
         changeContinuation?.yield(.joined(member))
@@ -505,6 +621,7 @@ public actor Community {
         // Remove from storage
         localAgentIDs.remove(agentID)
         localAgentRefs.removeValue(forKey: agentID)
+        peerRecords.removeValue(forKey: agentID)
     }
 
     // MARK: - Changes
@@ -585,13 +702,16 @@ public actor Community {
                 if let existing = memberCache[memberID] {
                     if existing != member {
                         memberCache[memberID] = member
+                        mergeRecord(member: member, location: .remote, kind: .updated)
                         changeContinuation?.yield(.updated(member))
                     } else if !existing.isAvailable {
                         memberCache[memberID] = member
+                        mergeRecord(member: member, location: .remote, kind: .becameAvailable)
                         changeContinuation?.yield(.becameAvailable(member))
                     }
                 } else {
                     memberCache[memberID] = member
+                    mergeRecord(member: member, location: .remote, kind: .discovered)
                     changeContinuation?.yield(.joined(member))
                 }
             }
@@ -605,6 +725,7 @@ public actor Community {
                 }
                 let unavailableMember = member.unavailable()
                 memberCache[id] = unavailableMember
+                mergeRecord(member: unavailableMember, location: .remote, kind: .becameUnavailable)
                 changeContinuation?.yield(.becameUnavailable(unavailableMember))
             }
         } catch {
@@ -627,6 +748,145 @@ public actor Community {
 
         return identifiers
     }
+
+    private func isRoutable(_ member: Member) -> Bool {
+        guard member.isAvailable else { return false }
+        return peerRecords[member.id]?.isBlocked != true
+    }
+
+    private func routeCandidate(
+        member: Member,
+        requiredCapabilities: Set<String>,
+        requiredPerceptions: Set<String>
+    ) -> RouteCandidate {
+        let record = peerRecords[member.id]
+        var score = member.isAvailable ? 1.0 : 0.0
+        var reasons: [String] = []
+        var risks: [String] = []
+
+        if requiredCapabilities.isEmpty {
+            reasons.append("no required capabilities")
+        } else {
+            score += Double(requiredCapabilities.count) * 10
+            reasons.append("matches required capabilities")
+        }
+
+        if requiredPerceptions.isEmpty {
+            reasons.append("no required perceptions")
+        } else {
+            score += Double(requiredPerceptions.count) * 8
+            reasons.append("accepts required perceptions")
+        }
+
+        if record?.location == .local {
+            score += 2
+            reasons.append("local member")
+        } else {
+            risks.append("remote claims are not local authority")
+        }
+
+        if let trustScore = record?.trustScore {
+            score += trustScore
+            if trustScore > 0 {
+                reasons.append("positive local trust")
+            }
+        }
+
+        if let latency = MeshMemberMetadata(member: member).latencyMs {
+            score -= Double(latency) / 100.0
+            reasons.append("latency \(latency)ms")
+        }
+
+        return RouteCandidate(
+            member: member,
+            score: score,
+            reasons: reasons,
+            risks: risks
+        )
+    }
+
+    private func peerView(from record: PeerRecord) -> CommunityPeerView {
+        CommunityPeerView(
+            member: record.member,
+            isLocal: record.location == .local,
+            isBlocked: record.isBlocked,
+            trustScore: record.trustScore,
+            claims: record.claims,
+            observations: record.observations
+        )
+    }
+
+    private func mergeRecord(
+        member: Member,
+        location: PeerLocation,
+        kind: PeerObservationKind
+    ) {
+        if var record = peerRecords[member.id] {
+            record.member = member
+            record.location = location
+            record.claims = claims(for: member, issuer: member.id)
+            record.observe(kind)
+            peerRecords[member.id] = record
+        } else {
+            peerRecords[member.id] = PeerRecord(
+                member: member,
+                location: location,
+                claims: claims(for: member, issuer: member.id),
+                observations: [
+                    PeerObservation(peerID: member.id, kind: kind),
+                ]
+            )
+        }
+    }
+
+    private func updateRecord(
+        for member: Member,
+        update: (inout PeerRecord) -> Void
+    ) {
+        var record = peerRecords[member.id] ?? PeerRecord(
+            member: member,
+            location: localAgentIDs.contains(member.id) ? .local : .remote,
+            claims: claims(for: member, issuer: member.id)
+        )
+        update(&record)
+        peerRecords[member.id] = record
+    }
+
+    private func observe(
+        _ memberID: String,
+        _ kind: PeerObservationKind,
+        message: String? = nil
+    ) {
+        guard var record = peerRecords[memberID] else {
+            return
+        }
+        record.observe(kind, message: message)
+        peerRecords[memberID] = record
+    }
+
+    private func claims(for member: Member, issuer: String) -> [SemanticClaim] {
+        let accepts = member.accepts.map { perception in
+            SemanticClaim(
+                assertion: SemanticAssertion(
+                    subject: member.id,
+                    predicate: "swiftagent:accepts",
+                    object: perception
+                ),
+                issuer: issuer
+            )
+        }
+        let provides = member.provides.map { capability in
+            SemanticClaim(
+                assertion: SemanticAssertion(
+                    subject: member.id,
+                    predicate: "swiftagent:provides",
+                    object: capability
+                ),
+                issuer: issuer
+            )
+        }
+        return accepts + provides
+    }
 }
 
 // MARK: - CommunityError
@@ -638,7 +898,9 @@ public enum CommunityError: Error, LocalizedError {
     case noAcceptedPerceptions(String)
     case invalidCapability(String)
     case invocationFailed(String)
+    case memberBlocked(String)
     case cannotTerminateRemote(String)
+    case cannotForgetLocal(String)
     case memberNotFound(String)
 
     public var errorDescription: String? {
@@ -653,8 +915,12 @@ public enum CommunityError: Error, LocalizedError {
             return "Invalid capability identifier: '\(capability)'"
         case .invocationFailed(let message):
             return "Invocation failed: \(message)"
+        case .memberBlocked(let id):
+            return "Member '\(id)' is blocked in this local community view"
         case .cannotTerminateRemote(let id):
             return "Cannot terminate remote member '\(id)'. Only local agents can be terminated."
+        case .cannotForgetLocal(let id):
+            return "Cannot forget local member '\(id)'. Terminate local agents instead."
         case .memberNotFound(let id):
             return "Member '\(id)' not found in local agents"
         }

@@ -26,6 +26,7 @@ let package = Package(
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
         .package(url: "https://github.com/1amageek/swift-discovery.git", branch: "main"),
+        .package(url: "https://github.com/1amageek/swift-skills.git", from: "0.2.1"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.18.0"),
     ],
@@ -57,6 +58,7 @@ let package = Package(
             name: "SwiftAgentSkills",
             dependencies: [
                 "SwiftAgent",
+                .product(name: "SwiftSkill", package: "swift-skills"),
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
             swiftSettings: [
@@ -132,6 +134,16 @@ let package = Package(
             dependencies: [
                 "SwiftAgent",
                 "SwiftAgentSymbio",
+            ],
+            swiftSettings: [
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
+            ]
+        ),
+        .testTarget(
+            name: "SwiftAgentSkillsTests",
+            dependencies: [
+                "SwiftAgent",
+                "SwiftAgentSkills",
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),

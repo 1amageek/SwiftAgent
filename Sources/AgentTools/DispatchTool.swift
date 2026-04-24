@@ -25,6 +25,8 @@ import OpenFoundationModels
 /// ## Sub-session capabilities
 /// - **Notebook**: Read/write shared scratchpad (same storage as parent)
 /// - **Dispatch**: Recursive delegation (depth-limited to prevent infinite recursion)
+/// - **Runtime middleware**: Sub-session tools execute through `ToolRuntime`
+///   so permission, event, and metrics middleware can observe nested tool use
 ///
 /// ## Typical workflow (RLM pattern)
 /// 1. Parent stores large data in Notebook
@@ -76,6 +78,9 @@ public struct DispatchTool: Tool {
     private let notebookStorage: NotebookStorage
     private let currentDepth: Int
     private let maxDepth: Int
+    private let runtimeConfiguration: ToolRuntimeConfiguration
+    private let additionalTools: [any Tool]
+    private let instructions: String
 
     #if OpenFoundationModels
     private let languageModel: any LanguageModel
@@ -91,12 +96,18 @@ public struct DispatchTool: Tool {
         languageModel: any LanguageModel,
         notebookStorage: NotebookStorage = NotebookStorage(),
         maxDepth: Int = defaultMaxDepth,
-        currentDepth: Int = 0
+        currentDepth: Int = 0,
+        runtimeConfiguration: ToolRuntimeConfiguration = .default,
+        additionalTools: [any Tool] = [],
+        instructions: String? = nil
     ) {
         self.languageModel = languageModel
         self.notebookStorage = notebookStorage
         self.maxDepth = maxDepth
         self.currentDepth = currentDepth
+        self.runtimeConfiguration = runtimeConfiguration
+        self.additionalTools = additionalTools
+        self.instructions = instructions ?? Self.defaultInstructions
     }
     #else
     /// Creates a DispatchTool with shared notebook.
@@ -108,11 +119,17 @@ public struct DispatchTool: Tool {
     public init(
         notebookStorage: NotebookStorage = NotebookStorage(),
         maxDepth: Int = defaultMaxDepth,
-        currentDepth: Int = 0
+        currentDepth: Int = 0,
+        runtimeConfiguration: ToolRuntimeConfiguration = .default,
+        additionalTools: [any Tool] = [],
+        instructions: String? = nil
     ) {
         self.notebookStorage = notebookStorage
         self.maxDepth = maxDepth
         self.currentDepth = currentDepth
+        self.runtimeConfiguration = runtimeConfiguration
+        self.additionalTools = additionalTools
+        self.instructions = instructions ?? Self.defaultInstructions
     }
     #endif
 
@@ -132,16 +149,14 @@ public struct DispatchTool: Tool {
     // MARK: - Single Query
 
     private func executeQuery(task: String, context: String) async throws -> DispatchOutput {
-        let prompt = buildPrompt(task: task, context: context)
-        let session = makeSession()
-
         do {
-            let response = try await session.respond(to: prompt)
+            let result = try await runSubtask(task: task, context: context)
             return DispatchOutput(
-                content: response.content,
+                content: result.content,
                 success: true,
                 operation: "query",
-                taskCount: 1
+                taskCount: 1,
+                sessionIDs: [result.sessionID]
             )
         } catch {
             throw DispatchError.sessionFailed(error.localizedDescription)
@@ -161,23 +176,21 @@ public struct DispatchTool: Tool {
         }
 
         // Best-effort: collect successes, don't cancel others on individual failure
-        let results: [(Int, Result<String, Error>)] = await withTaskGroup(
-            of: (Int, Result<String, Error>).self
+        let results: [(Int, Result<SubtaskResult, Error>)] = await withTaskGroup(
+            of: (Int, Result<SubtaskResult, Error>).self
         ) { group in
             for (index, task) in taskList.enumerated() {
                 group.addTask {
                     do {
-                        let prompt = buildPrompt(task: task, context: context)
-                        let session = makeSession()
-                        let response = try await session.respond(to: prompt)
-                        return (index, .success(response.content))
+                        let result = try await runSubtask(task: task, context: context)
+                        return (index, .success(result))
                     } catch {
                         return (index, .failure(error))
                     }
                 }
             }
 
-            var collected: [(Int, Result<String, Error>)] = []
+            var collected: [(Int, Result<SubtaskResult, Error>)] = []
             for await result in group {
                 collected.append(result)
             }
@@ -189,10 +202,12 @@ public struct DispatchTool: Tool {
 
         var successes: [String] = []
         var failures: [String] = []
+        var sessionIDs: [String] = []
         for (index, result) in sortedResults {
             switch result {
-            case .success(let content):
-                successes.append("[\(index + 1)/\(taskList.count)] \(content)")
+            case .success(let subtask):
+                sessionIDs.append(subtask.sessionID)
+                successes.append("[\(index + 1)/\(taskList.count)] \(subtask.content)")
             case .failure(let error):
                 failures.append("[\(index + 1)/\(taskList.count)] ERROR: \(error.localizedDescription)")
             }
@@ -209,36 +224,75 @@ public struct DispatchTool: Tool {
             content: content,
             success: failures.isEmpty,
             operation: "query_batched",
-            taskCount: taskList.count
+            taskCount: taskList.count,
+            sessionIDs: sessionIDs
         )
     }
 
     // MARK: - Session Factory
 
-    private func makeSession() -> LanguageModelSession {
-        let tools = makeSubTools()
-        let instructions = """
-        You are a focused reasoning sub-agent with access to a shared Notebook. \
-        Use Notebook to read context data stored by the parent agent and to store your results. \
-        Answer the task directly and concisely based on the provided context. \
-        If the task is complex, you can use Dispatch to further delegate sub-tasks.
-        """
+    private struct SubtaskResult: Sendable {
+        let sessionID: String
+        let content: String
+    }
+
+    private func runSubtask(task: String, context: String) async throws -> SubtaskResult {
+        let prompt = buildPrompt(task: task, context: context)
+        let sessionID = UUID().uuidString
+        let envelope = makeEnvelope(sessionID: sessionID, prompt: prompt)
+        let runnerConfiguration = makeRunnerConfiguration(sessionID: sessionID)
 
         #if OpenFoundationModels
-        return LanguageModelSession(model: languageModel, tools: tools) {
-            Instructions(instructions)
-        }
+        let runner = AgentSessionRunner(model: languageModel, configuration: runnerConfiguration)
         #else
-        return LanguageModelSession(tools: tools) {
-            Instructions(instructions)
-        }
+        let runner = AgentSessionRunner(configuration: runnerConfiguration)
         #endif
+
+        let result = try await runner.run(envelope)
+        guard result.status == .completed, let content = result.finalOutput else {
+            throw DispatchError.sessionFailed(result.error?.message ?? "Sub-session ended with status \(result.status.rawValue)")
+        }
+        return SubtaskResult(sessionID: sessionID, content: content)
+    }
+
+    private func makeEnvelope(sessionID: String, prompt: String) -> AgentTaskEnvelope {
+        var metadata: [String: String] = [
+            "dispatchDepth": "\(currentDepth)",
+        ]
+        if let parent = AgentSessionContext.current {
+            metadata["parentSessionID"] = parent.sessionID
+            metadata["parentTurnID"] = parent.turnID
+        }
+
+        return AgentTaskEnvelope(
+            requesterID: AgentSessionContext.current?.sessionID,
+            sessionID: sessionID,
+            relation: .delegated(parentTaskID: nil),
+            input: .text(prompt),
+            metadata: metadata
+        )
+    }
+
+    private func makeRunnerConfiguration(sessionID: String) -> AgentSessionRunnerConfiguration {
+        let instructions = self.instructions
+        return AgentSessionRunnerConfiguration(
+            tools: makeSubTools(),
+            runtimeConfiguration: runtimeConfiguration
+        ) {
+            Instructions {
+                instructions
+                "Dispatch sub-session ID: \(sessionID)"
+            }
+        } step: {
+            GenerateText<Prompt>()
+        }
     }
 
     private func makeSubTools() -> [any Tool] {
         var tools: [any Tool] = [
             NotebookTool(storage: notebookStorage)
         ]
+        tools.append(contentsOf: additionalTools)
 
         // Add recursive Dispatch if depth allows
         if currentDepth < maxDepth {
@@ -247,13 +301,19 @@ public struct DispatchTool: Tool {
                 languageModel: languageModel,
                 notebookStorage: notebookStorage,
                 maxDepth: maxDepth,
-                currentDepth: currentDepth + 1
+                currentDepth: currentDepth + 1,
+                runtimeConfiguration: runtimeConfiguration,
+                additionalTools: additionalTools,
+                instructions: instructions
             ))
             #else
             tools.append(DispatchTool(
                 notebookStorage: notebookStorage,
                 maxDepth: maxDepth,
-                currentDepth: currentDepth + 1
+                currentDepth: currentDepth + 1,
+                runtimeConfiguration: runtimeConfiguration,
+                additionalTools: additionalTools,
+                instructions: instructions
             ))
             #endif
         }
@@ -277,6 +337,15 @@ public struct DispatchTool: Tool {
         </task>
         """
     }
+
+    private static var defaultInstructions: String {
+        """
+        You are a focused reasoning sub-agent with access to a shared Notebook. \
+        Use Notebook to read context data stored by the parent agent and to store your results. \
+        Answer the task directly and concisely based on the provided context. \
+        If the task is complex, you can use Dispatch to further delegate sub-tasks.
+        """
+    }
 }
 
 // MARK: - Input/Output Types
@@ -292,6 +361,16 @@ public struct DispatchInput: Sendable {
 
     @Guide(description: "Shared context for the sub-session(s). The sub-session has no access to conversation history, so provide all necessary context here or reference Notebook keys.")
     public let context: String
+
+    public init(
+        operation: String,
+        task: String,
+        context: String = ""
+    ) {
+        self.operation = operation
+        self.task = task
+        self.context = context
+    }
 }
 
 /// Output structure for dispatch operations.
@@ -300,17 +379,20 @@ public struct DispatchOutput: Sendable {
     public let success: Bool
     public let operation: String
     public let taskCount: Int
+    public let sessionIDs: [String]
 
     public init(
         content: String,
         success: Bool,
         operation: String = "query",
-        taskCount: Int = 1
+        taskCount: Int = 1,
+        sessionIDs: [String] = []
     ) {
         self.content = content
         self.success = success
         self.operation = operation
         self.taskCount = taskCount
+        self.sessionIDs = sessionIDs
     }
 }
 
@@ -324,8 +406,10 @@ extension DispatchOutput: CustomStringConvertible {
     public var description: String {
         let status = success ? "Success" : "Failed"
         let countInfo = taskCount > 1 ? " (\(taskCount) tasks)" : ""
+        let sessionInfo = sessionIDs.isEmpty ? "" : "\nSub-sessions: \(sessionIDs.joined(separator: ", "))\n"
         return """
         Dispatch [\(status)] \(operation)\(countInfo)
+        \(sessionInfo)
 
         \(content)
         """

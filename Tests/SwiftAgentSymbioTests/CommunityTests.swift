@@ -243,6 +243,87 @@ struct CommunitySpawnTests {
         let resultReceivers = await community.whoCanReceive("result")
         #expect(resultReceivers.count == 0)
     }
+
+    @Test("route scores local perception matches")
+    func routeScoresLocalPerceptionMatches() async throws {
+        let actorSystem = SymbioActorSystem()
+        let community = Community(actorSystem: actorSystem)
+
+        let member = try await community.spawn {
+            TestWorkerAgent(community: community, actorSystem: actorSystem)
+        }
+        let envelope = AgentTaskEnvelope(
+            input: .text("work"),
+            policy: AgentTaskPolicy(requiredPerceptions: ["work"])
+        )
+
+        let candidates = await community.route(envelope)
+
+        #expect(candidates.count == 1)
+        #expect(candidates.first?.member.id == member.id)
+        #expect(candidates.first?.reasons.contains("local member") == true)
+        #expect(candidates.first?.risks.isEmpty == true)
+    }
+
+    @Test("peer views expose local claims and observations")
+    func peerViewsExposeLocalClaimsAndObservations() async throws {
+        let actorSystem = SymbioActorSystem()
+        let community = Community(actorSystem: actorSystem)
+
+        let member = try await community.spawn {
+            TestWorkerAgent(community: community, actorSystem: actorSystem)
+        }
+
+        let view = try #require(await community.peerView(for: member))
+        let claimObjects = Set(view.claims.map(\.assertion.object))
+        let observationKinds = Set(view.observations.map(\.kind))
+
+        #expect(view.member.id == member.id)
+        #expect(view.isLocal)
+        #expect(!view.isBlocked)
+        #expect(view.trustScore == 1)
+        #expect(claimObjects.contains("work"))
+        #expect(observationKinds.contains(.discovered))
+    }
+
+    @Test("block removes member from local routing view")
+    func blockRemovesMemberFromRouting() async throws {
+        let actorSystem = SymbioActorSystem()
+        let community = Community(actorSystem: actorSystem)
+
+        let member = try await community.spawn {
+            TestWorkerAgent(community: community, actorSystem: actorSystem)
+        }
+        let envelope = AgentTaskEnvelope(
+            input: .text("work"),
+            policy: AgentTaskPolicy(requiredPerceptions: ["work"])
+        )
+
+        await community.block(member, reason: "test block")
+
+        let candidates = await community.route(envelope)
+        let receivers = await community.whoCanReceive("work")
+        let view = try #require(await community.peerView(for: member))
+
+        #expect(candidates.isEmpty)
+        #expect(receivers.isEmpty)
+        #expect(view.isBlocked)
+        #expect(view.observations.map(\.kind).contains(.blocked))
+    }
+
+    @Test("forget rejects local members")
+    func forgetRejectsLocalMembers() async throws {
+        let actorSystem = SymbioActorSystem()
+        let community = Community(actorSystem: actorSystem)
+
+        let member = try await community.spawn {
+            TestWorkerAgent(community: community, actorSystem: actorSystem)
+        }
+
+        await #expect(throws: CommunityError.self) {
+            try await community.forget(member)
+        }
+    }
 }
 
 // MARK: - Community Terminate Tests

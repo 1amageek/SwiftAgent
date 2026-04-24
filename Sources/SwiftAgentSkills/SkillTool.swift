@@ -47,8 +47,8 @@ public struct SkillTool: Tool {
         to the current task. The skill's instructions will be returned and you
         should follow them to complete the task.
 
-        Example: If the user asks about PDF processing and you see a "pdf-processing"
-        skill in <available_skills>, activate it to get the detailed instructions.
+        Activate only skills listed in <available_skills>. Do not infer or
+        fabricate a skill's instructions before activation.
         """
 
     public var description: String { Self.toolDescription }
@@ -114,6 +114,10 @@ public struct SkillToolArguments: Sendable {
     /// The name of the skill to activate.
     @Guide(description: "The name of the skill to activate, as shown in <available_skills>")
     public let skillName: String
+
+    public init(skillName: String) {
+        self.skillName = skillName
+    }
 }
 
 // MARK: - Output

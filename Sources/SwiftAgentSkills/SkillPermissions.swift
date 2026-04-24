@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 import SwiftAgent
 
 /// Holds permission rules granted by activated skills.
@@ -29,19 +30,22 @@ import SwiftAgent
 ///
 /// ## Thread Safety
 ///
-/// All methods are thread-safe using `NSLock`.
+/// All methods are thread-safe using `Mutex`.
 ///
 /// ## Reference Counting
 ///
 /// If multiple skills grant the same permission, the permission remains active
 /// until all skills that granted it are removed. This prevents one skill's
 /// deactivation from revoking permissions still needed by another skill.
-public final class SkillPermissions: @unchecked Sendable {
+public final class SkillPermissions: Sendable {
 
-    private let lock = NSLock()
-    private var _rulesBySkill: [String: [PermissionRule]] = [:]
-    /// Reference count for each rule pattern (how many skills grant it)
-    private var _ruleRefCount: [String: Int] = [:]
+    private struct State: Sendable {
+        var rulesBySkill: [String: [PermissionRule]] = [:]
+        /// Reference count for each rule pattern (how many skills grant it)
+        var ruleRefCount: [String: Int] = [:]
+    }
+
+    private let state = Mutex(State())
 
     /// Creates an empty skill permissions container.
     public init() {}
@@ -51,9 +55,9 @@ public final class SkillPermissions: @unchecked Sendable {
     /// Returns unique rules - if multiple skills grant the same pattern,
     /// it appears only once in the result.
     public var rules: [PermissionRule] {
-        lock.withLock {
+        state.withLock {
             // Return unique rules based on pattern
-            Array(_ruleRefCount.keys).map { PermissionRule($0) }
+            Array($0.ruleRefCount.keys).map { PermissionRule($0) }
         }
     }
 
@@ -62,12 +66,12 @@ public final class SkillPermissions: @unchecked Sendable {
     /// - Parameter skillName: The name of the skill.
     /// - Returns: Array of permission rules from that skill.
     public func rules(from skillName: String) -> [PermissionRule] {
-        lock.withLock { _rulesBySkill[skillName] ?? [] }
+        state.withLock { $0.rulesBySkill[skillName] ?? [] }
     }
 
     /// The names of skills that have granted permissions.
     public var skillNames: [String] {
-        lock.withLock { Array(_rulesBySkill.keys).sorted() }
+        state.withLock { Array($0.rulesBySkill.keys).sorted() }
     }
 
     /// Adds permission rules.
@@ -75,9 +79,9 @@ public final class SkillPermissions: @unchecked Sendable {
     /// - Parameter rules: The rules to add.
     public func add(_ rules: [PermissionRule]) {
         guard !rules.isEmpty else { return }
-        lock.withLock {
+        state.withLock { state in
             for rule in rules {
-                _ruleRefCount[rule.pattern, default: 0] += 1
+                state.ruleRefCount[rule.pattern, default: 0] += 1
             }
         }
     }
@@ -94,10 +98,10 @@ public final class SkillPermissions: @unchecked Sendable {
     ///   - skillName: The name of the skill granting these permissions.
     public func add(_ rules: [PermissionRule], from skillName: String) {
         guard !rules.isEmpty else { return }
-        lock.withLock {
-            _rulesBySkill[skillName, default: []].append(contentsOf: rules)
+        state.withLock { state in
+            state.rulesBySkill[skillName, default: []].append(contentsOf: rules)
             for rule in rules {
-                _ruleRefCount[rule.pattern, default: 0] += 1
+                state.ruleRefCount[rule.pattern, default: 0] += 1
             }
         }
     }
@@ -110,17 +114,17 @@ public final class SkillPermissions: @unchecked Sendable {
     ///
     /// - Parameter skillName: The name of the skill to remove.
     public func remove(from skillName: String) {
-        lock.withLock {
-            guard let skillRules = _rulesBySkill.removeValue(forKey: skillName) else {
+        state.withLock { state in
+            guard let skillRules = state.rulesBySkill.removeValue(forKey: skillName) else {
                 return
             }
             // Decrement reference count for each rule
             for rule in skillRules {
-                if let count = _ruleRefCount[rule.pattern] {
+                if let count = state.ruleRefCount[rule.pattern] {
                     if count <= 1 {
-                        _ruleRefCount.removeValue(forKey: rule.pattern)
+                        state.ruleRefCount.removeValue(forKey: rule.pattern)
                     } else {
-                        _ruleRefCount[rule.pattern] = count - 1
+                        state.ruleRefCount[rule.pattern] = count - 1
                     }
                 }
             }
@@ -129,20 +133,20 @@ public final class SkillPermissions: @unchecked Sendable {
 
     /// Clears all permission rules.
     public func clear() {
-        lock.withLock {
-            _rulesBySkill.removeAll()
-            _ruleRefCount.removeAll()
+        state.withLock {
+            $0.rulesBySkill.removeAll()
+            $0.ruleRefCount.removeAll()
         }
     }
 
     /// The number of unique permission rules.
     public var count: Int {
-        lock.withLock { _ruleRefCount.count }
+        state.withLock { $0.ruleRefCount.count }
     }
 
     /// Whether there are any permission rules.
     public var isEmpty: Bool {
-        lock.withLock { _ruleRefCount.isEmpty }
+        state.withLock { $0.ruleRefCount.isEmpty }
     }
 }
 
@@ -151,7 +155,7 @@ public final class SkillPermissions: @unchecked Sendable {
 extension SkillPermissions: CustomStringConvertible {
     public var description: String {
         let ruleCount = count
-        let skillCount = lock.withLock { _rulesBySkill.count }
+        let skillCount = state.withLock { $0.rulesBySkill.count }
         return "SkillPermissions(\(ruleCount) rules from \(skillCount) skills)"
     }
 }

@@ -122,9 +122,7 @@ extension SkillMetadata {
             throw SkillError.validationFailed(field: "name", reason: "must be 64 characters or less")
         }
 
-        let nameRegex = try! NSRegularExpression(pattern: Self.namePattern)
-        let nameRange = NSRange(name.startIndex..., in: name)
-        guard nameRegex.firstMatch(in: name, range: nameRange) != nil else {
+        guard Self.isValidName(name) else {
             throw SkillError.validationFailed(
                 field: "name",
                 reason: "must contain only lowercase letters, numbers, and hyphens; cannot start or end with hyphen"
@@ -152,6 +150,43 @@ extension SkillMetadata {
         if let compat = compatibility, compat.count > 500 {
             throw SkillError.validationFailed(field: "compatibility", reason: "must be 500 characters or less")
         }
+    }
+
+    private static func isValidName(_ name: String) -> Bool {
+        guard let first = name.first,
+              let last = name.last,
+              first != "-",
+              last != "-" else {
+            return false
+        }
+
+        var previousWasHyphen = false
+        for character in name {
+            if character == "-" {
+                if previousWasHyphen {
+                    return false
+                }
+                previousWasHyphen = true
+                continue
+            }
+
+            guard character.isLowercaseASCIIAlphaNumeric else {
+                return false
+            }
+            previousWasHyphen = false
+        }
+
+        return true
+    }
+}
+
+private extension Character {
+    var isLowercaseASCIIAlphaNumeric: Bool {
+        guard let scalar = unicodeScalars.first, unicodeScalars.count == 1 else {
+            return false
+        }
+        let value = Int(scalar.value)
+        return (97...122).contains(value) || (48...57).contains(value)
     }
 }
 

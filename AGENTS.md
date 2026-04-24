@@ -471,7 +471,7 @@ let pipeline = basePipeline.withDynamicPermissions { permissions.rules }
 - 複数スキルが同じ権限を付与した場合、参照カウントで管理
 
 ### SwiftAgentMCP
-MCP統合モジュール。Claude Code互換。
+MCP統合モジュール。Codex互換。
 
 ```swift
 // 複数サーバー管理
@@ -744,7 +744,7 @@ final class SymbioActorSystem: DistributedActorSystem {
 
 ## AgentTools
 
-Claude Code スタイルのツール名を採用。
+Codex スタイルのツール名を採用。
 
 | ツール名 | 説明 |
 |---------|------|

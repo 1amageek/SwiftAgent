@@ -308,11 +308,12 @@ public final class AgentSession: Sendable {
     // MARK: - Convenience Run (tools + pipeline)
 
     #if OpenFoundationModels
-    /// Runs the agent session with tools automatically wrapped by a `ToolPipeline`.
+    /// Runs the agent session with tools dispatched through a `ToolRuntime`.
     ///
-    /// This overload wraps the provided tools with `EventEmittingMiddleware` (and other
-    /// middleware in the pipeline) before creating the `LanguageModelSession` and `Conversation`.
-    /// Use this instead of `run(_ conversation:)` to guarantee tool event emission.
+    /// The runtime installs middleware (event emitting, permission, sandbox)
+    /// around every tool invocation and exposes type-erased forwarder tools
+    /// to the LLM. Use this instead of `run(_ conversation:)` to guarantee
+    /// tool event emission and security enforcement.
     ///
     /// ## Usage
     ///
@@ -331,30 +332,34 @@ public final class AgentSession: Sendable {
     ///
     /// - Parameters:
     ///   - model: The language model to use.
-    ///   - tools: The tools to make available. Automatically wrapped by `pipeline`.
-    ///   - pipeline: The middleware pipeline. Defaults to `.default` (includes `EventEmittingMiddleware`).
+    ///   - tools: The tools to make available. Registered as public tools on the runtime.
+    ///   - configuration: The runtime configuration. Defaults to `.default`
+    ///     (event emitting, permissive permission, no sandbox).
     ///   - instructions: System instructions for the language model.
     ///   - step: The processing step pipeline.
     public func run<S: Step & Sendable>(
         model: any LanguageModel,
         tools: [any Tool] = [],
-        pipeline: ToolPipeline = .default,
+        configuration: ToolRuntimeConfiguration = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
     ) async throws where S.Input == Prompt, S.Output == String {
-        let wrappedTools = pipeline.wrap(tools)
-        let languageModelSession = LanguageModelSession(model: model, tools: wrappedTools) {
+        var config = configuration
+        config.register(tools)
+        let runtime = ToolRuntime(configuration: config)
+        let languageModelSession = LanguageModelSession(model: model, tools: runtime.publicTools()) {
             instructions()
         }
         let conversation = Conversation(languageModelSession: languageModelSession, step: step)
         try await run(conversation)
     }
     #else
-    /// Runs the agent session with tools automatically wrapped by a `ToolPipeline`.
+    /// Runs the agent session with tools dispatched through a `ToolRuntime`.
     ///
-    /// This overload wraps the provided tools with `EventEmittingMiddleware` (and other
-    /// middleware in the pipeline) before creating the `LanguageModelSession` and `Conversation`.
-    /// Use this instead of `run(_ conversation:)` to guarantee tool event emission.
+    /// The runtime installs middleware (event emitting, permission, sandbox)
+    /// around every tool invocation and exposes type-erased forwarder tools
+    /// to the LLM. Use this instead of `run(_ conversation:)` to guarantee
+    /// tool event emission and security enforcement.
     ///
     /// ## Usage
     ///
@@ -371,18 +376,21 @@ public final class AgentSession: Sendable {
     /// ```
     ///
     /// - Parameters:
-    ///   - tools: The tools to make available. Automatically wrapped by `pipeline`.
-    ///   - pipeline: The middleware pipeline. Defaults to `.default` (includes `EventEmittingMiddleware`).
+    ///   - tools: The tools to make available. Registered as public tools on the runtime.
+    ///   - configuration: The runtime configuration. Defaults to `.default`
+    ///     (event emitting, permissive permission, no sandbox).
     ///   - instructions: System instructions for the language model.
     ///   - step: The processing step pipeline.
     public func run<S: Step & Sendable>(
         tools: [any Tool] = [],
-        pipeline: ToolPipeline = .default,
+        configuration: ToolRuntimeConfiguration = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
     ) async throws where S.Input == Prompt, S.Output == String {
-        let wrappedTools = pipeline.wrap(tools)
-        let languageModelSession = LanguageModelSession(tools: wrappedTools) {
+        var config = configuration
+        config.register(tools)
+        let runtime = ToolRuntime(configuration: config)
+        let languageModelSession = LanguageModelSession(tools: runtime.publicTools()) {
             instructions()
         }
         let conversation = Conversation(languageModelSession: languageModelSession, step: step)

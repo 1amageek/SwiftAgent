@@ -122,6 +122,14 @@ public actor MCPClient {
     private var transport: (any Transport)?
     private var isConnected: Bool = false
 
+    /// The server-provided instructions captured at initialization, if any.
+    ///
+    /// MCP servers may return free-form `instructions` text in their
+    /// `initialize` response. `MCPClient` captures that string so higher-level
+    /// helpers (e.g. `MCPClientManager.sessionPayload(toolSearchName:)`) can
+    /// fold it into the enclosing session's system prompt.
+    public private(set) var instructions: String?
+
     /// Creates a new MCP client with the given configuration
     /// - Parameter config: The server configuration
     private init(config: MCPServerConfig) {
@@ -237,7 +245,8 @@ public actor MCPClient {
         )
         self.transport = transport
 
-        try await client.connect(transport: transport)
+        let result = try await client.connect(transport: transport)
+        self.instructions = result.instructions
         isConnected = true
     }
     #endif
@@ -254,7 +263,8 @@ public actor MCPClient {
         let transport = HTTPClientTransport(endpoint: endpoint, streaming: false)
         self.transport = transport
 
-        try await client.connect(transport: transport)
+        let result = try await client.connect(transport: transport)
+        self.instructions = result.instructions
         isConnected = true
     }
 
@@ -273,7 +283,8 @@ public actor MCPClient {
         let transport = HTTPClientTransport(endpoint: endpoint, streaming: true)
         self.transport = transport
 
-        try await client.connect(transport: transport)
+        let result = try await client.connect(transport: transport)
+        self.instructions = result.instructions
         isConnected = true
     }
 

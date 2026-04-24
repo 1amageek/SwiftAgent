@@ -28,7 +28,7 @@ import Foundation
 ///
 /// ## Integration
 ///
-/// Included in `ToolPipeline.default`. No manual configuration required.
+/// Included in `ToolRuntimeConfiguration.default`. No manual configuration required.
 ///
 /// ```swift
 /// // Automatic: AgentSession sets AgentSessionContext + EventSinkContext,

@@ -88,7 +88,7 @@ public struct SandboxExecutor: Sendable {
         /// ## Usage
         ///
         /// ```swift
-        /// // Used internally by ToolPipeline.default
+        /// // Used internally by ToolRuntimeConfiguration.default
         /// SandboxMiddleware(configuration: .none)
         /// ```
         public static var none: Configuration {

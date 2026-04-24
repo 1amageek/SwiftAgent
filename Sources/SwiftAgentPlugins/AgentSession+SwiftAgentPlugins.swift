@@ -12,21 +12,19 @@ extension AgentSession {
         model: any LanguageModel,
         tools: [any Tool] = [],
         pluginRegistry: PluginRegistry? = nil,
-        pipeline: ToolPipeline = .default,
+        configuration: ToolRuntimeConfiguration = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
     ) async throws where S.Input == Prompt, S.Output == String {
-        let effectivePipeline: ToolPipeline
-        let effectiveTools: [any Tool]
+        var effectiveConfiguration = configuration
         if let pluginRegistry {
-            effectivePipeline = try pipeline.withPluginRegistry(pluginRegistry)
-            effectiveTools = tools + (try pluginRegistry.aggregatedSwiftAgentTools())
+            effectiveConfiguration = try effectiveConfiguration.withPluginRegistry(pluginRegistry)
+            effectiveConfiguration.register(tools + (try pluginRegistry.aggregatedSwiftAgentTools()))
         } else {
-            effectivePipeline = pipeline
-            effectiveTools = tools
+            effectiveConfiguration.register(tools)
         }
-        let wrappedTools = effectivePipeline.wrap(effectiveTools)
-        let languageModelSession = LanguageModelSession(model: model, tools: wrappedTools) {
+        let runtime = ToolRuntime(configuration: effectiveConfiguration)
+        let languageModelSession = LanguageModelSession(model: model, tools: runtime.publicTools()) {
             instructions()
         }
         let conversation = Conversation(languageModelSession: languageModelSession, step: step)
@@ -36,21 +34,19 @@ extension AgentSession {
     public func run<S: Step & Sendable>(
         tools: [any Tool] = [],
         pluginRegistry: PluginRegistry? = nil,
-        pipeline: ToolPipeline = .default,
+        configuration: ToolRuntimeConfiguration = .default,
         @InstructionsBuilder instructions: @Sendable () -> Instructions,
         @StepBuilder step: @Sendable () -> S
     ) async throws where S.Input == Prompt, S.Output == String {
-        let effectivePipeline: ToolPipeline
-        let effectiveTools: [any Tool]
+        var effectiveConfiguration = configuration
         if let pluginRegistry {
-            effectivePipeline = try pipeline.withPluginRegistry(pluginRegistry)
-            effectiveTools = tools + (try pluginRegistry.aggregatedSwiftAgentTools())
+            effectiveConfiguration = try effectiveConfiguration.withPluginRegistry(pluginRegistry)
+            effectiveConfiguration.register(tools + (try pluginRegistry.aggregatedSwiftAgentTools()))
         } else {
-            effectivePipeline = pipeline
-            effectiveTools = tools
+            effectiveConfiguration.register(tools)
         }
-        let wrappedTools = effectivePipeline.wrap(effectiveTools)
-        let languageModelSession = LanguageModelSession(tools: wrappedTools) {
+        let runtime = ToolRuntime(configuration: effectiveConfiguration)
+        let languageModelSession = LanguageModelSession(tools: runtime.publicTools()) {
             instructions()
         }
         let conversation = Conversation(languageModelSession: languageModelSession, step: step)

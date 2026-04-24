@@ -9,22 +9,26 @@ struct PluginPermissionRuntimeTests {
     @Test("Workspace-write plugin tool is denied in read-only mode")
     func workspaceWritePluginToolIsDeniedInReadOnlyMode() async throws {
         let tool = try makePluginTool(requiredPermission: .workspaceWrite).makeSwiftAgentTool()
-        let pipeline = ToolPipeline.empty.use(PermissionMiddleware(configuration: .readOnly))
-        let wrappedTool = pipeline.wrap(tool)
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PermissionMiddleware(configuration: .readOnly))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
         await #expect(throws: PermissionDenied.self) {
-            _ = try await wrappedTool.call(arguments: try GeneratedContent(json: #"{"message":"hello"}"#))
+            _ = try await runtime.execute(toolName: tool.name, argumentsJSON: #"{"message":"hello"}"#)
         }
     }
 
     @Test("Danger-full-access plugin tool prompts in standard mode and can proceed")
     func dangerFullAccessPluginToolCanProceedAfterApproval() async throws {
         let tool = try makePluginTool(requiredPermission: .dangerFullAccess).makeSwiftAgentTool()
-        let config = PermissionConfiguration.standard.withHandler(AlwaysAllowHandler())
-        let pipeline = ToolPipeline.empty.use(PermissionMiddleware(configuration: config))
-        let wrappedTool = pipeline.wrap(tool)
+        let permissionConfig = PermissionConfiguration.standard.withHandler(AlwaysAllowHandler())
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PermissionMiddleware(configuration: permissionConfig))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
-        let output = try await wrappedTool.call(arguments: try GeneratedContent(json: #"{"message":"hello"}"#))
+        let output = try await runtime.execute(toolName: tool.name, argumentsJSON: #"{"message":"hello"}"#)
         let outputObject = try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: String]
 
         #expect(outputObject?["message"] == "hello")
@@ -33,11 +37,13 @@ struct PluginPermissionRuntimeTests {
     @Test("Danger-full-access plugin tool is denied in standard mode without a handler")
     func dangerFullAccessPluginToolIsDeniedWithoutApprovalHandler() async throws {
         let tool = try makePluginTool(requiredPermission: .dangerFullAccess).makeSwiftAgentTool()
-        let pipeline = ToolPipeline.empty.use(PermissionMiddleware(configuration: .standard))
-        let wrappedTool = pipeline.wrap(tool)
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PermissionMiddleware(configuration: .standard))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
         await #expect(throws: PermissionDenied.self) {
-            _ = try await wrappedTool.call(arguments: try GeneratedContent(json: #"{"message":"hello"}"#))
+            _ = try await runtime.execute(toolName: tool.name, argumentsJSON: #"{"message":"hello"}"#)
         }
     }
 

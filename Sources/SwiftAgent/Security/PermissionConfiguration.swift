@@ -130,8 +130,8 @@ extension PermissionConfiguration {
     /// ## Usage
     ///
     /// ```swift
-    /// // Typically used internally by ToolPipeline.default
-    /// let pipeline = ToolPipeline()
+    /// // Typically used internally by ToolRuntimeConfiguration.default
+    /// var config = ToolRuntimeConfiguration()
     ///     .use(PermissionMiddleware(configuration: .permissive))
     /// ```
     public static var permissive: PermissionConfiguration {

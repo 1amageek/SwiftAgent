@@ -30,7 +30,7 @@ import Foundation
 /// ## Example
 ///
 /// ```swift
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(PermissionMiddleware(configuration: .standard))
 ///     .use(SandboxMiddleware(configuration: .standard))
 ///

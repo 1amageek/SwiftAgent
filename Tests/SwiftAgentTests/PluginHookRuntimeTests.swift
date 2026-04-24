@@ -109,11 +109,14 @@ struct PluginHookRuntimeTests {
         )
 
         let runner = PluginHookRunner(hooks: PluginHooks(preToolUse: [hookPath]))
-        let pipeline = ToolPipeline.empty.use(PluginHookMiddleware(hookRunner: runner))
         let recorder = HookExecutionRecorder()
-        let wrappedTool = pipeline.wrap(HookEchoTool(recorder: recorder))
+        let tool = HookEchoTool(recorder: recorder)
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PluginHookMiddleware(hookRunner: runner))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
-        let output = try await wrappedTool.call(arguments: HookEchoInput(command: "pwd"))
+        let output = try await runtime.execute(tool, arguments: HookEchoInput(command: "pwd"))
 
         #expect(output == "git status")
         #expect(await recorder.snapshot() == ["git status"])
@@ -131,12 +134,15 @@ struct PluginHookRuntimeTests {
         )
 
         let runner = PluginHookRunner(hooks: PluginHooks(preToolUse: [hookPath]))
-        let pipeline = ToolPipeline.empty.use(PluginHookMiddleware(hookRunner: runner))
         let recorder = HookExecutionRecorder()
-        let wrappedTool = pipeline.wrap(HookEchoTool(recorder: recorder))
+        let tool = HookEchoTool(recorder: recorder)
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PluginHookMiddleware(hookRunner: runner))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
         await #expect(throws: PluginHookError.self) {
-            _ = try await wrappedTool.call(arguments: HookEchoInput(command: "pwd"))
+            _ = try await runtime.execute(tool, arguments: HookEchoInput(command: "pwd"))
         }
         #expect(await recorder.snapshot().isEmpty)
     }
@@ -153,12 +159,15 @@ struct PluginHookRuntimeTests {
         )
 
         let runner = PluginHookRunner(hooks: PluginHooks(postToolUse: [hookPath]))
-        let pipeline = ToolPipeline.empty.use(PluginHookMiddleware(hookRunner: runner))
         let recorder = HookExecutionRecorder()
-        let wrappedTool = pipeline.wrap(HookEchoTool(recorder: recorder))
+        let tool = HookEchoTool(recorder: recorder)
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PluginHookMiddleware(hookRunner: runner))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
         await #expect(throws: PluginHookError.self) {
-            _ = try await wrappedTool.call(arguments: HookEchoInput(command: "pwd"))
+            _ = try await runtime.execute(tool, arguments: HookEchoInput(command: "pwd"))
         }
         #expect(await recorder.snapshot() == ["pwd"])
     }
@@ -178,11 +187,14 @@ struct PluginHookRuntimeTests {
         )
 
         let runner = PluginHookRunner(hooks: PluginHooks(postToolUseFailure: [hookPath]))
-        let pipeline = ToolPipeline.empty.use(PluginHookMiddleware(hookRunner: runner))
-        let wrappedTool = pipeline.wrap(HookFailingTool())
+        let tool = HookFailingTool()
+        var config = ToolRuntimeConfiguration.empty
+        config.use(PluginHookMiddleware(hookRunner: runner))
+        config.register(tool)
+        let runtime = ToolRuntime(configuration: config)
 
         await #expect(throws: HookFixtureError.self) {
-            _ = try await wrappedTool.call(arguments: HookEchoInput(command: "false"))
+            _ = try await runtime.execute(tool, arguments: HookEchoInput(command: "false"))
         }
 
         let marker = try String(contentsOfFile: markerPath, encoding: .utf8)

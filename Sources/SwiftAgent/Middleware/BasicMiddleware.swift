@@ -15,15 +15,15 @@ import Foundation
 ///
 /// ```swift
 /// // Basic usage
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(LoggingMiddleware())
 ///
 /// // Verbose mode: logs tool arguments
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(LoggingMiddleware(verbose: true))
 ///
 /// // Custom logger
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(LoggingMiddleware { print($0) })
 /// ```
 public struct LoggingMiddleware: ToolMiddleware {
@@ -129,7 +129,7 @@ public struct LoggingMiddleware: ToolMiddleware {
 /// ## Example
 ///
 /// ```swift
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(RetryMiddleware(maxAttempts: 3, delay: .seconds(1)))
 /// ```
 public struct RetryMiddleware: ToolMiddleware {
@@ -190,7 +190,7 @@ public struct RetryMiddleware: ToolMiddleware {
 /// ## Example
 ///
 /// ```swift
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(TimeoutMiddleware(duration: .seconds(30)))
 /// ```
 public struct TimeoutMiddleware: ToolMiddleware {
@@ -249,7 +249,7 @@ public struct PassthroughMiddleware: ToolMiddleware {
 /// ## Example
 ///
 /// ```swift
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(ConditionalMiddleware(
 ///         condition: { $0.toolName.hasPrefix("dangerous_") },
 ///         middleware: PermissionMiddleware(configuration: .restrictive)

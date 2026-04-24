@@ -61,7 +61,7 @@ public typealias DynamicPermissionRulesProvider = @Sendable () -> [PermissionRul
 ///
 /// let middleware = PermissionMiddleware(configuration: config)
 ///
-/// let pipeline = ToolPipeline()
+/// var config = ToolRuntimeConfiguration()
 ///     .use(middleware)
 /// ```
 ///

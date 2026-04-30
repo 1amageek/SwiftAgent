@@ -14,24 +14,24 @@ import SwiftAgent
 ///
 /// When the LLM determines that a task has many TODOs or can be parallelized,
 /// it can use this tool to spawn helper agents. The spawned SubAgents are
-/// automatically registered with Community and become available for work distribution.
+/// automatically registered with the runtime and become available for work distribution.
 ///
 /// ## Usage
 ///
 /// ```swift
 /// distributed actor WorkerAgent: Communicable, Replicable {
-///     let community: Community
+///     let runtime: SymbioRuntime
 ///     let replicateTool: ReplicateTool
 ///
-///     init(community: Community, actorSystem: SymbioActorSystem) {
-///         self.community = community
+///     init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
+///         self.runtime = runtime
 ///         self.actorSystem = actorSystem
 ///         self.replicateTool = ReplicateTool(agent: self)
 ///     }
 ///
-///     func replicate() async throws -> Member {
-///         try await community.spawn {
-///             WorkerAgent(community: self.community, actorSystem: self.actorSystem)
+///     func replicate() async throws -> ParticipantView {
+///         try await runtime.spawn {
+///             WorkerAgent(runtime: self.runtime, actorSystem: self.actorSystem)
 ///         }
 ///     }
 /// }
@@ -44,7 +44,7 @@ import SwiftAgent
 ///     }
 /// }
 /// ```
-public struct ReplicateTool: Tool, @unchecked Sendable {
+public struct ReplicateTool: Tool, Sendable {
     public typealias Arguments = ReplicateArguments
     public typealias Output = ReplicateOutput
 
@@ -59,8 +59,8 @@ public struct ReplicateTool: Tool, @unchecked Sendable {
         - Work can be parallelized across multiple agents
         - You need specialized helpers for subtasks
 
-        The spawned SubAgent will be registered with the Community and can receive signals.
-        After spawning, use the returned agent ID to send work via community signals.
+        The spawned SubAgent will be registered with the runtime and can receive signals.
+        After spawning, use the returned agent ID to send work through runtime signals.
         """
 
     public var description: String { Self.toolDescription }
@@ -79,14 +79,14 @@ public struct ReplicateTool: Tool, @unchecked Sendable {
     }
 
     public func call(arguments: ReplicateArguments) async throws -> ReplicateOutput {
-        let member = try await agent.replicate()
+        let participant = try await agent.replicate()
 
         return ReplicateOutput(
             success: true,
-            agentID: member.id,
-            accepts: Array(member.accepts),
+            participantID: participant.id.rawValue,
+            affordances: participant.affordances.map(\.contract.id).sorted(),
             reason: arguments.reason,
-            message: "SubAgent spawned successfully. ID: \(member.id). Ready to receive signals for: \(member.accepts.joined(separator: ", "))"
+            message: "SubAgent spawned successfully. ID: \(participant.id.rawValue)."
         )
     }
 }
@@ -96,7 +96,7 @@ public struct ReplicateTool: Tool, @unchecked Sendable {
 /// Arguments for the replicate tool
 @Generable
 public struct ReplicateArguments: Sendable {
-    @Guide(description: "Reason for spawning a SubAgent (e.g., 'Many TODOs to process in parallel', 'Need helper for file processing')")
+    @Guide(description: "Reason for spawning a SubAgent")
     public let reason: String
 }
 
@@ -107,11 +107,11 @@ public struct ReplicateOutput: Sendable {
     /// Whether the replication succeeded
     public let success: Bool
 
-    /// The ID of the spawned SubAgent
-    public let agentID: String
+    /// The ID of the spawned SubAgent participant
+    public let participantID: String
 
-    /// Signal types the SubAgent can receive
-    public let accepts: [String]
+    /// Affordances advertised by the SubAgent
+    public let affordances: [String]
 
     /// The reason provided for spawning
     public let reason: String
@@ -121,14 +121,14 @@ public struct ReplicateOutput: Sendable {
 
     public init(
         success: Bool,
-        agentID: String = "",
-        accepts: [String] = [],
+        participantID: String = "",
+        affordances: [String] = [],
         reason: String = "",
         message: String
     ) {
         self.success = success
-        self.agentID = agentID
-        self.accepts = accepts
+        self.participantID = participantID
+        self.affordances = affordances
         self.reason = reason
         self.message = message
     }
@@ -141,11 +141,11 @@ extension ReplicateOutput: PromptRepresentable {
         if success {
             return Prompt("""
                 SubAgent spawned successfully:
-                - Agent ID: \(agentID)
-                - Accepts signals: \(accepts.joined(separator: ", "))
+                - Participant ID: \(participantID)
+                - Affordances: \(affordances.joined(separator: ", "))
                 - Reason: \(reason)
 
-                You can now send work to this SubAgent using community.send().
+                You can now send work to this SubAgent using runtime.send(..., to: participantID, ...).
                 """)
         } else {
             return Prompt("Failed to spawn SubAgent: \(message)")

@@ -1,45 +1,61 @@
 # ``SwiftAgentSymbio``
 
-Distributed actor system for multi-agent communication and discovery.
+Distributed runtime primitives for agent membership, routing, invocation, and
+peer observations.
 
 ## Overview
 
-SwiftAgentSymbio enables agents to communicate and discover each other across processes
-and networks using Swift Distributed Actors.
+SwiftAgentSymbio separates the philosophical concept of a community from the
+concrete runtime object that executes local work. `Community` is the social
+model described in `PHILOSOPHY.md`. ``SymbioRuntime`` is the implementation
+surface that owns local agents, observes remote peers, and routes work through a
+transport boundary.
+
+`Community` is not required for every interaction. Direct one-to-one
+conversation can remain direct, and even multi-party coordination can sometimes
+be handled by a capable mediator without creating an explicit shared substrate.
+In Symbio, community is a coordination affordance: a shared surface for claims,
+observations, tasks, reviews, memory, and situated affordances when direct
+communication is not enough.
+
+Affordances complement capabilities. A capability is a relatively stable action
+contract. An affordance is situated: what a member appears able to contribute
+now under current constraints. A robot may have a camera capability but may not
+currently see the target; a high-compute agent may analyze observations but
+cannot act physically. Symbio keeps these differences visible so mixed
+communities of robots, models, memory services, and people can complement one
+another.
 
 ### Architecture
 
-```
-Layer 4: Agent (Communicable = CommunityAgent + SignalReceivable)
+```text
+Layer 4: Agent (Communicable)
     ↓
-Layer 3: Community (member management, spawn/terminate/send)
+Layer 3: SymbioRuntime (members, local lifecycle, routing, observations)
     ↓
-Layer 2: SymbioActorSystem + PeerConnector (Distributed Actor infrastructure)
+Layer 2: SymbioActorSystem + SymbioProtocol envelopes
     ↓
-Layer 1: swift-discovery (transport abstraction)
+Layer 1: SymbioTransport
     ↓
-Layer 0: Transport (mDNS/TCP, BLE, HTTP/WebSocket)
+Layer 0: PeerConnectivity, in-process, or custom transports
 ```
 
-### Creating a Community
+### Creating a Runtime
 
 ```swift
 let actorSystem = SymbioActorSystem()
-let community = Community(actorSystem: actorSystem)
+let runtime = SymbioRuntime(actorSystem: actorSystem)
 
-// Spawn a local agent
-let worker = try await community.spawn {
-    WorkerAgent(community: community, actorSystem: actorSystem)
+let worker = try await runtime.spawn {
+    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
 }
 
-// Send signals
-try await community.send(WorkSignal(task: "process"), to: worker, perception: "work")
+try await runtime.send(WorkSignal(task: "process"), to: worker.id, perception: "work")
 
-// Monitor changes
-for await change in await community.changes {
+for await change in await runtime.changes {
     switch change {
-    case .joined(let member): print("Joined: \(member.id)")
-    case .left(let member): print("Left: \(member.id)")
+    case .joined(let participant): print("Joined: \(participant.id)")
+    case .left(let participantID): print("Left: \(participantID)")
     default: break
     }
 }
@@ -51,7 +67,12 @@ for await change in await community.changes {
 distributed actor WorkerAgent: Communicable, Terminatable {
     typealias ActorSystem = SymbioActorSystem
 
-    let community: Community
+    let runtime: SymbioRuntime
+
+    init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
+        self.runtime = runtime
+        self.actorSystem = actorSystem
+    }
 
     nonisolated var perceptions: [any Perception] {
         [WorkPerception()]
@@ -59,13 +80,10 @@ distributed actor WorkerAgent: Communicable, Terminatable {
 
     distributed func receive(_ data: Data, perception: String) async throws -> Data? {
         let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
-        // Process signal...
         return nil
     }
 
-    nonisolated func terminate() async {
-        // Cleanup...
-    }
+    nonisolated func terminate() async {}
 }
 ```
 
@@ -73,28 +91,39 @@ distributed actor WorkerAgent: Communicable, Terminatable {
 
 | Operation | Local | Remote |
 |-----------|:-----:|:------:|
-| spawn | ✅ | ❌ |
-| terminate | ✅ | ❌ |
-| send | ✅ | ✅ |
-| invoke (capability) | ❌ | ✅ |
+| spawn | yes | no |
+| terminate | yes | no |
+| send | yes | yes |
+| invoke | yes | yes |
 
-### Dynamic Agent Replication
+Remote behavior is provided through ``SymbioTransport``. The default
+``LocalOnlySymbioTransport`` keeps runtime behavior deterministic for local-only
+tests and applications.
 
-LLMs can spawn sub-agents dynamically using ``ReplicateTool``:
-
-```swift
-let session = LanguageModelSession(tools: [ReplicateTool(agent: workerAgent)]) {
-    Instructions("Spawn helper agents when tasks are complex.")
-}
-```
+Use the `SwiftAgentSymbioPeerConnectivity` product when a runtime should use a
+`PeerConnectivitySession` as its remote transport. That adapter exchanges
+``ParticipantDescriptor`` values over a descriptor stream and invocations over an
+invocation stream.
 
 ## Topics
 
-### Community Management
+### Runtime
 
-- ``Community``
-- ``CommunityChange``
-- ``Member``
+- ``SymbioRuntime``
+- ``SymbioRuntimeChange``
+- ``ParticipantID``
+- ``ParticipantDescriptor``
+- ``ParticipantView``
+- ``Affordance``
+- ``RoutePlan``
+
+### Transport
+
+- ``SymbioTransport``
+- ``SymbioTransportEvent``
+- ``SymbioInvocationEnvelope``
+- ``SymbioInvocationReply``
+- ``LocalOnlySymbioTransport``
 
 ### Agent Protocols
 
@@ -106,7 +135,6 @@ let session = LanguageModelSession(tools: [ReplicateTool(agent: workerAgent)]) {
 
 - ``SymbioActorSystem``
 - ``Address``
-- ``PeerConnector``
 
 ### Tools
 

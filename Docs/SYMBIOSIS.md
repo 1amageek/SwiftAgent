@@ -1,696 +1,220 @@
 # SwiftAgentSymbio 仕様書
 
-エージェント間通信と発見のための分散システムモジュール。
+SwiftAgentSymbio は、エージェントが他者と協力するための実行時基盤である。
+
+`Community` は哲学上の概念として扱う。実装上の中心は `SymbioRuntime` であり、ローカルに所有するエージェント、観測された peer、claim、信頼、routing をこのプロセスの主観的な view として保持する。
+
+設計への具体的な落とし込みは [SYMBIO_DESIGN.md](SYMBIO_DESIGN.md) に分離する。
 
 ## 設計原則
 
 | 原則 | 説明 |
-|------|------|
-| **平等性** | 全エージェントは同列、親子関係なし |
-| **場所透過性** | エージェントは相手の場所を知らない（同一プロセス/LAN/インターネット） |
-| **統一インターフェース** | 全て `Community` 経由で通信 |
-| **自己申告** | 各エージェントが `perceptions` で受信可能な信号を宣言 |
-| **ローカル管轄** | エージェントは自分の管轄内でのみ起動・終了できる |
-| **Distributed Actor** | エージェントは Swift Distributed Actor として実装 |
+|---|---|
+| 平等性 | エージェント間の関係は command hierarchy ではなく peer membership |
+| 主観的 view | runtime は global registry ではなく、このプロセスから見た局所的な社会 view |
+| 接続と社会性の分離 | transport は到達性を扱い、runtime は関係・信頼・routing を扱う |
+| claim と authority の分離 | remote peer の宣言は claim であり、local policy を通るまで権限ではない |
+| ローカル所有 | 起動・終了できるのはローカルに生成した agent だけ |
+| 型付き境界 | signal、invocation、descriptor、route は typed boundary として扱う |
+| Community の任意性 | Community は常に必要な実体ではなく、協調を助ける affordance として扱う |
+
+## Community の哲学
+
+`Community` は、複数の主体が協力するための共有作業面である。ただし、3 者以上の共同作業であっても常に `Community` が必要とは限らない。高い文脈保持能力を持つ LLM が全体を調停できる場合や、参加者が直接会話だけで十分に同期できる場合は、明示的な Community を作らなくても協調は成立する。
+
+人間における掲示板、GitHub issue、pull request、共有タスクリスト、現場ログのようなものが Community に近い。これらは会話そのものではなく、会話・作業・判断・レビュー・履歴を外部化するための場である。
+
+```text
+goal + participants + context pressure + time scale + audit need
+  -> direct conversation
+  -> mediated coordination
+  -> community substrate
+```
+
+Community はしたがって、基礎オブジェクトではなく coordination affordance である。必要なときに立ち上がり、不要なときは直接通信や内部 planning を邪魔しない。
+
+| 状況 | Community の必要性 |
+|---|---|
+| 1 on 1 の直接会話で完結する | 低い |
+| 3 者以上でも強い調停者が文脈を保持できる | 低い場合がある |
+| 非同期・長期・レビュー・責任分担が必要 | 高い |
+| ロボット、LLM、memory、human が非対称な能力を補完する | 高い |
+| context window や計算資源の制約が強い | 高い |
+| claim、判断、観測、作業履歴に provenance が必要 | 高い |
+
+## Affordance と capability
+
+ロボットや physical AI を含む協調では、`capability` だけでは不十分である。capability は「原理的に実行できる契約」に近い。一方、affordance は「今この状況でできそうなこと」である。
+
+| 概念 | 意味 | 例 |
+|---|---|---|
+| perception | 相手に届く問い、観測、報告、signal | 「そこからタワーは見える？」 |
+| capability | 明示的に呼び出せる action contract | 画像分析、移動命令、ファイル編集 |
+| affordance | 状況込みで現在可能に見えること | タワーが見える、棚に近づける、把持できない |
+| claim | provenance 付きの主張 | robot A says tower is visible |
+| constraint | affordance を制限する条件 | battery low、path blocked、permission missing |
+
+`perception` は conversational input として開いているべきである。相手が答えられるかを事前に知っている必要はない。電話で相手の状況が分からなくても「そこから見える？」と聞けるのと同じである。
+
+ただし conversational input は自然言語に限定しない。自然言語で表現できる intent もあれば、typed payload、sensor frame、actuator command、resource reference としてしか扱えない入力もある。自然言語を理解できないロボット、reflex loop、低レベル controller も Community の参加者になり得る。
+
+```text
+intent -> natural language / typed payload / sensor frame / actuator command
+       -> direct receiver or mediator
+```
+
+`capability` は side effect や安全境界を伴うため、明示的で typed かつ policy-gated であるべきである。
+
+`affordance` はその間をつなぐ。Community または runtime は、問いかけ、観測、応答、失敗、成功を通じて「今この member が何を差し出せそうか」という local view を更新する。
+
+```text
+question / observation -> claim -> affordance -> route / task formation
+```
 
 ## ローカル vs リモート
 
 | 操作 | ローカル | リモート |
-|------|:--------:|:--------:|
-| 起動 (spawn) | ✅ | ❌ |
-| 終了 (terminate) | ✅ | ❌ |
-| 発見 (discover) | ✅ | ✅ |
-| 通信 (send/invoke) | ✅ | ✅ |
+|---|:---:|:---:|
+| spawn | yes | no |
+| terminate | yes | no |
+| observe | yes | yes |
+| send | yes | yes |
+| invoke | yes | yes |
+| block / forget | local view only | local view only |
 
-- **ローカルエージェント**: 自分で起動し、自分で終了できる
-- **リモートエージェント**: 発見して通信するのみ（起動・終了は相手の管轄）
-
----
+remote agent は所有対象ではない。発見、接続、通信、観測、忘却、拒否、低優先度化はできるが、相手そのものを終了したり支配したりしない。
 
 ## アーキテクチャ
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 4: Agent (distributed actor)                              │
-│   • ビジネスロジック                                             │
-│   • @Resolvable プロトコル準拠                                   │
-│   • distributed func receive(...)                               │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 3: Community                                              │
-│   • SymbioActorSystem のラッパー                                 │
-│   • Member の管理                                               │
-│   • エージェントの起動 (spawn)                                   │
-│   • 高レベル API 提供                                            │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 2: SymbioActorSystem (DistributedActorSystem)             │
-│   • ActorRegistry でローカル Actor を管理                        │
-│   • remoteCall / remoteCallVoid でRPC                           │
-│   • PeerConnector 統合                                           │
-│   • ローカル/リモート透過的なルーティング                         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 1: PeerConnector (swift-discovery)                        │
-│   • Perception ↔ CapabilityID 変換                              │
-│   • TransportCoordinator 統合                                    │
-│   • 複数トランスポート対応                                        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 0: Transport (swift-discovery)                            │
-│   • LocalNetworkTransport (mDNS/TCP)                            │
-│   • NearbyTransport (BLE)                                       │
-│   • RemoteNetworkTransport (HTTP/WebSocket)                     │
-└─────────────────────────────────────────────────────────────────┘
+```text
+Layer 4: Agent
+  - Communicable
+  - distributed func receive(...)
+
+Layer 3: SymbioRuntime
+  - local agent lifecycle
+  - member view
+  - local peer observations
+  - route scoring
+  - block / forget
+
+Layer 2: SymbioActorSystem + SymbioProtocol
+  - local distributed actor registry
+  - incoming invocation routing
+  - invocation envelope / reply
+
+Layer 1: SymbioTransport
+  - remote peer descriptor events
+  - remote invocation delivery
+
+Layer 0: PeerConnectivity or custom transport
+  - discovery
+  - join / disconnect
+  - messages / streams / resources
 ```
 
----
+## 主要型
 
-## 核心技術: Swift Distributed Actors
+| 型 | 責務 |
+|---|---|
+| `SymbioRuntime` | ローカル agent と participant view の実行時 facade |
+| `ParticipantID` | agent、robot、device、aggregate を表す安定 ID |
+| `ParticipantDescriptor` | participant が交換する自己記述 |
+| `ParticipantView` | affordance、claim、evidence、availability、policy 制約を含む局所 view |
+| `Affordance` | participant が状況内で実行可能に見える capability contract |
+| `RoutePlan` | routing 判断、delivery、evidence、policy decision を含む計画 |
+| `SymbioActorSystem` | ローカル distributed actor registry と invocation routing |
+| `SymbioTransport` | transport 実装を差し替える境界 |
+| `SymbioInvocationEnvelope` | remote invocation の request envelope |
+| `SymbioInvocationReply` | remote invocation の result / failure |
 
-SwiftAgentSymbio は Swift の Distributed Actors を活用し、場所透過的なエージェント通信を実現する。
-
-### @Resolvable マクロ
-
-`@Resolvable` マクロ（SE-0428）により、プロトコルを通じて distributed actor を解決できる：
+## Agent 実装
 
 ```swift
-@Resolvable
-public protocol SignalReceivable: DistributedActor where ActorSystem == SymbioActorSystem {
-    /// 信号を受信
-    distributed func receive(_ data: Data, perception: String) async throws -> Data?
-}
-```
-
-生成されるコード:
-```swift
-// コンパイラが自動生成
-public struct $SignalReceivable: DistributedActor {
-    public static func resolve(id: Address, using system: SymbioActorSystem) throws -> any SignalReceivable
-}
-```
-
-### SymbioActorSystem
-
-`DistributedActorSystem` プロトコルを実装し、ローカル/リモートの区別なく Actor を管理：
-
-```swift
-public final class SymbioActorSystem: DistributedActorSystem {
-    public typealias ActorID = Address
-    public typealias SerializationRequirement = Codable
-
-    /// ローカル Actor レジストリ
-    private let registry: ActorRegistry
-
-    /// swift-discovery 統合
-    private var peerConnector: PeerConnector?
-
-    /// Actor を解決（ローカル優先）
-    public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
-
-    /// リモート呼び出し（自動的にローカル/リモートを判断）
-    public func remoteCall<Act, Err, Res>(
-        on actor: Act,
-        target: RemoteCallTarget,
-        invocation: inout InvocationEncoder,
-        throwing: Err.Type,
-        returning: Res.Type
-    ) async throws -> Res
-}
-```
-
-**ルーティング原則**:
-1. `registry.find(id:)` でローカル Actor を検索
-2. 見つかれば `executeDistributedTarget()` で直接実行
-3. 見つからなければ `PeerConnector` 経由でリモート呼び出し
-
----
-
-## コアプロトコル
-
-### Perception（知覚）
-
-エージェントが受け取れる信号の種類を宣言する。
-
-```swift
-public protocol Perception: Sendable {
-    var identifier: String { get }
-    associatedtype Signal: Sendable & Codable
-}
-```
-
-**Perception と Signal は 1:1 の関係**:
-- 1つの Perception は 1つの Signal 型に対応
-- Signal 型は必ず `Codable` に準拠（シリアライズ可能）
-
-**標準シグナル型：**
-
-| シグナル | 説明 |
-|----------|------|
-| `VisualSignal` | 画像データ（data, width, height, timestamp） |
-| `AuditorySignal` | 音声データ（data, sampleRate, channels, timestamp） |
-| `TactileSignal` | 触覚データ（pressure, locationX, locationY, timestamp） |
-| `NetworkSignal` | テキストメッセージ（text, sourceIdentifier, timestamp） |
-
-### SignalReceivable（信号受信可能）
-
-Distributed Actor として信号を受信するためのプロトコル。
-
-```swift
-@Resolvable
-public protocol SignalReceivable: DistributedActor where ActorSystem == SymbioActorSystem {
-    /// 信号を受信
-    /// - Parameters:
-    ///   - data: シリアライズされた信号データ
-    ///   - perception: 知覚の識別子
-    /// - Returns: オプショナルなレスポンスデータ
-    distributed func receive(_ data: Data, perception: String) async throws -> Data?
-}
-```
-
-### CommunityAgent
-
-コミュニティに参加するエージェントのプロトコル。
-
-```swift
-public protocol CommunityAgent: DistributedActor where ActorSystem == SymbioActorSystem {
-    var community: Community { get }
-    nonisolated var perceptions: [any Perception] { get }
-}
-```
-
-### Terminatable
-
-グレースフル終了をサポートするプロトコル。
-
-```swift
-public protocol Terminatable: Actor {
-    func terminate() async
-}
-```
-
----
-
-## Member
-
-コミュニティ内の他のエージェントを表す。
-
-```swift
-public struct Member: Identifiable, Hashable, Sendable {
-    public let id: String
-    public let name: String?
-    public let accepts: Set<String>      // 受け取れる信号
-    public let provides: Set<String>     // 提供する機能
-    public var isAvailable: Bool
-    public let metadata: [String: String]
-}
-```
-
-**metadata["location"] の値：**
-- `"local"` - 同一プロセス内（ローカル Actor）
-- `"remote"` - ネットワーク経由（リモート Actor）
-
----
-
-## Community API
-
-### 初期化とライフサイクル
-
-```swift
-public actor Community {
-    /// Actor System を指定して初期化
-    init(actorSystem: SymbioActorSystem)
-
-    /// 設定を指定して初期化
-    init(name: String, perceptions: [any Perception] = [], ...)
-
-    func start() async throws
-    func stop() async throws
-}
-```
-
-### メンバー検索
-
-```swift
-func whoCanReceive(_ perception: String) -> [Member]
-func whoProvides(_ capability: String) -> [Member]
-func member(id: String) -> Member?
-var members: [Member] { get }
-var availableMembers: [Member] { get }
-```
-
-### 通信
-
-```swift
-/// 信号を送信（Distributed Actor 経由）
-func send<S: Sendable & Codable>(
-    _ signal: S,
-    to member: Member,
-    perception: String
-) async throws -> Data?
-
-/// 機能を呼び出し
-func invoke(
-    _ capability: String,
-    on member: Member,
-    with arguments: Data
-) async throws -> Data
-```
-
-### エージェント起動・終了
-
-```swift
-/// ローカルでエージェントを起動
-@discardableResult
-func spawn<A: CommunityAgent & SignalReceivable>(
-    _ factory: @escaping () async throws -> A
-) async throws -> Member
-
-/// エージェントを終了
-func terminate(_ member: Member) async throws
-```
-
-### 変更監視
-
-```swift
-var changes: AsyncStream<CommunityChange> { get }
-
-public enum CommunityChange: Sendable {
-    case joined(Member)
-    case left(Member)
-    case updated(Member)
-    case becameAvailable(Member)
-    case becameUnavailable(Member)
-}
-```
-
----
-
-## 信号送受信フロー
-
-### send() の実装
-
-```swift
-public func send<S: Sendable & Codable>(
-    _ signal: S,
-    to member: Member,
-    perception: String
-) async throws -> Data? {
-    guard member.isAvailable else {
-        throw CommunityError.memberUnavailable(member.id)
-    }
-
-    // 1. 信号をシリアライズ
-    let data = try JSONEncoder().encode(signal)
-
-    // 2. @Resolvable 経由で Actor を解決
-    let receiver = try $SignalReceivable.resolve(
-        id: Address(hexString: member.id),
-        using: actorSystem
-    )
-
-    // 3. distributed func を呼び出し（ローカル/リモート透過）
-    return try await receiver.receive(data, perception: perception)
-}
-```
-
-### フロー図
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           信号送受信フロー                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Sender                     Community                     Receiver          │
-│    │                           │                             │              │
-│    │ send(signal, to: member)  │                             │              │
-│    │ ─────────────────────────>│                             │              │
-│    │                           │                             │              │
-│    │                      $SignalReceivable.resolve()        │              │
-│    │                           │                             │              │
-│    │                           │ ┌─────────────────────────┐ │              │
-│    │                           │ │ SymbioActorSystem       │ │              │
-│    │                           │ │ ┌───────────────────┐   │ │              │
-│    │                           │ │ │registry.find(id:) │   │ │              │
-│    │                           │ │ └─────────┬─────────┘   │ │              │
-│    │                           │ │           │             │ │              │
-│    │                           │ │     ┌─────┴─────┐       │ │              │
-│    │                           │ │ ローカル     リモート    │ │              │
-│    │                           │ │     │           │       │ │              │
-│    │                           │ │     ▼           ▼       │ │              │
-│    │                           │ │  execute    PeerConnector│ │              │
-│    │                           │ │  Target     → Transport │ │              │
-│    │                           │ └───────────────────────┘ │ │              │
-│    │                           │                             │              │
-│    │                           │ receiver.receive(data, ...)│              │
-│    │                           │ ───────────────────────────>│              │
-│    │                           │                             │              │
-│    │                           │                             │ 信号を処理   │
-│    │                           │                             │              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## エージェント起動フロー
-
-### ローカル起動 (`spawn`)
-
-```
-spawn { WorkerAgent(community, actorSystem) }
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│ 1. factory() で distributed actor 生成   │
-│ 2. actorSystem.actorReady() が自動呼出  │
-│    → ActorRegistry に登録               │
-│ 3. perceptions → accepts 変換           │
-│ 4. Member 作成 & memberCache 登録       │
-│ 5. .joined(member) イベント発行          │
-└─────────────────────────────────────────┘
-         │
-         ▼
-    return Member
-```
-
-**ポイント**:
-- `distributed actor` の初期化時に `actorReady()` が自動的に呼ばれる
-- これにより `ActorRegistry` に自動登録される
-- 手動のハンドラ登録は不要
-
-### spawn() 実装
-
-```swift
-@discardableResult
-public func spawn<A: CommunityAgent & SignalReceivable>(
-    _ factory: @escaping () async throws -> A
-) async throws -> Member {
-    // 1. エージェント生成（distributed actor）
-    let agent = try await factory()
-
-    // 2. Actor ID を取得（actorReady で自動登録済み）
-    let agentID = agent.id.hexString
-
-    // 3. perceptions → accepts 変換
-    let accepts = Set(agent.perceptions.map { $0.identifier })
-
-    // 4. Member 作成
-    let member = Member(
-        id: agentID,
-        name: nil,
-        accepts: accepts,
-        provides: [],
-        isAvailable: true,
-        metadata: ["location": "local"]
-    )
-
-    // 5. キャッシュに追加
-    memberCache[agentID] = member
-    localAgentIDs.insert(agentID)
-
-    // 6. イベント発行
-    changeContinuation?.yield(.joined(member))
-
-    return member
-}
-```
-
----
-
-## エージェント終了フロー
-
-```
-terminate(member)
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│ metadata["location"] を確認             │
-└─────────────────────────────────────────┘
-         │
-    ┌────┴────────────────────┐
-    │                         │
-    ▼ "local"                 ▼ "remote"
-┌──────────────────┐    ┌──────────────────┐
-│ 1. Terminatable  │    │ エラー           │
-│    .terminate()  │    │ (終了不可)       │
-│ 2. resignID()で  │    └──────────────────┘
-│    Registry解除  │
-└────────┬─────────┘
-         │
-         ▼
-┌───────────────────────┐
-│ memberCache から削除  │
-│ .left(member) 発行    │
-└───────────────────────┘
-```
-
----
-
-## 使用例
-
-### Distributed Actor として実装
-
-```swift
-distributed actor WorkerAgent: CommunityAgent, SignalReceivable, Terminatable {
-
+distributed actor WorkerAgent: Communicable, Terminatable {
     typealias ActorSystem = SymbioActorSystem
 
-    let community: Community
-    private var isRunning = true
+    let runtime: SymbioRuntime
+
+    init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
+        self.runtime = runtime
+        self.actorSystem = actorSystem
+    }
 
     nonisolated var perceptions: [any Perception] {
         [WorkPerception()]
     }
 
-    init(community: Community, actorSystem: SymbioActorSystem) {
-        self.community = community
-        self.actorSystem = actorSystem
-    }
-
-    // SignalReceivable - 信号を受信
     distributed func receive(_ data: Data, perception: String) async throws -> Data? {
-        switch perception {
-        case "work":
-            let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
-            let result = await process(signal)
-            return try JSONEncoder().encode(ResultSignal(data: result))
-        default:
-            return nil
-        }
+        let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
+        return nil
     }
 
-    private func process(_ work: WorkSignal) async -> String {
-        // 処理ロジック
-        return "processed: \(work.task)"
-    }
-
-    func terminate() async {
-        isRunning = false
-    }
+    nonisolated func terminate() async {}
 }
 ```
 
-### オーケストレーター
+## Runtime 使用例
 
 ```swift
-distributed actor OrchestratorAgent: CommunityAgent {
-
-    typealias ActorSystem = SymbioActorSystem
-
-    let community: Community
-    private var workers: [Member] = []
-
-    nonisolated var perceptions: [any Perception] { [] }
-
-    init(community: Community, actorSystem: SymbioActorSystem) {
-        self.community = community
-        self.actorSystem = actorSystem
-    }
-
-    // ワーカーを起動
-    func scaleUp(count: Int) async throws {
-        for _ in 0..<count {
-            let worker = try await community.spawn {
-                WorkerAgent(community: self.community, actorSystem: self.actorSystem)
-            }
-            workers.append(worker)
-        }
-    }
-
-    // タスクを分散
-    func distribute(tasks: [WorkSignal]) async throws {
-        for (index, task) in tasks.enumerated() {
-            let worker = workers[index % workers.count]
-            _ = try await community.send(task, to: worker, perception: "work")
-        }
-    }
-
-    // 全ワーカーを終了
-    func shutdown() async throws {
-        for worker in workers {
-            try await community.terminate(worker)
-        }
-        workers.removeAll()
-    }
-}
-```
-
-### 完全な実行例
-
-```swift
-// ActorSystem と Community を作成
 let actorSystem = SymbioActorSystem()
-let community = Community(actorSystem: actorSystem)
-try await community.start()
+let runtime = SymbioRuntime(actorSystem: actorSystem)
 
-// オーケストレーターを起動
-let orchestratorMember = try await community.spawn {
-    OrchestratorAgent(community: community, actorSystem: actorSystem)
+let worker = try await runtime.spawn {
+    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
 }
 
-// OrchestratorAgent を解決して操作
-let orchestrator = try actorSystem.resolve(
-    id: Address(hexString: orchestratorMember.id),
-    as: OrchestratorAgent.self
-)!
-
-// ワーカーを3つ起動
-try await orchestrator.scaleUp(count: 3)
-
-// タスクを分散
-let tasks = [
-    WorkSignal(task: "task1"),
-    WorkSignal(task: "task2"),
-    WorkSignal(task: "task3")
-]
-try await orchestrator.distribute(tasks: tasks)
-
-// 終了
-try await orchestrator.shutdown()
-try await community.stop()
+try await runtime.send(WorkSignal(task: "process"), to: worker.id, perception: "work")
 ```
 
----
+## Transport 境界
 
-## エラー
+`SymbioTransport` は networking framework ではなく、Symbio runtime が必要とする最小境界である。
 
 ```swift
-public enum CommunityError: Error {
-    case memberUnavailable(String)
-    case memberDoesNotProvide(String, String)
-    case noAcceptedPerceptions(String)
-    case invalidCapability(String)
-    case invocationFailed(String)
-    case cannotTerminateRemote(String)
-    case memberNotFound(String)
-}
+public protocol SymbioTransport: Sendable {
+    var events: AsyncStream<SymbioTransportEvent> { get }
 
-public enum SymbioError: Error {
-    case notStarted
-    case alreadyStarted
-    case noTransportAvailable
-    case serializationFailed(String)
-    case deserializationFailed(String)
-    case invocationFailed(String)
-    case actorNotFound(String)
+    func start() async throws
+    func shutdown() async throws
+    func setInvocationHandler(_ handler: @escaping SymbioIncomingInvocationHandler) async
+    func removeInvocationHandler() async
+    func invoke(
+        _ envelope: SymbioInvocationEnvelope,
+        on peerID: ParticipantID,
+        timeout: Duration
+    ) async throws -> SymbioInvocationReply
 }
 ```
 
----
+`PeerConnectivity` はこの境界の有力な実装候補である。`SymbioRuntime` は `PeerConnectivity` 型を直接知らないため、近傍通信、libp2p、in-process transport、test double を同じ runtime semantics で扱える。
 
-## ファイル構成
+## PeerConnectivity adapter
 
-| ファイル | 責務 |
-|----------|------|
-| `SymbioActorSystem.swift` | DistributedActorSystem 実装、ActorRegistry 管理 |
-| `Community.swift` | Community actor、Member、CommunityChange |
-| `Communicable.swift` | CommunityAgent、SignalReceivable、Terminatable |
-| `PeerConnector.swift` | swift-discovery 統合 |
-| `Address.swift` | Actor ID (ActorID = Address) |
-| `InvocationEncoder.swift` | RPC エンコーダー |
-| `InvocationDecoder.swift` | RPC デコーダー |
-| `ResultHandler.swift` | RPC 結果ハンドラ |
+`SwiftAgentSymbioPeerConnectivity` は `PeerConnectivitySession` を `SymbioTransport` として使うための adapter を提供する。
 
----
+| 型 | 責務 |
+|---|---|
+| `PeerConnectivitySymbioTransport` | `PeerConnectivityEvent` を `SymbioTransportEvent` に変換し、stream 上で invocation / descriptor を交換する |
+| `PeerConnectivitySymbioMetadata` | discovery metadata へ `ParticipantDescriptor` を載せるための key / codec |
 
-## swift-discovery 依存
+adapter は 2 つの stream protocol を使う。
 
-| Transport | スコープ | 技術 |
-|-----------|---------|------|
-| `LocalNetworkTransport` | 同一ネットワーク | mDNS + TCP |
-| `NearbyTransport` | 近接 | BLE |
-| `RemoteNetworkTransport` | インターネット | HTTP + WebSocket |
+| Protocol | 用途 |
+|---|---|
+| `/swiftagent/symbio/descriptor/1.0.0` | 接続後に `ParticipantDescriptor` を交換する |
+| `/swiftagent/symbio/invoke/1.0.0` | `SymbioInvocationEnvelope` と `SymbioInvocationReply` を交換する |
 
----
+discovery metadata が得られる backend では metadata から `ParticipantDescriptor` を作る。metadata が不十分な backend では、接続後の descriptor exchange によって descriptor 全体を補完する。
 
-## swift-actor-runtime 依存
+## Community の位置づけ
 
-| コンポーネント | 説明 |
-|----------------|------|
-| `ActorRegistry` | ローカル Actor インスタンスの管理 |
-| `InvocationEnvelope` | RPC リクエストのエンベロープ |
-| `ResponseEnvelope` | RPC レスポンスのエンベロープ |
+`Community` は実装型ではなく、エージェントやロボットが社会的に存在するための概念である。
 
----
+transport event は単なる到達性であり、runtime はそれを observation、claim、relationship、trust、route に変換する。
 
-## 設計のポイント
-
-### なぜ SignalRouter が不要になったか
-
-従来の設計では、信号ルーティングのために `SignalRouter` を使用していた：
-
-```swift
-// 旧設計（SignalRouter ベース）
-actor SignalRouter {
-    func register<P: Perception>(_ perception: P, handler: ...)
-    func route(perception: String, signalData: Data, from: Member)
-}
+```text
+transport event -> observation -> claim -> relationship -> route -> action
 ```
 
-**問題点**:
-- 型消去による複雑さ（`[any Perception]` → ハンドラ登録）
-- 手動のハンドラ登録・解除が必要
-- ローカル/リモートで異なるルーティングパス
-
-**新設計（Distributed Actor ベース）**:
-
-```swift
-// 新設計（@Resolvable ベース）
-@Resolvable
-protocol SignalReceivable: DistributedActor {
-    distributed func receive(_ data: Data, perception: String) async throws -> Data?
-}
-```
-
-**解決**:
-- `distributed actor` の標準機能でルーティング
-- `SymbioActorSystem.remoteCall()` が自動的にローカル/リモートを判断
-- ハンドラ登録不要（Actor 生成時に `actorReady()` で自動登録）
-- 型安全（`$SignalReceivable.resolve()` でコンパイル時チェック）
-
-### Community の役割
-
-`Community` は `SymbioActorSystem` の高レベルラッパーとして機能：
-
-```
-┌─────────────────────────────────────────────────┐
-│                  Community                      │
-│  ┌───────────────────────────────────────────┐  │
-│  │ • Member 管理 (memberCache)              │  │
-│  │ • whoCanReceive() / whoProvides()        │  │
-│  │ • spawn() / terminate()                  │  │
-│  │ • changes (AsyncStream)                  │  │
-│  └───────────────────────────────────────────┘  │
-│                      ↓                          │
-│  ┌───────────────────────────────────────────┐  │
-│  │           SymbioActorSystem               │  │
-│  │ • ActorRegistry                          │  │
-│  │ • PeerConnector                          │  │
-│  │ • remoteCall / remoteCallVoid            │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
-```
+この変換が SwiftAgentSymbio の中心である。

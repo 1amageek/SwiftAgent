@@ -2,46 +2,38 @@
 //  MeshScoring.swift
 //  SwiftAgentSymbio
 //
-//  Scoring and selection utilities for mesh task dispatch.
-//
 
 import Foundation
-
-// MARK: - Mesh Metadata Keys
 
 public enum MeshMetadataKeys {
     public static let deviceType = "deviceType"
     public static let model = "model"
-    public static let battery = "battery"          // 0.0 - 1.0
-    public static let isCharging = "isCharging"    // "true" / "false"
-    public static let status = "status"            // "idle" / "busy"
-    public static let latencyMs = "latencyMs"      // Int as String
+    public static let battery = "battery"
+    public static let isCharging = "isCharging"
+    public static let status = "status"
+    public static let latencyMs = "latencyMs"
 }
 
-// MARK: - Mesh Status
-
-public enum MeshMemberStatus: String, Sendable {
+public enum MeshParticipantStatus: String, Sendable {
     case idle
     case busy
 
-    public static func parse(_ value: String?) -> MeshMemberStatus {
+    public static func parse(_ value: String?) -> MeshParticipantStatus {
         guard let raw = value?.lowercased() else { return .idle }
-        return MeshMemberStatus(rawValue: raw) ?? .idle
+        return MeshParticipantStatus(rawValue: raw) ?? .idle
     }
 }
 
-// MARK: - Member Metadata
-
-public struct MeshMemberMetadata: Sendable {
+public struct MeshParticipantMetadata: Sendable {
     public let deviceType: String?
     public let model: String?
     public let battery: Double?
     public let isCharging: Bool?
-    public let status: MeshMemberStatus
+    public let status: MeshParticipantStatus
     public let latencyMs: Int?
 
-    public init(member: Member) {
-        let metadata = member.metadata
+    public init(view: ParticipantView) {
+        let metadata = view.descriptor.metadata
         self.deviceType = metadata[MeshMetadataKeys.deviceType]
         self.model = metadata[MeshMetadataKeys.model]
         if let value = metadata[MeshMetadataKeys.battery] {
@@ -54,7 +46,7 @@ public struct MeshMemberMetadata: Sendable {
         } else {
             self.isCharging = nil
         }
-        self.status = MeshMemberStatus.parse(metadata[MeshMetadataKeys.status])
+        self.status = MeshParticipantStatus.parse(metadata[MeshMetadataKeys.status])
         if let value = metadata[MeshMetadataKeys.latencyMs] {
             self.latencyMs = Int(value)
         } else {
@@ -62,8 +54,6 @@ public struct MeshMemberMetadata: Sendable {
         }
     }
 }
-
-// MARK: - Task Requirements
 
 public struct MeshTaskRequirements: Sendable {
     public var requiredCapabilities: Set<String>
@@ -87,8 +77,6 @@ public struct MeshTaskRequirements: Sendable {
     }
 }
 
-// MARK: - Scoring
-
 public struct MeshScoreWeights: Sendable {
     public var capabilityMatch: Double
     public var batteryHigh: Double
@@ -97,57 +85,45 @@ public struct MeshScoreWeights: Sendable {
     public var latencyPenaltyPer100Ms: Double
 
     public static let `default` = MeshScoreWeights(
-        capabilityMatch: 10.0,
-        batteryHigh: 5.0,
-        charging: 3.0,
-        busyPenalty: 3.0,
-        latencyPenaltyPer100Ms: 1.0
+        capabilityMatch: 10,
+        batteryHigh: 5,
+        charging: 3,
+        busyPenalty: 3,
+        latencyPenaltyPer100Ms: 1
     )
 }
 
-public struct MemberScore: Sendable {
-    public let member: Member
+public struct ParticipantScore: Sendable {
+    public let participant: ParticipantView
     public let score: Double
 }
 
 public enum MeshScorer {
-
     public static func score(
-        member: Member,
+        participant: ParticipantView,
         requirements: MeshTaskRequirements,
         weights: MeshScoreWeights = .default
     ) -> Double {
-        let meta = MeshMemberMetadata(member: member)
-
+        let metadata = MeshParticipantMetadata(view: participant)
         var score = 0.0
 
-        // Capability match
+        let providedCapabilities = Set(participant.affordances.map(\.contract.id))
         if requirements.requiredCapabilities.isEmpty {
             score += weights.capabilityMatch
-        } else {
-            let matchesAll = requirements.requiredCapabilities.allSatisfy { cap in
-                member.canProvide(cap)
-            }
-            score += matchesAll ? weights.capabilityMatch : 0.0
+        } else if requirements.requiredCapabilities.isSubset(of: providedCapabilities) {
+            score += weights.capabilityMatch
         }
 
-        // Battery
-        if let battery = meta.battery, battery > 0.5 {
+        if let battery = metadata.battery, battery > 0.5 {
             score += weights.batteryHigh
         }
-
-        // Charging
-        if meta.isCharging == true {
+        if metadata.isCharging == true {
             score += weights.charging
         }
-
-        // Busy penalty
-        if meta.status == .busy {
+        if metadata.status == .busy {
             score -= weights.busyPenalty
         }
-
-        // Latency penalty
-        if let latencyMs = meta.latencyMs {
+        if let latencyMs = metadata.latencyMs {
             score -= (Double(latencyMs) / 100.0) * weights.latencyPenaltyPer100Ms
         }
 
@@ -155,50 +131,44 @@ public enum MeshScorer {
     }
 
     public static func selectCandidates(
-        from members: [Member],
+        from participants: [ParticipantView],
         requirements: MeshTaskRequirements,
         topN: Int = 3,
         weights: MeshScoreWeights = .default
-    ) -> [MemberScore] {
-        let filtered = members.filter { member in
-            guard member.isAvailable else { return false }
-
-            // Capability filter
-            for cap in requirements.requiredCapabilities {
-                if !member.canProvide(cap) { return false }
-            }
-
-            let meta = MeshMemberMetadata(member: member)
-
-            if let battery = meta.battery, battery < requirements.minBattery {
+    ) -> [ParticipantScore] {
+        let filtered = participants.filter { participant in
+            guard participant.availability.state == .available || participant.availability.state == .degraded else {
                 return false
             }
-
-            if requirements.requireCharging && meta.isCharging != true {
+            guard !participant.isBlocked else {
                 return false
             }
-
-            if !requirements.allowBusy && meta.status == .busy {
+            let providedCapabilities = Set(participant.affordances.map(\.contract.id))
+            guard requirements.requiredCapabilities.isSubset(of: providedCapabilities) else {
                 return false
             }
-
+            let metadata = MeshParticipantMetadata(view: participant)
+            if let battery = metadata.battery, battery < requirements.minBattery {
+                return false
+            }
+            if requirements.requireCharging && metadata.isCharging != true {
+                return false
+            }
+            if !requirements.allowBusy && metadata.status == .busy {
+                return false
+            }
             if let maxLatency = requirements.maxLatencyMs,
-               let latency = meta.latencyMs,
+               let latency = metadata.latencyMs,
                latency > maxLatency {
                 return false
             }
-
             return true
         }
 
-        let scored = filtered.map { member in
-            MemberScore(
-                member: member,
-                score: score(member: member, requirements: requirements, weights: weights)
-            )
-        }
-
-        return scored.sorted { $0.score > $1.score }.prefix(topN).map { $0 }
+        return filtered
+            .map { ParticipantScore(participant: $0, score: score(participant: $0, requirements: requirements, weights: weights)) }
+            .sorted { $0.score > $1.score }
+            .prefix(topN)
+            .map { $0 }
     }
 }
-

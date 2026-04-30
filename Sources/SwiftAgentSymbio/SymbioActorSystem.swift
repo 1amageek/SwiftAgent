@@ -9,14 +9,12 @@ import Foundation
 import Distributed
 import Synchronization
 import SwiftAgent
-import DiscoveryCore
 import ActorRuntime
 
 // MARK: - SymbioActorSystem
 
-/// A distributed actor system for agent communication
-/// Uses PeerConnector for discovery and remote invocation
-public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendable {
+/// A distributed actor system for local agent invocation routing.
+public final class SymbioActorSystem: DistributedActorSystem, Sendable {
 
     // MARK: - Type Aliases
 
@@ -40,11 +38,17 @@ public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendabl
     /// Method to actor ID mapping (for incoming invocations)
     private let methodActors: Mutex<[String: Address]> = Mutex([:])
 
-    /// Default timeout for remote calls
-    public var defaultTimeout: Duration = .seconds(30)
+    /// Default timeout for remote calls.
+    private let defaultTimeoutStorage: Mutex<Duration> = Mutex(.seconds(30))
 
-    /// Peer connector for swift-discovery integration (optional)
-    private var peerConnector: PeerConnector?
+    public var defaultTimeout: Duration {
+        get {
+            defaultTimeoutStorage.withLock { $0 }
+        }
+        set {
+            defaultTimeoutStorage.withLock { $0 = newValue }
+        }
+    }
 
     // MARK: - Initialization
 
@@ -55,98 +59,73 @@ public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendabl
         self.actorRegistry = ActorRuntime.ActorRegistry()
     }
 
-    // MARK: - Peer Connector Integration
+    // MARK: - Incoming Invocation
 
-    /// Set the peer connector for swift-discovery integration
-    /// - Parameter connector: The peer connector to use
-    public func setPeerConnector(_ connector: PeerConnector) async {
-        self.peerConnector = connector
-
-        // Set up invocation handler to route to local actors
-        await connector.setInvocationHandler { [weak self] payload, senderID in
-            guard let self = self else {
-                return InvokeResponsePayload(
-                    invocationID: payload.invocationID,
-                    success: false,
-                    errorCode: DiscoveryErrorCode.resourceUnavailable.rawValue,
-                    errorMessage: "Actor system not available"
-                )
-            }
-
-            return await self.handleDiscoveryInvocation(payload, from: senderID)
-        }
-    }
-
-    /// Get the peer connector
-    public func getPeerConnector() -> PeerConnector? {
-        peerConnector
-    }
-
-    /// Handle invocation from discovery bridge
-    private func handleDiscoveryInvocation(
-        _ payload: InvokePayload,
-        from senderID: PeerID
-    ) async -> InvokeResponsePayload {
-        // Find the actor that handles this capability
-        let capabilityString = payload.capability.fullString
+    /// Route an incoming transport invocation to a local communicable actor.
+    public func handleIncomingInvocation(
+        _ envelope: SymbioInvocationEnvelope,
+        from senderID: String
+    ) async -> SymbioInvocationReply {
+        let capabilityString = envelope.capability
 
         guard let actorID = actorID(for: capabilityString) else {
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: false,
-                errorCode: DiscoveryErrorCode.capabilityNotFound.rawValue,
-                errorMessage: "No actor registered for capability: \(capabilityString)"
+            return SymbioInvocationReply.failure(
+                invocationID: envelope.invocationID,
+                code: SymbioErrorCode.notFound.rawValue,
+                message: "No actor registered for capability: \(capabilityString)"
             )
         }
 
-        // Find the local actor
         guard let actor = actorRegistry.find(id: actorID.hexString) else {
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: false,
-                errorCode: DiscoveryErrorCode.resourceUnavailable.rawValue,
-                errorMessage: "Actor not found: \(actorID)"
+            return SymbioInvocationReply.failure(
+                invocationID: envelope.invocationID,
+                code: SymbioErrorCode.notFound.rawValue,
+                message: "Actor not found: \(actorID)"
             )
         }
 
-        // Try to cast to Communicable and call receive() directly
-        guard let signalReceiver = actor as? any Communicable else {
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: false,
-                errorCode: DiscoveryErrorCode.capabilityNotFound.rawValue,
-                errorMessage: "Actor does not implement Communicable"
-            )
-        }
-
-        // Extract perception identifier from capability string
-        // Format: "agent.perception.{identifier}"
         let prefix = "\(AgentCapabilityNamespace.perception)."
-        guard capabilityString.hasPrefix(prefix) else {
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: false,
-                errorCode: DiscoveryErrorCode.invocationFailed.rawValue,
-                errorMessage: "Invalid capability format: \(capabilityString)"
+        if capabilityString.hasPrefix(prefix) {
+            guard let signalReceiver = actor as? any Communicable else {
+                return SymbioInvocationReply.failure(
+                    invocationID: envelope.invocationID,
+                    code: SymbioErrorCode.notFound.rawValue,
+                    message: "Actor does not implement Communicable"
+                )
+            }
+            let perception = String(capabilityString.dropFirst(prefix.count))
+
+            do {
+                let result = try await signalReceiver.receive(envelope.arguments, perception: perception)
+                return SymbioInvocationReply.success(invocationID: envelope.invocationID, result: result)
+            } catch {
+                return SymbioInvocationReply.failure(
+                    invocationID: envelope.invocationID,
+                    code: SymbioErrorCode.invocationFailed.rawValue,
+                    message: error.localizedDescription
+                )
+            }
+        }
+
+        guard let capabilityProvider = actor as? any CapabilityProviding else {
+            return SymbioInvocationReply.failure(
+                invocationID: envelope.invocationID,
+                code: SymbioErrorCode.notFound.rawValue,
+                message: "Actor does not provide capability: \(capabilityString)"
             )
         }
-        let perception = String(capabilityString.dropFirst(prefix.count))
 
-        // Call receive() directly
         do {
-            let result = try await signalReceiver.receive(payload.arguments, perception: perception)
-
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: true,
-                result: result
+            let result = try await capabilityProvider.invokeCapability(
+                envelope.arguments,
+                capability: capabilityString
             )
+            return SymbioInvocationReply.success(invocationID: envelope.invocationID, result: result)
         } catch {
-            return InvokeResponsePayload(
-                invocationID: payload.invocationID,
-                success: false,
-                errorCode: DiscoveryErrorCode.invocationFailed.rawValue,
-                errorMessage: error.localizedDescription
+            return SymbioInvocationReply.failure(
+                invocationID: envelope.invocationID,
+                code: SymbioErrorCode.invocationFailed.rawValue,
+                message: error.localizedDescription
             )
         }
     }
@@ -238,7 +217,7 @@ public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendabl
             )
         }
 
-        // Remote actors not directly supported - use Community.send() instead
+        // Remote actors are reached through SymbioRuntime transport invocation.
         throw SymbioError.actorNotLocal(actor.id)
     }
 
@@ -264,14 +243,14 @@ public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendabl
             return
         }
 
-        // Remote actors not directly supported - use Community.send() instead
+        // Remote actors are reached through SymbioRuntime transport invocation.
         throw SymbioError.actorNotLocal(actor.id)
     }
 
     // MARK: - Private: Local Call Implementation
 
     /// Thread-safe holder for capturing invocation responses across async boundaries
-    private final class ResponseHolder: @unchecked Sendable {
+    private final class ResponseHolder: Sendable {
         private let mutex = Mutex<InvocationResponse?>(nil)
 
         func setResponse(_ response: InvocationResponse) {
@@ -375,77 +354,5 @@ public final class SymbioActorSystem: DistributedActorSystem, @unchecked Sendabl
     /// - Returns: The actor ID, or nil if not registered
     public func actorID(for method: String) -> Address? {
         methodActors.withLock { $0[method] }
-    }
-}
-
-// MARK: - Peer Connector Extension
-
-extension SymbioActorSystem {
-
-    /// Discover agents that can receive a specific perception using PeerConnector
-    /// - Parameters:
-    ///   - perceptionIdentifier: The perception identifier to search for
-    ///   - timeout: Maximum time to wait for responses
-    /// - Returns: Stream of discovered peers that accept this perception
-    public func discoverReceivers(
-        for perceptionIdentifier: String,
-        timeout: Duration = .seconds(5)
-    ) async throws -> AsyncThrowingStream<DiscoveredPeer, Error> {
-        guard let connector = peerConnector else {
-            return AsyncThrowingStream { continuation in
-                continuation.finish(throwing: SymbioError.noTransportAvailable)
-            }
-        }
-
-        return try await connector.discoverReceivers(for: perceptionIdentifier, timeout: timeout)
-    }
-
-    /// Discover agents that provide a specific capability using PeerConnector
-    /// - Parameters:
-    ///   - capabilityID: The capability to search for
-    ///   - timeout: Maximum time to wait for responses
-    /// - Returns: Stream of discovered peers that provide this capability
-    public func discoverProviders(
-        for capabilityID: CapabilityID,
-        timeout: Duration = .seconds(5)
-    ) async -> AsyncThrowingStream<DiscoveredPeer, Error> {
-        guard let connector = peerConnector else {
-            return AsyncThrowingStream { continuation in
-                continuation.finish(throwing: SymbioError.noTransportAvailable)
-            }
-        }
-
-        return await connector.discoverProviders(for: capabilityID, timeout: timeout)
-    }
-
-    /// Resolve a peer by ID using PeerConnector
-    /// - Parameter peerID: The peer to resolve
-    /// - Returns: Resolved peer or nil if not found
-    public func resolvePeer(_ peerID: PeerID) async throws -> ResolvedPeer? {
-        guard let connector = peerConnector else {
-            throw SymbioError.noTransportAvailable
-        }
-
-        return try await connector.resolve(peerID)
-    }
-
-    /// Invoke a capability on a remote peer using PeerConnector
-    /// - Parameters:
-    ///   - capability: The capability to invoke
-    ///   - peerID: Target peer ID
-    ///   - arguments: Invocation arguments
-    ///   - timeout: Maximum time to wait for response
-    /// - Returns: Invocation result
-    public func invokeCapability(
-        _ capability: CapabilityID,
-        on peerID: PeerID,
-        arguments: Data,
-        timeout: Duration = .seconds(30)
-    ) async throws -> DiscoveryCore.InvocationResult {
-        guard let connector = peerConnector else {
-            throw SymbioError.noTransportAvailable
-        }
-
-        return try await connector.invoke(capability, on: peerID, arguments: arguments, timeout: timeout)
     }
 }

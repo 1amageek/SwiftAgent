@@ -8,23 +8,23 @@
 import Foundation
 import SwiftAgent
 import Distributed
-import DiscoveryCore
 
 // MARK: - Communicable Protocol
 
-/// Communicable - A distributed actor that can communicate within a community
+/// Communicable - A distributed actor that can communicate through a runtime.
 ///
 /// This protocol provides all communication capabilities for agents:
-/// - Community membership (community, perceptions)
+/// - runtime participant view
+/// - declared perceptions
 /// - Signal receiving (receive)
 ///
 /// Usage:
 /// ```swift
 /// distributed actor MyAgent: Communicable {
-///     let community: Community
+///     let runtime: SymbioRuntime
 ///
-///     init(community: Community, actorSystem: SymbioActorSystem) {
-///         self.community = community
+///     init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
+///         self.runtime = runtime
 ///         self.actorSystem = actorSystem
 ///     }
 ///
@@ -38,8 +38,8 @@ import DiscoveryCore
 /// }
 /// ```
 public protocol Communicable: DistributedActor where ActorSystem == SymbioActorSystem {
-    /// The community this agent belongs to
-    var community: Community { get }
+    /// The runtime this agent belongs to.
+    var runtime: SymbioRuntime { get }
 
     /// Available perceptions (ways this agent can receive signals)
     /// This property is nonisolated to allow access without await
@@ -53,24 +53,42 @@ public protocol Communicable: DistributedActor where ActorSystem == SymbioActorS
     distributed func receive(_ data: Data, perception: String) async throws -> Data?
 }
 
+// MARK: - CapabilityProviding Protocol
+
+/// A distributed actor that exposes remotely invocable capabilities.
+///
+/// `perceptions` are signal receivers. `providedCapabilities` are request /
+/// response actions that can be invoked through the runtime.
+public protocol CapabilityProviding: DistributedActor where ActorSystem == SymbioActorSystem {
+    /// Capability identifiers this actor provides.
+    nonisolated var providedCapabilities: Set<String> { get }
+
+    /// Invoke a capability with serialized arguments.
+    /// - Parameters:
+    ///   - data: Serialized arguments
+    ///   - capability: Capability identifier
+    /// - Returns: Serialized result data
+    distributed func invokeCapability(_ data: Data, capability: String) async throws -> Data
+}
+
 // MARK: - Terminatable Protocol
 
 /// Protocol for agents that can be gracefully terminated
 ///
 /// Implement this protocol to perform cleanup before an agent is removed
-/// from the community. This is called by `Community.terminate(_:)` before
+/// from the runtime. This is called by `SymbioRuntime.terminate(_:)` before
 /// the agent reference is released.
 ///
 /// Usage:
 /// ```swift
-/// distributed actor MyAgent: CommunityAgent, Terminatable {
+/// distributed actor MyAgent: Communicable, Terminatable {
 ///     nonisolated func terminate() async {
 ///         // Save state, close connections, etc.
 ///     }
 /// }
 /// ```
 public protocol Terminatable: Actor {
-    /// Called before the agent is removed from the community
+    /// Called before the agent is removed from the runtime.
     /// Use this to clean up resources, save state, close connections, etc.
     nonisolated func terminate() async
 }
@@ -91,63 +109,59 @@ public protocol Terminatable: Actor {
 /// Usage:
 /// ```swift
 /// distributed actor WorkerAgent: Communicable, Replicable {
-///     let community: Community
+///     let runtime: SymbioRuntime
 ///
-///     func replicate() async throws -> Member {
-///         try await community.spawn {
-///             WorkerAgent(community: self.community, actorSystem: self.actorSystem)
+///     func replicate() async throws -> ParticipantView {
+///         try await runtime.spawn {
+///             WorkerAgent(runtime: self.runtime, actorSystem: self.actorSystem)
 ///         }
 ///     }
 ///
 ///     // When work is too heavy, spawn a helper
 ///     func handleHeavyWork() async throws {
 ///         let helper = try await replicate()
-///         try await community.send(halfOfWork, to: helper, perception: "work")
+///         try await runtime.send(halfOfWork, to: helper.id, perception: "work")
 ///     }
 /// }
 /// ```
 public protocol Replicable: Sendable {
     /// Create a copy of this agent
-    /// - Returns: Member representing the newly spawned agent
-    func replicate() async throws -> Member
+    /// - Returns: Participant view representing the newly spawned agent
+    func replicate() async throws -> ParticipantView
 }
 
 // MARK: - Communicable Default Implementation
 
 extension Communicable {
-    /// Find members who can receive a specific signal type
-    public func whoCanReceive(_ perception: String) async -> [Member] {
-        await community.whoCanReceive(perception)
+    /// Read the currently available participants in the local subjective runtime view.
+    public var availableParticipants: [ParticipantView] {
+        get async {
+            await runtime.availableParticipants
+        }
     }
 
-    /// Find members who provide a specific capability
-    public func whoProvides(_ capability: String) async -> [Member] {
-        await community.whoProvides(capability)
-    }
-
-    /// Send a signal to a member
+    /// Send a signal to a participant.
     public func send<S: Sendable & Codable>(
         _ signal: S,
-        to member: Member,
+        to participantID: ParticipantID,
         perception: String
     ) async throws -> Data? {
-        try await community.send(signal, to: member, perception: perception)
+        try await runtime.send(signal, to: participantID, perception: perception)
     }
 
-    /// Invoke a capability on a member
+    /// Invoke a capability on a participant.
     public func invoke(
         _ capability: String,
-        on member: Member,
+        on participantID: ParticipantID,
         with arguments: Data
     ) async throws -> Data {
-        try await community.invoke(capability, on: member, with: arguments)
+        try await runtime.invoke(capability, on: participantID, with: arguments)
     }
 
-    /// Observe community changes
-    public var communityChanges: AsyncStream<CommunityChange> {
+    /// Observe runtime view changes.
+    public var runtimeChanges: AsyncStream<SymbioRuntimeChange> {
         get async {
-            await community.changes
+            await runtime.changes
         }
     }
 }
-

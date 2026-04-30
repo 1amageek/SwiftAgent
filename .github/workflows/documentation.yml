@@ -3,12 +3,16 @@
 
 name: Documentation
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     branches: [main]
     paths:
       - 'Sources/**'
       - 'Package.swift'
+      - 'Package.resolved'
       - '.github/workflows/documentation.yml'
   workflow_dispatch:
 

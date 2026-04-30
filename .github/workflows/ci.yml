@@ -1,0 +1,43 @@
+name: CI
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Swift tests (${{ matrix.configuration.name }})
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration:
+          - name: default
+            traits: ""
+          - name: OpenFoundationModels
+            traits: "--traits OpenFoundationModels"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Resolve dependencies
+        run: swift package resolve ${{ matrix.configuration.traits }}
+
+      - name: Run tests
+        run: |
+          python3 -c 'import subprocess,sys; sys.exit(subprocess.run(sys.argv[2:], timeout=int(sys.argv[1])).returncode)' \
+            1200 swift test --disable-sandbox --no-parallel ${{ matrix.configuration.traits }}

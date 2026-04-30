@@ -142,7 +142,9 @@ struct ToolSearchToolTests {
             GitHubSearchTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "select:Weather,Calculator"))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "select:Weather,Calculator",
+        ]))
 
         #expect(output.contains("\"name\":\"Weather\""))
         #expect(output.contains("\"name\":\"Calculator\""))
@@ -155,7 +157,9 @@ struct ToolSearchToolTests {
             WeatherTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "select:DoesNotExist"))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "select:DoesNotExist",
+        ]))
         #expect(output.contains("No matching tools"))
     }
 
@@ -167,7 +171,10 @@ struct ToolSearchToolTests {
             GitHubSearchTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "search", maxResults: 1))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "search",
+            "maxResults": 1,
+        ]))
         // "search" appears in GitHub tool's name — should rank highest
         #expect(output.contains("\"name\":\"mcp__github__search_repos\""))
     }
@@ -180,7 +187,10 @@ struct ToolSearchToolTests {
             GitHubSearchTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "tool", maxResults: 2))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "tool",
+            "maxResults": 2,
+        ]))
         let matchCount = output.components(separatedBy: "<function>").count - 1
         #expect(matchCount <= 2)
     }
@@ -192,7 +202,10 @@ struct ToolSearchToolTests {
             CalculatorTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "   ", maxResults: 2))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "   ",
+            "maxResults": 2,
+        ]))
         #expect(output.contains("<function>"))
     }
 
@@ -200,10 +213,28 @@ struct ToolSearchToolTests {
     func noMatchReportsClearly() async throws {
         let search = ToolSearchTool {
             WeatherTool()
+            CalculatorTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "xyzzy_nothing_matches"))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "xyzzy_nothing_matches",
+        ]))
         #expect(output.contains("No matching tools"))
+        #expect(output.contains("Available grouped tools"))
+    }
+
+    @Test("No-match query reveals the sole grouped tool as a recovery fallback")
+    func noMatchQueryRevealsSoleGroupedTool() async throws {
+        let search = ToolSearchTool {
+            WeatherTool()
+        }
+
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "Tokyo",
+        ]))
+        #expect(output.contains("<function>"))
+        #expect(output.contains("\"name\":\"Weather\""))
+        #expect(output.contains("\"city\""))
     }
 
     // MARK: - Schema rendering
@@ -214,7 +245,9 @@ struct ToolSearchToolTests {
             WeatherTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "select:Weather"))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "select:Weather",
+        ]))
 
         let prefix = "<function>"
         let suffix = "</function>"
@@ -237,7 +270,9 @@ struct ToolSearchToolTests {
             WeatherTool()
         }
 
-        let output = try await search.call(arguments: .init(query: "select:Weather"))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "query": "select:Weather",
+        ]))
 
         let prefix = "<function>"
         let suffix = "</function>"
@@ -269,13 +304,37 @@ struct ToolSearchToolTests {
             WeatherTool()
         }
 
-        let output = try await search.call(arguments: .init(
-            operation: "call",
-            toolName: "Weather",
-            argumentsJSON: #"{"city":"Tokyo"}"#
-        ))
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "operation": "call",
+            "toolName": "Weather",
+            "arguments": GeneratedContent(properties: [
+                "city": "Tokyo",
+            ]),
+        ]))
 
         #expect(output == "Weather in Tokyo: sunny")
+    }
+
+    @Test("Call operation returns retryable failure output for invalid selected tool arguments")
+    func callOperationReturnsRetryableFailureForInvalidArguments() async throws {
+        let search = ToolSearchTool {
+            WeatherTool()
+        }
+
+        let output = try await search.call(arguments: GeneratedContent(properties: [
+            "operation": "call",
+            "toolName": "Weather",
+            "arguments": GeneratedContent(properties: [
+                "query": "Tokyo",
+            ]),
+        ]))
+
+        #expect(output.contains("ToolSearch could not execute"))
+        #expect(output.contains("Failure:"))
+        #expect(output.contains("Retry by calling ToolSearch again"))
+        #expect(output.contains("<function>"))
+        #expect(output.contains("\"name\":\"Weather\""))
+        #expect(output.contains("\"city\""))
     }
 
     @Test("Runtime registers ToolSearch inner tools as hidden and applies middleware")
@@ -295,7 +354,9 @@ struct ToolSearchToolTests {
             argumentsJSON: GeneratedContent(properties: [
                 "operation": "call",
                 "toolName": "Weather",
-                "argumentsJSON": #"{"city":"Tokyo"}"#,
+                "arguments": GeneratedContent(properties: [
+                    "city": "Tokyo",
+                ]),
             ]).jsonString
         )
 
@@ -317,17 +378,20 @@ struct ToolSearchToolTests {
         configuration.register(SecretTool(), public: false)
         let runtime = ToolRuntime(configuration: configuration)
 
-        await #expect(throws: ToolRuntimeError.self) {
-            _ = try await runtime.execute(
-                toolName: "ToolSearch",
-                argumentsJSON: GeneratedContent(properties: [
-                    "operation": "call",
-                    "toolName": "Secret",
-                    "argumentsJSON": #"{"value":"classified"}"#,
-                ]).jsonString
-            )
-        }
+        let output = try await runtime.execute(
+            toolName: "ToolSearch",
+            argumentsJSON: GeneratedContent(properties: [
+                "operation": "call",
+                "toolName": "Secret",
+                "arguments": GeneratedContent(properties: [
+                    "value": "classified",
+                ]),
+            ]).jsonString
+        )
 
+        #expect(output.contains("ToolSearch could not execute"))
+        #expect(output.contains("Requested toolName: Secret"))
+        #expect(output.contains("Available grouped tool names: Weather"))
         #expect(recorder.names == ["ToolSearch"])
     }
 
@@ -422,8 +486,8 @@ struct ToolSearchToolTests {
         // Container tool itself keeps its full schema
         let toolSearch = try #require(instructions.toolDefinitions.first { $0.name == "ToolSearch" })
         let searchParamsDict = toolSearch.parameters.toSchemaDictionary()
-        let searchProps = searchParamsDict["properties"] as? [String: Any] ?? [:]
-        #expect(!searchProps.isEmpty, "ToolSearchTool itself should keep its real parameters schema")
+        let gatewayBranches = searchParamsDict["anyOf"] as? [[String: Any]] ?? []
+        #expect(!gatewayBranches.isEmpty, "ToolSearchTool itself should keep its real parameters schema")
     }
 
     #endif

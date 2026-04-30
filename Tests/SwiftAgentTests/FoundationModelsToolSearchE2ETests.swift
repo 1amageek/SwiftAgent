@@ -114,7 +114,7 @@ struct FoundationModelsToolSearchE2ETests {
         === End ToolSearch Initial Definition Summary ===
         """)
         #expect(toolSearchSchemaDump.contains("operation"), "ToolSearch schema should contain the gateway operation field.\n\n=== ToolSearch schema ===\n\(toolSearchSchemaDump)")
-        #expect(toolSearchSchemaDump.contains("argumentsJSON"), "ToolSearch schema should contain the gateway argumentsJSON field.\n\n=== ToolSearch schema ===\n\(toolSearchSchemaDump)")
+        #expect(toolSearchSchemaDump.contains("arguments"), "ToolSearch schema should contain the gateway arguments field.\n\n=== ToolSearch schema ===\n\(toolSearchSchemaDump)")
         #expect(!toolSearchSchemaDump.contains("city"), "Initial ToolSearch schema must not contain Weather.city.\n\n=== ToolSearch schema ===\n\(toolSearchSchemaDump)")
         #expect(!toolSearchSchemaDump.contains("The city name"), "Initial ToolSearch schema must not contain Weather field descriptions.\n\n=== ToolSearch schema ===\n\(toolSearchSchemaDump)")
 

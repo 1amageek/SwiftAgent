@@ -11,7 +11,7 @@ import Foundation
 /// `ToolSearchTool` implements progressive disclosure without registering the
 /// inner tools as directly callable tools. The model first searches for a tool
 /// schema, then calls this same gateway with the selected tool name and a JSON
-/// argument payload. This is necessary for runtimes whose tool definitions are
+/// object payload. This is necessary for runtimes whose tool definitions are
 /// fixed when the session is created.
 ///
 /// Use ``gatewayTools()`` to build the `[any Tool]` array to pass to a
@@ -24,8 +24,11 @@ public struct ToolSearchTool: Tool {
         Searches and executes the grouped tools listed below.
 
         Use operation "search" to inspect matching tool schemas. Use operation "call" to execute \
-        a selected tool through this gateway. The selected tool arguments must be provided as a \
-        JSON object encoded in argumentsJSON.
+        a selected tool through this gateway. The selected tool arguments must be provided in the \
+        arguments object.
+
+        If a call operation fails, ToolSearch returns the failure details as tool output. Read that \
+        output, correct the selected tool name or arguments, and retry by calling ToolSearch again.
 
         Directly invoking the grouped tools is not supported; execute them through this gateway.
 
@@ -44,47 +47,67 @@ public struct ToolSearchTool: Tool {
 
     public let innerTools: [any Tool]
 
-    @Generable
-    public struct Arguments: Sendable {
-        @Guide(description: "Operation to perform.", .anyOf(["search", "call"]))
-        public let operation: String?
+    public typealias Arguments = GeneratedContent
+    public typealias Output = String
 
-        @Guide(description: "Search query used when operation is search.")
-        public let query: String?
+    public var parameters: GenerationSchema {
+        let searchArguments = DynamicGenerationSchema(
+            name: "ToolSearchSearchArguments",
+            description: nil,
+            properties: [
+                DynamicGenerationSchema.Property(
+                    name: "operation",
+                    description: "Search operation selector.",
+                    schema: DynamicGenerationSchema(type: String.self, guides: [.constant("search")])
+                ),
+                DynamicGenerationSchema.Property(
+                    name: "query",
+                    description: "Search query for matching grouped tools.",
+                    schema: DynamicGenerationSchema(type: String.self, guides: [])
+                ),
+                DynamicGenerationSchema.Property(
+                    name: "maxResults",
+                    description: "Maximum number of search results to return.",
+                    schema: DynamicGenerationSchema(type: Double.self, guides: []),
+                    isOptional: true
+                ),
+            ]
+        )
 
-        @Guide(description: "Exact grouped tool name used when operation is call.")
-        public let toolName: String?
+        let callArguments = DynamicGenerationSchema(
+            name: "ToolSearchCallArguments",
+            description: nil,
+            properties: [
+                DynamicGenerationSchema.Property(
+                    name: "operation",
+                    description: "Call operation selector.",
+                    schema: DynamicGenerationSchema(type: String.self, guides: [.constant("call")])
+                ),
+                DynamicGenerationSchema.Property(
+                    name: "toolName",
+                    description: "Exact grouped tool name to execute.",
+                    schema: DynamicGenerationSchema(type: String.self, guides: [])
+                ),
+                DynamicGenerationSchema.Property(
+                    name: "arguments",
+                    description: "JSON object containing the selected grouped tool arguments.",
+                    schema: DynamicGenerationSchema(type: GeneratedContent.self, guides: [])
+                ),
+            ]
+        )
 
-        @Guide(description: "JSON object encoded as text, used as the selected tool arguments when operation is call.")
-        public let argumentsJSON: String?
+        let root = DynamicGenerationSchema(
+            name: "ToolSearchArguments",
+            description: nil,
+            anyOf: [searchArguments, callArguments]
+        )
 
-        @Guide(description: "Maximum number of results to return (default: 5)")
-        public let maxResults: Int?
-
-        public init(
-            operation: String? = nil,
-            query: String? = nil,
-            toolName: String? = nil,
-            argumentsJSON: String? = nil,
-            maxResults: Int? = nil
-        ) {
-            self.operation = operation
-            self.query = query
-            self.toolName = toolName
-            self.argumentsJSON = argumentsJSON
-            self.maxResults = maxResults
-        }
-
-        public init(query: String, maxResults: Int? = nil) {
-            self.operation = "search"
-            self.query = query
-            self.toolName = nil
-            self.argumentsJSON = nil
-            self.maxResults = maxResults
+        do {
+            return try GenerationSchema(root: root, dependencies: [])
+        } catch {
+            preconditionFailure("Failed to build ToolSearch schema: \(error)")
         }
     }
-
-    public typealias Output = String
 
     public init(name: String = "ToolSearch", @ToolsBuilder _ builder: () -> [any Tool]) {
         self.name = name
@@ -96,66 +119,170 @@ public struct ToolSearchTool: Tool {
         self.innerTools = tools
     }
 
-    public func call(arguments: Arguments) async throws -> String {
-        let normalizedOperation = arguments.operation?
+    public func call(arguments content: GeneratedContent) async throws -> String {
+        let request: ToolSearchRequest
+        do {
+            request = try ToolSearchRequest(content)
+        } catch {
+            return try retryableFailureOutput(
+                failure: error,
+                toolName: nil,
+                selectedTool: nil
+            )
+        }
+
+        let normalizedOperation = request.operation?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let operation = normalizedOperation ?? (arguments.toolName == nil ? "search" : "call")
+        let operation = normalizedOperation ?? (request.toolName == nil ? "search" : "call")
 
         switch operation {
         case "search":
-            return try searchOutput(arguments: arguments)
+            return try searchOutput(request: request)
         case "call":
-            return try await callSelectedTool(arguments: arguments)
+            return try await callSelectedTool(request: request)
         default:
-            throw ToolSearchToolError.unsupportedOperation(operation)
+            return try retryableFailureOutput(
+                failure: ToolSearchToolError.unsupportedOperation(operation),
+                toolName: request.toolName,
+                selectedTool: tool(named: request.toolName)
+            )
         }
     }
 
-    private func searchOutput(arguments: Arguments) throws -> String {
-        let limit = max(1, arguments.maxResults ?? 5)
+    private func searchOutput(request: ToolSearchRequest) throws -> String {
+        let limit = max(1, request.maxResults ?? 5)
         let query: String
-        if let toolName = arguments.toolName?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let toolName = request.toolName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !toolName.isEmpty {
             query = "select:\(toolName)"
         } else {
-            query = arguments.query ?? ""
+            query = request.query ?? ""
         }
-        let matches = Self.search(query: query, in: innerTools, limit: limit)
+        var matches = Self.search(query: query, in: innerTools, limit: limit)
+        if matches.isEmpty, !query.lowercased().hasPrefix("select:"), innerTools.count == 1 {
+            matches = innerTools
+        }
 
         if matches.isEmpty {
-            return "No matching tools found for query: \(query)"
+            return noMatchesOutput(query: query)
         }
 
         let blocks = try matches.map(Self.renderFunctionBlock(for:))
         return """
         Matching grouped tools are listed below. To execute one, call \(name) with operation "call", \
-        toolName set to the selected name, and argumentsJSON containing a JSON object matching its parameters.
+        toolName set to the selected name, and arguments containing a JSON object matching its parameters.
         \(blocks.joined(separator: "\n"))
         """
     }
 
-    private func callSelectedTool(arguments: Arguments) async throws -> String {
-        guard let toolName = arguments.toolName?
+    private func callSelectedTool(request: ToolSearchRequest) async throws -> String {
+        guard let toolName = request.toolName?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !toolName.isEmpty else {
-            throw ToolSearchToolError.missingToolName
+            return try retryableFailureOutput(
+                failure: ToolSearchToolError.missingToolName,
+                toolName: nil,
+                selectedTool: nil
+            )
         }
-        guard let argumentsJSON = arguments.argumentsJSON?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !argumentsJSON.isEmpty else {
-            throw ToolSearchToolError.missingArgumentsJSON(toolName: toolName)
-        }
-
-        guard let tool = innerTools.first(where: { $0.name == toolName }) else {
-            throw ToolRuntimeError.unknownTool(toolName)
-        }
-
-        if let executor = ToolExecutorContext.current {
-            return try await executor.execute(toolName: toolName, argumentsJSON: argumentsJSON)
+        guard let toolArguments = request.arguments else {
+            return try retryableFailureOutput(
+                failure: ToolSearchToolError.missingArguments(toolName: toolName),
+                toolName: toolName,
+                selectedTool: tool(named: toolName)
+            )
         }
 
-        return try await Self.callDirect(tool: tool, argumentsJSON: argumentsJSON)
+        guard let tool = tool(named: toolName) else {
+            return try retryableFailureOutput(
+                failure: ToolRuntimeError.unknownTool(toolName),
+                toolName: toolName,
+                selectedTool: nil
+            )
+        }
+
+        let missingRequiredArguments = try Self.missingRequiredArguments(for: tool, arguments: toolArguments)
+        if !missingRequiredArguments.isEmpty {
+            return try retryableFailureOutput(
+                failure: ToolSearchToolError.missingRequiredArguments(
+                    toolName: toolName,
+                    properties: missingRequiredArguments
+                ),
+                toolName: toolName,
+                selectedTool: tool
+            )
+        }
+
+        do {
+            if let executor = ToolExecutorContext.current {
+                return try await executor.execute(toolName: toolName, argumentsJSON: toolArguments.jsonString)
+            }
+
+            return try await Self.callDirect(tool: tool, arguments: toolArguments)
+        } catch {
+            return try retryableFailureOutput(
+                failure: error,
+                toolName: toolName,
+                selectedTool: tool
+            )
+        }
+    }
+
+    private func tool(named name: String?) -> (any Tool)? {
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return nil
+        }
+        return innerTools.first { $0.name == name }
+    }
+
+    private func noMatchesOutput(query: String) -> String {
+        let availableTools = innerTools.map { tool in
+            let summary = tool.description.split(separator: "\n").first.map(String.init) ?? ""
+            return summary.isEmpty ? tool.name : "\(tool.name) — \(summary)"
+        }.joined(separator: "\n")
+
+        return """
+        No matching tools found for query: \(query)
+        Available grouped tools:
+        \(availableTools)
+        Retry by calling \(name) with operation "search" and a broader capability query, or call \
+        \(name) with operation "call" when you know the exact toolName and arguments object.
+        """
+    }
+
+    private func retryableFailureOutput(
+        failure: Error,
+        toolName: String?,
+        selectedTool: (any Tool)?
+    ) throws -> String {
+        var lines = [
+            "ToolSearch could not execute the requested grouped tool call.",
+            "Failure: \(Self.describe(failure))",
+            "Retry by calling \(name) again with operation \"call\", toolName set to an available grouped tool, and arguments containing an object that matches the selected tool schema.",
+        ]
+
+        if let selectedTool {
+            lines.append("Selected tool schema:")
+            lines.append(try Self.renderFunctionBlock(for: selectedTool))
+        } else {
+            if let toolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !toolName.isEmpty {
+                lines.append("Requested toolName: \(toolName)")
+            }
+            let names = innerTools.map(\.name).joined(separator: ", ")
+            lines.append("Available grouped tool names: \(names)")
+            lines.append("If the selected tool is unclear, call \(name) with operation \"search\" first.")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription {
+            return description
+        }
+        return String(describing: error)
     }
 
     // MARK: - Search
@@ -221,8 +348,22 @@ public struct ToolSearchTool: Tool {
         return string
     }
 
-    private static func callDirect<T: Tool>(tool: T, argumentsJSON: String) async throws -> String {
-        let content = try GeneratedContent(json: argumentsJSON)
+    private static func missingRequiredArguments(for tool: any Tool, arguments content: GeneratedContent) throws -> [String] {
+        guard case .structure(let properties, _) = content.kind else {
+            return []
+        }
+
+        let data = try JSONEncoder().encode(tool.parameters)
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let schema = object as? [String: Any],
+              let required = schema["required"] as? [String] else {
+            return []
+        }
+
+        return required.filter { properties[$0] == nil }
+    }
+
+    private static func callDirect<T: Tool>(tool: T, arguments content: GeneratedContent) async throws -> String {
         let arguments = try T.Arguments(content)
         let output = try await tool.call(arguments: arguments)
         if let string = output as? String {
@@ -249,10 +390,60 @@ extension ToolSearchTool {
     }
 }
 
+private struct ToolSearchRequest: Sendable {
+    let operation: String?
+    let query: String?
+    let toolName: String?
+    let arguments: GeneratedContent?
+    let maxResults: Int?
+
+    init(_ content: GeneratedContent) throws {
+        guard case .structure(let properties, _) = content.kind else {
+            throw ToolSearchToolError.invalidRequest
+        }
+        self.operation = Self.stringValue(properties["operation"])
+        self.query = Self.stringValue(properties["query"])
+        self.toolName = Self.stringValue(properties["toolName"])
+        self.arguments = try Self.objectValue(properties["arguments"])
+        self.maxResults = Self.intValue(properties["maxResults"])
+    }
+
+    private static func stringValue(_ content: GeneratedContent?) -> String? {
+        guard let content else { return nil }
+        if case .string(let value) = content.kind {
+            return value
+        }
+        return nil
+    }
+
+    private static func intValue(_ content: GeneratedContent?) -> Int? {
+        guard let content else { return nil }
+        switch content.kind {
+        case .number(let value):
+            return Int(String(describing: value))
+        case .string(let value):
+            return Int(value)
+        default:
+            return nil
+        }
+    }
+
+    private static func objectValue(_ content: GeneratedContent?) throws -> GeneratedContent? {
+        guard let content else { return nil }
+        guard case .structure = content.kind else {
+            throw ToolSearchToolError.invalidArgumentsObject
+        }
+        return content
+    }
+}
+
 public enum ToolSearchToolError: Error, LocalizedError, Sendable {
     case unsupportedOperation(String)
     case missingToolName
-    case missingArgumentsJSON(toolName: String)
+    case missingArguments(toolName: String)
+    case missingRequiredArguments(toolName: String, properties: [String])
+    case invalidRequest
+    case invalidArgumentsObject
     case invalidUTF8
 
     public var errorDescription: String? {
@@ -261,8 +452,14 @@ public enum ToolSearchToolError: Error, LocalizedError, Sendable {
             return "Unsupported ToolSearch operation '\(operation)'"
         case .missingToolName:
             return "ToolSearch call operation requires toolName"
-        case .missingArgumentsJSON(let toolName):
-            return "ToolSearch call operation requires argumentsJSON for '\(toolName)'"
+        case .missingArguments(let toolName):
+            return "ToolSearch call operation requires arguments object for '\(toolName)'"
+        case .missingRequiredArguments(let toolName, let properties):
+            return "ToolSearch call operation for '\(toolName)' is missing required arguments: \(properties.joined(separator: ", "))"
+        case .invalidRequest:
+            return "ToolSearch request must be a JSON object"
+        case .invalidArgumentsObject:
+            return "ToolSearch call arguments must be a JSON object"
         case .invalidUTF8:
             return "ToolSearch could not convert encoded JSON data to UTF-8"
         }

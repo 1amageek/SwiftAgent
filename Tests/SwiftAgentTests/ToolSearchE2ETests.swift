@@ -66,7 +66,9 @@ struct ToolSearchE2ETests {
                         arguments: GeneratedContent(properties: [
                             "operation": "call",
                             "toolName": "Weather",
-                            "argumentsJSON": #"{"city":"Tokyo"}"#,
+                            "arguments": GeneratedContent(properties: [
+                                "city": "Tokyo",
+                            ]),
                         ])
                     )
                 ]))
@@ -88,6 +90,65 @@ struct ToolSearchE2ETests {
                     do {
                         let entry = try await self.generate(transcript: transcript, options: options)
                         continuation.yield(entry)
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+            }
+        }
+    }
+
+    final class UnknownToolCallModel: LanguageModel, Sendable {
+        private let storage: Mutex<[Transcript]> = Mutex([])
+
+        var transcripts: [Transcript] {
+            storage.withLock { $0 }
+        }
+
+        var isAvailable: Bool { true }
+        func supports(locale: Locale) -> Bool { true }
+
+        func generate(transcript: Transcript, options: GenerationOptions?) async throws -> Transcript.Entry {
+            storage.withLock { $0.append(transcript) }
+
+            let toolSearchOutputCount = transcript.reduce(into: 0) { count, entry in
+                if case .toolOutput(let output) = entry, output.toolName == "ToolSearch" {
+                    count += 1
+                }
+            }
+
+            if toolSearchOutputCount > 0 {
+                return .response(Transcript.Response(
+                    id: UUID().uuidString,
+                    assetIDs: [],
+                    segments: [.text(Transcript.TextSegment(
+                        id: UUID().uuidString,
+                        content: "The grouped tool call failed and can be retried."
+                    ))]
+                ))
+            }
+
+            return .toolCalls(Transcript.ToolCalls([
+                Transcript.ToolCall(
+                    id: UUID().uuidString,
+                    toolName: "ToolSearch",
+                    arguments: GeneratedContent(properties: [
+                        "operation": "call",
+                        "toolName": "MissingTool",
+                        "arguments": GeneratedContent(properties: [
+                            "value": "payload",
+                        ]),
+                    ])
+                )
+            ]))
+        }
+
+        func stream(transcript: Transcript, options: GenerationOptions?) -> AsyncThrowingStream<Transcript.Entry, Error> {
+            AsyncThrowingStream { continuation in
+                Task {
+                    do {
+                        continuation.yield(try await generate(transcript: transcript, options: options))
                         continuation.finish()
                     } catch {
                         continuation.finish(throwing: error)
@@ -182,12 +243,13 @@ struct ToolSearchE2ETests {
         #expect(instructions.toolDefinitions.first { $0.name == "Weather" } == nil)
         #expect(instructions.toolDefinitions.first { $0.name == "Calculator" } == nil)
 
-        // ToolSearch keeps its full parameters schema.
-        let toolSearchProps = toolSearchDef.parameters.toSchemaDictionary()["properties"] as? [String: Any] ?? [:]
-        #expect(!toolSearchProps.isEmpty, "ToolSearch itself must expose its parameters schema")
-        #expect(toolSearchProps["operation"] != nil)
-        #expect(toolSearchProps["toolName"] != nil)
-        #expect(toolSearchProps["argumentsJSON"] != nil)
+        // ToolSearch keeps its full gateway schema without exposing grouped tools directly.
+        let toolSearchSchema = toolSearchDef.parameters.toSchemaDictionary()
+        let gatewayBranches = toolSearchSchema["anyOf"] as? [[String: Any]] ?? []
+        #expect(!gatewayBranches.isEmpty, "ToolSearch itself must expose its gateway branch schema")
+        #expect(String(describing: toolSearchSchema).contains("operation"))
+        #expect(String(describing: toolSearchSchema).contains("toolName"))
+        #expect(String(describing: toolSearchSchema).contains("arguments"))
     }
 
     @Test("ToolSearch output reveals the Weather JSONSchema inside a <function> block")
@@ -220,6 +282,43 @@ struct ToolSearchE2ETests {
         #expect(searchText.contains("<function>"))
         #expect(searchText.contains("\"name\":\"Weather\""))
         #expect(searchText.contains("\"city\""))
+    }
+
+    @Test("Session surfaces ToolSearch call failures as retryable tool output")
+    func toolSearchUnknownGroupedToolReturnsRetryableOutput() async throws {
+        let model = UnknownToolCallModel()
+        let search = ToolSearchTool {
+            WeatherTool()
+        }
+
+        let session = LanguageModelSession(
+            model: model,
+            tools: search.gatewayTools(),
+            instructions: "You are a helpful assistant."
+        )
+
+        let response = try await session.respond(to: "Use the missing grouped tool.")
+
+        #expect(response.content == "The grouped tool call failed and can be retried.")
+        #expect(model.transcripts.count == 2)
+
+        let secondTranscript = try #require(model.transcripts.dropFirst().first)
+        let output = try #require(secondTranscript.compactMap { entry -> Transcript.ToolOutput? in
+            if case .toolOutput(let output) = entry, output.toolName == "ToolSearch" {
+                return output
+            }
+            return nil
+        }.first)
+        let outputText = output.segments.compactMap { segment -> String? in
+            if case .text(let text) = segment {
+                return text.content
+            }
+            return nil
+        }.joined(separator: "\n")
+
+        #expect(outputText.contains("ToolSearch could not execute"))
+        #expect(outputText.contains("Requested toolName: MissingTool"))
+        #expect(outputText.contains("Available grouped tool names: Weather"))
     }
 }
 #endif

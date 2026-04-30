@@ -1,5 +1,5 @@
 {
-  "originHash" : "ab57818532981ebbbc23d510ffa900eeb3b7e3e572b9a527433dfcfaf2d7dc0d",
+  "originHash" : "c7da43083fccb7519ed7dfb590bbaeb453ddcc0a6b1224c0c61977afc7d34a4b",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-libp2p.git",
       "state" : {
-        "revision" : "38c7bea7c5f3ae0a40dc8f66a3cbd8fc8f9c7036",
-        "version" : "0.1.2"
+        "revision" : "faec9c485b541641c61b9ab4af40f91a01a7d200",
+        "version" : "0.1.3"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-mDNS.git",
       "state" : {
-        "revision" : "6cfcba8861c480433c43a6429b502e9216d394a5",
-        "version" : "1.1.1"
+        "revision" : "12ff79711fbffcad5e525bec625dac6bcaa10618",
+        "version" : "1.1.2"
       }
     },
     {
@@ -195,8 +195,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-nio-udp.git",
       "state" : {
-        "revision" : "60aec10edf5a2c5e4104f664ab7fd5c5f203ffde",
-        "version" : "1.1.0"
+        "revision" : "39303781856668e8ceb22b82d6dc305f7f7c048e",
+        "version" : "1.1.1"
       }
     },
     {
@@ -204,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-peer-connectivity.git",
       "state" : {
-        "revision" : "cb3bb5f080b22f10b3aef1a6bca2c0022c86f3de",
-        "version" : "0.1.0"
+        "revision" : "f13477f2242db39ee3f683e165845aa99af9c956",
+        "version" : "0.1.1"
       }
     },
     {
@@ -213,8 +213,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-quic.git",
       "state" : {
-        "revision" : "3ea690db3fdd24a9b1e0498f59e0135e73761cd0",
-        "version" : "1.1.1"
+        "revision" : "923e2f933cbb54adec55e20cadd425fd07513bc5",
+        "version" : "1.1.3"
       }
     },
     {
@@ -276,8 +276,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-tls.git",
       "state" : {
-        "revision" : "965260affad740e1e10bcb7af94dce799219d20d",
-        "version" : "1.1.0"
+        "revision" : "d726f2dc259d418b9af91d50568c650f1703ebc1",
+        "version" : "1.1.1"
       }
     },
     {
@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-webrtc.git",
       "state" : {
-        "revision" : "68e4d41e98a707e98321d07eb69259dc42389e4b",
-        "version" : "1.1.1"
+        "revision" : "fbc125f04033151ad01cbae6051e81dbe097cfd0",
+        "version" : "1.1.2"
       }
     },
     {

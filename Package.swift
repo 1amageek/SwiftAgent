@@ -28,7 +28,7 @@ let package = Package(
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
         .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
         .package(url: "https://github.com/1amageek/swift-skills.git", from: "0.2.1"),
-        .package(url: "https://github.com/1amageek/swift-peer-connectivity.git", from: "0.1.0"),
+        .package(url: "https://github.com/1amageek/swift-peer-connectivity.git", from: "0.1.1"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.18.0"),
     ],

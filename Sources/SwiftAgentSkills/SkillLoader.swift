@@ -47,12 +47,13 @@ public struct SkillLoader: Sendable {
         let content = try readSkillFile(at: source.promptFilePath)
 
         // Detect format and parse
-        let metadata: SkillMetadata
+        let rawMetadata: SkillMetadata
         if hasFrontmatter(content) {
-            (metadata, _) = try parseFrontmatter(content)
+            (rawMetadata, _) = try parseFrontmatter(content, fallbackName: source.fallbackName)
         } else {
-            (metadata, _) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
+            (rawMetadata, _) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
         }
+        let metadata = normalizeDirectoryNameIfNeeded(rawMetadata, source: source)
 
         // Validate metadata
         try metadata.validate(directoryName: source.expectedDirectoryName)
@@ -75,13 +76,14 @@ public struct SkillLoader: Sendable {
         let content = try readSkillFile(at: source.promptFilePath)
 
         // Detect format and parse
-        let metadata: SkillMetadata
+        let rawMetadata: SkillMetadata
         let body: String
         if hasFrontmatter(content) {
-            (metadata, body) = try parseFrontmatter(content)
+            (rawMetadata, body) = try parseFrontmatter(content, fallbackName: source.fallbackName)
         } else {
-            (metadata, body) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
+            (rawMetadata, body) = try parseMarkdownSkill(content, fallbackName: source.fallbackName)
         }
+        let metadata = normalizeDirectoryNameIfNeeded(rawMetadata, source: source)
 
         // Validate metadata
         try metadata.validate(directoryName: source.expectedDirectoryName)
@@ -103,7 +105,10 @@ public struct SkillLoader: Sendable {
         if skill.isFullyLoaded {
             return skill
         }
-        return try loadFull(from: skill.promptFilePath)
+        let sourcePath = ((skill.promptFilePath as NSString).lastPathComponent == "SKILL.md")
+            ? skill.directoryPath
+            : skill.promptFilePath
+        return try loadFull(from: sourcePath)
     }
 
     // MARK: - Format Detection
@@ -188,6 +193,108 @@ public struct SkillLoader: Sendable {
         } catch {
             throw SkillError.frontmatterParsingError(reason: error.localizedDescription)
         }
+    }
+
+    private static func parseFrontmatter(
+        _ content: String,
+        fallbackName: String
+    ) throws -> (metadata: SkillMetadata, body: String) {
+        do {
+            return try parseFrontmatter(content)
+        } catch {
+            return try parseFrontmatterFallback(content, fallbackName: fallbackName, originalError: error)
+        }
+    }
+
+    private static func parseFrontmatterFallback(
+        _ content: String,
+        fallbackName: String,
+        originalError: Error
+    ) throws -> (metadata: SkillMetadata, body: String) {
+        let lines = content.components(separatedBy: .newlines)
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else {
+            throw originalError
+        }
+
+        guard let endIndex = lines.dropFirst().firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces) == "---"
+        }) else {
+            throw originalError
+        }
+
+        let frontmatterLines = lines[1..<endIndex]
+        let bodyStart = lines.index(after: endIndex)
+        let body = bodyStart < lines.endIndex
+            ? lines[bodyStart...].joined(separator: "\n")
+            : ""
+
+        let fields = parseSimpleFrontmatterFields(frontmatterLines)
+        guard let description = fields["description"], !description.isEmpty else {
+            throw originalError
+        }
+
+        let metadata = SkillMetadata(
+            name: fields["name"] ?? fallbackName,
+            description: description,
+            license: fields["license"],
+            compatibility: fields["compatibility"],
+            allowedTools: fields["allowed-tools"]
+        )
+        return (metadata, body)
+    }
+
+    private static func parseSimpleFrontmatterFields(
+        _ lines: ArraySlice<String>
+    ) -> [String: String] {
+        var fields: [String: String] = [:]
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else {
+                continue
+            }
+            guard let separatorIndex = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+
+            let key = String(trimmed[..<separatorIndex]).trimmingCharacters(in: .whitespaces)
+            let valueStart = trimmed.index(after: separatorIndex)
+            let rawValue = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty, !rawValue.isEmpty else {
+                continue
+            }
+            fields[key] = stripMatchingQuotes(rawValue)
+        }
+        return fields
+    }
+
+    private static func stripMatchingQuotes(_ value: String) -> String {
+        guard value.count >= 2,
+              let first = value.first,
+              let last = value.last,
+              (first == "\"" && last == "\"") || (first == "'" && last == "'") else {
+            return value
+        }
+        return String(value.dropFirst().dropLast())
+    }
+
+    private static func normalizeDirectoryNameIfNeeded(
+        _ metadata: SkillMetadata,
+        source: SkillSource
+    ) -> SkillMetadata {
+        guard let expectedDirectoryName = source.expectedDirectoryName,
+              metadata.name != expectedDirectoryName,
+              SkillMetadata.isValidName(expectedDirectoryName) else {
+            return metadata
+        }
+
+        return SkillMetadata(
+            name: expectedDirectoryName,
+            description: metadata.description,
+            license: metadata.license,
+            compatibility: metadata.compatibility,
+            metadata: metadata.metadata,
+            allowedTools: metadata.allowedTools
+        )
     }
 
     private static func readSkillFile(at promptFilePath: String) throws -> String {

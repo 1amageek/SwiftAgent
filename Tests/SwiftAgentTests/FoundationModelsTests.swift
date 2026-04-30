@@ -49,8 +49,13 @@ struct FoundationModelsSessionTests {
         }
 
         let transcript = session.transcript
-        // Transcript should have at least the instructions entry
-        #expect(transcript.count >= 0)
+        let hasInstructions = transcript.contains { entry in
+            if case .instructions = entry {
+                return true
+            }
+            return false
+        }
+        #expect(transcript.isEmpty || hasInstructions)
     }
 }
 
@@ -248,24 +253,25 @@ struct FoundationModelsTranscriptTests {
             Instructions("Test")
         }
 
-        for entry in session.transcript {
+        let transcript = session.transcript
+        let knownEntryCount = transcript.reduce(0) { count, entry in
             switch entry {
             case .instructions:
-                break
+                return count + 1
             case .prompt:
-                break
+                return count + 1
             case .response:
-                break
+                return count + 1
             case .toolCalls:
-                break
+                return count + 1
             case .toolOutput:
-                break
+                return count + 1
             @unknown default:
-                break
+                return count
             }
         }
 
-        #expect(true)
+        #expect(knownEntryCount == transcript.count)
     }
 }
 

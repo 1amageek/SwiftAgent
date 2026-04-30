@@ -9,8 +9,6 @@ import Foundation
 import ArgumentParser
 import SwiftAgent
 import AgentTools
-import OpenFoundationModelsOpenAI
-import OpenFoundationModelsClaude
 
 @main
 struct AgentCommand: AsyncParsableCommand {
@@ -46,7 +44,7 @@ struct GlobalOptions: ParsableArguments {
 
         return AgentConfiguration(
             apiKey: apiKey,
-            model: OpenAIModel(model),
+            model: model,
             verbose: verbose,
             workingDirectory: workingDir ?? FileManager.default.currentDirectoryPath
         )
@@ -82,21 +80,23 @@ extension AgentCommand {
                     .session(session)
                     .run(message)
             } else {
-                // Interactive mode via AgentSession + StdioTransport
+                // Interactive mode via stdin loop. Conversation requires Prompt input; this sample
+                // keeps the CLI task contract string-based.
                 print("SwiftAgent Chat (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("---")
                 let languageModelSession = ChatSessionFactory.createSession(configuration: config)
-                let conversation = Conversation(languageModelSession: languageModelSession) {
-                    Transform<String, String> { input in
-                        print("Assistant: ", terminator: "")
-                        return input
-                    }
-                    ChatAgent()
+                while true {
+                    print("You: ", terminator: "")
+                    guard let input = readLine() else { break }
+                    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed == "exit" { break }
+                    guard !trimmed.isEmpty else { continue }
+                    print("Assistant: ", terminator: "")
+                    _ = try await ChatAgent()
+                        .session(languageModelSession)
+                        .run(trimmed)
                 }
-                let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
-                let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
-                try await session.run(conversation)
             }
         }
     }
@@ -129,22 +129,24 @@ extension AgentCommand {
                 print("---")
                 _ = try await CodingAgent(configuration: config).run(task)
             } else {
-                // Interactive mode via AgentSession + StdioTransport
+                // Interactive mode via stdin loop. The coding step accepts string tasks.
                 print("SwiftAgent Coding Assistant (type 'exit' to quit)")
                 print("Model: \(config.model)")
                 print("Working directory: \(config.workingDirectory)")
                 print("---")
-                let session = config.createSession(
+                while true {
+                    print("Task: ", terminator: "")
+                    guard let input = readLine() else { break }
+                    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed == "exit" { break }
+                    guard !trimmed.isEmpty else { continue }
+                    _ = try await CodingAgent(configuration: config).run(trimmed)
+                }
+                _ = config.createSession(
                     instructions: Instructions {
                         "You are an expert coding assistant."
                     }
                 )
-                let conversation = Conversation(languageModelSession: session) {
-                    CodingAgent(configuration: config)
-                }
-                let transport = StdioTransport(prompt: "You: ", verbose: options.verbose)
-                let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
-                try await session.run(conversation)
             }
         }
     }
@@ -165,8 +167,8 @@ extension AgentCommand {
         @Option(name: .long, help: "Anthropic API key (or set ANTHROPIC_API_KEY)")
         var apiKey: String?
 
-        @Option(name: .shortAndLong, help: "Claude model (claude-sonnet-4-5-20250929, claude-opus-4-5-20251101, claude-haiku-4-5-20251001)")
-        var model: String = ClaudeLanguageModel.sonnet4_5
+        @Option(name: .shortAndLong, help: "Claude model identifier")
+        var model: String = "claude-sonnet-4-5-20250929"
 
         @Option(name: .shortAndLong, help: "Working directory for file operations")
         var workingDir: String?

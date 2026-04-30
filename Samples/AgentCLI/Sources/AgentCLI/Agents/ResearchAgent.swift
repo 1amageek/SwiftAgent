@@ -8,7 +8,6 @@
 import Foundation
 import SwiftAgent
 import AgentTools
-import OpenFoundationModelsClaude
 
 // MARK: - Claude Research Configuration
 
@@ -21,7 +20,7 @@ public struct ClaudeResearchConfiguration: Sendable {
 
     public init(
         apiKey: String,
-        modelName: String = ClaudeLanguageModel.sonnet4_5,
+        modelName: String = "claude-sonnet-4-5-20250929",
         verbose: Bool = false,
         workingDirectory: String = FileManager.default.currentDirectoryPath
     ) {
@@ -31,20 +30,13 @@ public struct ClaudeResearchConfiguration: Sendable {
         self.workingDirectory = workingDirectory
     }
 
-    public func createModel() -> ClaudeLanguageModel {
-        let config = ClaudeConfiguration(apiKey: apiKey)
-        return ClaudeLanguageModel(configuration: config, modelName: modelName)
-    }
-
     public func createSession(
-        tools: [any OpenFoundationModels.Tool] = [],
+        tools: [any Tool] = [],
         instructions: Instructions
     ) -> LanguageModelSession {
-        LanguageModelSession(
-            model: createModel(),
-            tools: tools,
-            instructions: instructions
-        )
+        LanguageModelSession(tools: tools) {
+            instructions
+        }
     }
 }
 
@@ -66,7 +58,7 @@ public struct ClaudeResearchConfiguration: Sendable {
 /// - Claude-optimized system prompts
 public struct ResearchAgent: Step {
     public typealias Input = String
-    public typealias Output = ResearchResult
+    public typealias Output = String
 
     private let configuration: ClaudeResearchConfiguration
 
@@ -83,7 +75,7 @@ public struct ResearchAgent: Step {
         self.configuration = configuration
     }
 
-    public var body: some Step<String, ResearchResult> {
+    public var body: some Step<String, String> {
         Pipeline {
             // Phase 1: Validate and enhance query
             Gate<String, String> { query in
@@ -105,75 +97,19 @@ public struct ResearchAgent: Step {
     }
 }
 
-// MARK: - Structured Research Output
-
-/// Comprehensive research result with rich metadata
-@Generable
-public struct ResearchResult: Sendable, Encodable {
-    @Guide(description: "Executive summary of research findings in 2-3 sentences")
-    public let summary: String
-
-    @Guide(description: "List of key findings, each with supporting evidence")
-    public let keyFindings: [KeyFinding]
-
-    @Guide(description: "Sources used with reliability assessment")
-    public let sources: [Source]
-
-    @Guide(description: "Research methodology and approach taken")
-    public let methodology: String
-
-    @Guide(description: "Identified gaps or limitations in the research")
-    public let limitations: [String]
-
-    @Guide(description: "Suggested areas for further investigation")
-    public let followUpQuestions: [String]
-
-    @Guide(description: "Overall confidence level from 0.0 (no confidence) to 1.0 (high confidence)")
-    public let confidence: Double
-}
-
-/// A key finding with supporting evidence
-@Generable
-public struct KeyFinding: Sendable, Encodable {
-    @Guide(description: "The finding statement")
-    public let finding: String
-
-    @Guide(description: "Evidence supporting this finding")
-    public let evidence: String
-
-    @Guide(description: "Confidence in this specific finding from 0.0 to 1.0")
-    public let confidence: Double
-}
-
-/// A source with reliability assessment
-@Generable
-public struct Source: Sendable, Encodable {
-    @Guide(description: "Source title or description")
-    public let title: String
-
-    @Guide(description: "URL or file path")
-    public let location: String
-
-    @Guide(description: "Type of source: 'primary' (original data), 'secondary' (analysis of primary), or 'tertiary' (summary/compilation)")
-    public let sourceType: String
-
-    @Guide(description: "Reliability assessment: 'high' (verified, authoritative), 'medium' (generally reliable), 'low' (uncertain), or 'unknown'")
-    public let reliability: String
-}
-
 // MARK: - Claude Research Step
 
 /// Internal step that executes the research using Claude
 private struct ClaudeResearchStep: Step {
     typealias Input = String
-    typealias Output = ResearchResult
+    typealias Output = String
 
     let configuration: ClaudeResearchConfiguration
     let fetchedURLs: Relay<Set<String>>
     let analyzedFiles: Relay<Set<String>>
     let hypotheses: Relay<[String]>
 
-    func run(_ query: String) async throws -> ResearchResult {
+    func run(_ query: String) async throws -> String {
         // Select tools optimized for research tasks
         let tools: [any Tool] = [
             URLFetchTool(),
@@ -199,8 +135,7 @@ private struct ClaudeResearchStep: Step {
         print("Analyzing and synthesizing findings...")
         print("---")
 
-        // Use streaming mode with structured output
-        let step = Generate<String, ResearchResult>(
+        let step = GenerateText<String>(
             session: session,
             prompt: {
                 Prompt(researchPrompt(for: $0))
@@ -285,14 +220,14 @@ private struct ClaudeResearchStep: Step {
         5. Be explicit about your confidence level and any limitations
         </instructions>
 
-        Provide your findings in the requested structured format.
+        Provide your findings as concise Markdown with explicit source notes, limitations, and confidence.
         """
     }
 }
 
 // MARK: - Text Output Wrapper
 
-/// Wrapper that converts ResearchResult to formatted text output
+/// Wrapper retained for CLI compatibility.
 public struct ResearchAgentText: Step {
     public typealias Input = String
     public typealias Output = String
@@ -304,61 +239,6 @@ public struct ResearchAgentText: Step {
     }
 
     public func run(_ input: String) async throws -> String {
-        let result = try await agent.run(input)
-        return formatResult(result)
-    }
-
-    private func formatResult(_ result: ResearchResult) -> String {
-        var output = """
-        ## Executive Summary
-        \(result.summary)
-
-        ## Key Findings
-        """
-
-        for (index, finding) in result.keyFindings.enumerated() {
-            let confidencePercent = Int(finding.confidence * 100)
-            output += """
-
-            ### \(index + 1). \(finding.finding)
-            - **Evidence**: \(finding.evidence)
-            - **Confidence**: \(confidencePercent)%
-            """
-        }
-
-        output += "\n\n## Methodology\n\(result.methodology)"
-
-        output += "\n\n## Sources"
-        for source in result.sources {
-            let reliabilityBadge = reliabilityEmoji(source.reliability)
-            output += "\n- \(reliabilityBadge) [\(source.title)](\(source.location)) (\(source.sourceType), \(source.reliability) reliability)"
-        }
-
-        if !result.limitations.isEmpty {
-            output += "\n\n## Limitations"
-            for limitation in result.limitations {
-                output += "\n- \(limitation)"
-            }
-        }
-
-        if !result.followUpQuestions.isEmpty {
-            output += "\n\n## Suggested Follow-up Questions"
-            for question in result.followUpQuestions {
-                output += "\n- \(question)"
-            }
-        }
-
-        output += "\n\n---\n**Overall Confidence**: \(Int(result.confidence * 100))%"
-
-        return output
-    }
-
-    private func reliabilityEmoji(_ reliability: String) -> String {
-        switch reliability {
-        case "high": return "[H]"
-        case "medium": return "[M]"
-        case "low": return "[L]"
-        default: return "[?]"
-        }
+        try await agent.run(input)
     }
 }

@@ -9,6 +9,22 @@ import Foundation
 import Tracing
 import Instrumentation
 
+private func generationDiagnosticDescription(_ error: Error) -> String {
+    let localizedDescription = error.localizedDescription
+    let debugDescription = String(describing: error)
+
+    guard localizedDescription != debugDescription else {
+        return localizedDescription
+    }
+    return "\(localizedDescription) (\(debugDescription))"
+}
+
+private func debugLog(_ message: String) {
+    if let data = "\(message)\n".data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
+
 // MARK: - Type Aliases
 
 /// Type alias for ResponseStream.Snapshot used in Generate streaming
@@ -426,7 +442,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step, @unchecke
                     // Check if error is retryable
                     guard shouldRetryGenerationError(error) else {
                         span.recordError(error)
-                        throw ModelError.generationFailed(error.localizedDescription)
+                        throw ModelError.generationFailed(generationDiagnosticDescription(error))
                     }
 
                     lastError = error
@@ -440,7 +456,7 @@ public struct Generate<In: Sendable, Out: Sendable & Generable>: Step, @unchecke
             // All retry attempts failed
             if let error = lastError {
                 span.recordError(error)
-                throw ModelError.generationFailed(error.localizedDescription)
+                throw ModelError.generationFailed(generationDiagnosticDescription(error))
             }
 
             // This should never happen, but satisfy the compiler
@@ -779,6 +795,10 @@ public struct GenerateText<In: Sendable>: Step, @unchecked Sendable {
                     // Streaming mode - use streamResponse
                     span.addEvent("streaming_started")
                     var lastContent: String = ""
+                    #if DEBUG
+                    let sessionContext = AgentSessionContext.current
+                    debugLog("[GenerateText] streamResponse begin sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none") options=\(options)")
+                    #endif
 
                     let responseStream = session.streamResponse(
                         options: options
@@ -786,9 +806,16 @@ public struct GenerateText<In: Sendable>: Step, @unchecked Sendable {
                         prompt
                     }
 
+                    var snapshotCount = 0
                     for try await snapshot in responseStream {
                         try Task.checkCancellation()
                         try TurnCancellationContext.current?.checkCancellation()
+                        snapshotCount += 1
+                        #if DEBUG
+                        if snapshotCount == 1 || snapshotCount % 10 == 0 {
+                            debugLog("[GenerateText] stream snapshot sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none") count=\(snapshotCount) contentLength=\(snapshot.content.count) isComplete=\(snapshot.rawContent.isComplete)")
+                        }
+                        #endif
 
                         // Pass the snapshot directly to the handler
                         await handler(snapshot)
@@ -798,6 +825,9 @@ public struct GenerateText<In: Sendable>: Step, @unchecked Sendable {
                     }
 
                     span.addEvent("streaming_completed")
+                    #if DEBUG
+                    debugLog("[GenerateText] streamResponse completed sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none") snapshots=\(snapshotCount) finalLength=\(lastContent.count)")
+                    #endif
                     return lastContent
 
                 } else {
@@ -810,15 +840,27 @@ public struct GenerateText<In: Sendable>: Step, @unchecked Sendable {
                     ) {
                         prompt
                     }
+                    #if DEBUG
+                    let sessionContext = AgentSessionContext.current
+                    debugLog("[GenerateText] respond completed sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none") outputLength=\(response.content.count)")
+                    #endif
 
                     // Span is successful by default
                     return response.content
                 }
             } catch is CancellationError {
+                #if DEBUG
+                let sessionContext = AgentSessionContext.current
+                debugLog("[GenerateText] cancelled sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none")")
+                #endif
                 throw CancellationError()
             } catch {
+                #if DEBUG
+                let sessionContext = AgentSessionContext.current
+                debugLog("[GenerateText] failed sessionID=\(sessionContext?.sessionID ?? "none") turnID=\(sessionContext?.turnID ?? "none") type=\(type(of: error)) error=\(error)")
+                #endif
                 span.recordError(error)
-                throw ModelError.generationFailed(error.localizedDescription)
+                throw ModelError.generationFailed(generationDiagnosticDescription(error))
             }
         }
     }

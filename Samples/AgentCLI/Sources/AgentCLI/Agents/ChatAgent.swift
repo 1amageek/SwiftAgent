@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftAgent
-import OpenFoundationModelsOpenAI
 
 /// A conversational chat agent with streaming output.
 ///
@@ -62,13 +61,9 @@ public struct ChatSessionFactory {
     }
 
     public static func createReasoningSession(configuration: AgentConfiguration) -> LanguageModelSession {
-        let reasoningModel: OpenAIModel = configuration.model.isReasoningModel
-            ? configuration.model
-            : .o4Mini
-
         let config = AgentConfiguration(
             apiKey: configuration.apiKey,
-            model: reasoningModel,
+            model: configuration.model.hasPrefix("o") ? configuration.model : "o4-mini",
             verbose: configuration.verbose,
             workingDirectory: configuration.workingDirectory
         )
@@ -98,7 +93,7 @@ public struct ChatSessionFactory {
 /// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
 /// try await runtime.run(conversation)
 /// ```
-public struct InteractiveChatAgent: Agent {
+public struct InteractiveChatAgent {
 
     public init() {}
 
@@ -111,11 +106,7 @@ public struct InteractiveChatAgent: Agent {
         }
     }
 
-    public var body: some Step<String, String> {
-        Transform<String, String> { input in
-            print("Assistant: ", terminator: "")
-            return input
-        }
+    public var body: ChatAgent {
         ChatAgent()
     }
 }

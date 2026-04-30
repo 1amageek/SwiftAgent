@@ -496,56 +496,56 @@ let mcpTools = try await mcpClient.tools()
 - MCP SDK: `HTTPClientTransport(streaming: false)` = HTTP, `streaming: true` = SSE
 
 ### SwiftAgentSymbio
-エージェント間通信と発見の分散システムモジュール。Swift Distributed Actors を使用。
+エージェント間の局所的な社会 view と通信境界を扱うモジュール。実装上の中心は `SymbioRuntime` であり、`Community` は `PHILOSOPHY.md` 上の概念として扱う。
 
 #### レイヤー構成
 
 ```
-Layer 4: Agent (Communicable = CommunityAgent + SignalReceivable)
+Layer 4: Agent (Communicable)
     ↓
-Layer 3: Community (メンバー管理、spawn/terminate/send)
+Layer 3: SymbioRuntime (members, lifecycle, routing, local peer view)
     ↓
-Layer 2: SymbioActorSystem + PeerConnector (Distributed Actor基盤)
+Layer 2: SymbioActorSystem (Distributed Actor identity and local invocation)
     ↓
-Layer 1: swift-discovery (トランスポート抽象化)
+Layer 1: SymbioTransport (transport boundary)
     ↓
-Layer 0: Transport (mDNS/TCP, BLE, HTTP/WebSocket)
+Layer 0: PeerConnectivity / in-process transport / future transports
 ```
 
 #### 操作の可否
 
 | 操作 | ローカル | リモート |
 |------|:--------:|:--------:|
-| spawn | ✅ | ❌ |
-| terminate | ✅ | ❌ |
-| send | ✅ | ✅ |
-| invoke (capability) | ❌ | ✅ |
+| spawn | yes | no |
+| terminate | yes | no |
+| send | yes | yes |
+| invoke (capability) | no | yes |
 
 #### 設計原則
 
-- **perceptions (accepts)**: エージェントが受信できる信号の種類。ローカル/リモート両対応
-- **capabilities (provides)**: リモートサービス広告用。ローカルエージェントは `provides: []`
-- **changes**: 単一コンシューマー制限（AsyncStream の仕様）
+- `ParticipantDescriptor`: エージェント、ロボット、家電、群などが交換する自己記述。
+- `Affordance`: participant が状況内で実行可能に見える capability contract。
+- `RoutePlan`: delivery、evidence、policy decision を含む実行前 routing 判断。
+- `SymbioTransport`: runtime が必要とする最小境界。networking framework の型を core に漏らさない。
+- `ParticipantView`: affordance、claim、evidence、availability、policy 制約を含む局所 view。
+- `Community`: raw connectivity ではなく、関係性・信頼・記憶を含む哲学上の社会的基盤。
 
 #### プロトコル
 
 ```swift
-// 通信可能なエージェント（コミュニティ参加 + 信号受信）
 public protocol Communicable: DistributedActor
     where ActorSystem == SymbioActorSystem {
-    var community: Community { get }
+    var runtime: SymbioRuntime { get }
     nonisolated var perceptions: [any Perception] { get }
     distributed func receive(_ data: Data, perception: String) async throws -> Data?
 }
 
-// 終了可能なエージェント
 public protocol Terminatable: Actor {
     nonisolated func terminate() async
 }
 
-// 自己複製可能なエージェント（SubAgent生成用）
 public protocol Replicable: Sendable {
-    func replicate() async throws -> Member
+    func replicate() async throws -> ParticipantView
 }
 ```
 
@@ -553,194 +553,116 @@ public protocol Replicable: Sendable {
 
 **spawn() フロー:**
 ```
-factory() → actorReady() → ActorRegistry登録 → localAgentRefs保存
-    → registerMethod() → memberCache追加 → .joined イベント
+factory() → actorReady() → ActorRegistry registration
+    → local refs retained → ParticipantView registered → .joined event
 ```
 
 **terminate() フロー:**
 ```
-Terminatable.terminate() → unregisterMethod() → resignID()
-    → ストレージ削除 → .left イベント
+Terminatable.terminate() → resignID()
+    → local storage removal → .left event
 ```
 
 **send() ローカルフロー:**
 ```
-localAgentIDs確認 → Communicable キャスト → receive() 直接呼び出し
+SymbioRuntime.send()
+    → local agent lookup
+    → Communicable.receive()
 ```
 
 **send() リモートフロー:**
 ```
-PeerConnector.invoke() → Transport → リモートピア
+SymbioRuntime.send()
+    → SymbioInvocationEnvelope
+    → SymbioTransport.invoke()
+    → remote SymbioActorSystem.handleIncomingInvocation()
 ```
 
-**リモート受信フロー:**
+**peer discovery フロー:**
 ```
-PeerConnector → handleDiscoveryInvocation() → actorID(for:)
-    → ActorRegistry.find() → SignalReceivable.receive()
-```
-
-#### Community 内部構造
-
-```swift
-actor Community {
-    // ストレージ
-    var memberCache: [String: Member]              // 全メンバー（ローカル+リモート）
-    var localAgentIDs: Set<String>                 // ローカルエージェントID
-    var localAgentRefs: [String: any DistributedActor]  // エージェント参照（強参照）
-    var registeredMethods: [String: [String]]      // エージェントID → メソッド名リスト
-
-    // ID形式: agent.id.hexString (Address の16進文字列表現)
-}
+PeerConnectivity event
+    → PeerConnectivitySymbioTransport
+    → SymbioTransportEvent
+    → SymbioRuntime peer view / routing update
 ```
 
 #### 使用例
 
 ```swift
-// エージェント定義
 distributed actor WorkerAgent: Communicable, Terminatable {
     typealias ActorSystem = SymbioActorSystem
 
-    let community: Community
+    let runtime: SymbioRuntime
 
     nonisolated var perceptions: [any Perception] {
         [WorkPerception()]
     }
 
-    init(community: Community, actorSystem: SymbioActorSystem) {
-        self.community = community
+    init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
+        self.runtime = runtime
         self.actorSystem = actorSystem
     }
 
     distributed func receive(_ data: Data, perception: String) async throws -> Data? {
         let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
-        // 処理...
         return nil
     }
 
-    nonisolated func terminate() async {
-        // クリーンアップ...
-    }
+    nonisolated func terminate() async {}
 }
 
-// Community 使用
 let actorSystem = SymbioActorSystem()
-let community = Community(actorSystem: actorSystem)
+let runtime = SymbioRuntime(actorSystem: actorSystem)
 
-// ローカルエージェント起動
-let worker = try await community.spawn {
-    WorkerAgent(community: community, actorSystem: actorSystem)
+let worker = try await runtime.spawn {
+    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
 }
 
-// 信号送信
-try await community.send(WorkSignal(task: "process"), to: worker, perception: "work")
+try await runtime.send(WorkSignal(task: "process"), to: worker.id, perception: "work")
 
-// 検索
-let workers = await community.whoCanReceive("work")
+let workers = await runtime.availableParticipants
 
-// 変更監視（単一コンシューマーのみ）
-for await change in await community.changes {
+for await change in await runtime.changes {
     switch change {
-    case .joined(let member): print("Joined: \(member.id)")
-    case .left(let member): print("Left: \(member.id)")
+    case .joined(let participant): print("Joined: \(participant.id)")
+    case .left(let participantID): print("Left: \(participantID)")
     default: break
     }
 }
 
-// 終了
-try await community.terminate(worker)
+try await runtime.terminate(worker.id)
 ```
 
-#### SubAgent Spawning（LLMによる動的エージェント生成）
+#### PeerConnectivity Adapter
 
-LLMがタスクの複雑さを判断し、`ReplicateTool`を通じてSubAgentを動的に生成する仕組み。
+`SwiftAgentSymbioPeerConnectivity` は `PeerConnectivitySession` を `SymbioTransport` として使うための adapter を提供する。
 
-**フロー:**
-```
-LLM → ReplicateTool.call() → Replicable.replicate() → Community.spawn()
-    → memberCache追加 → .joined イベント → 動的にToolとして利用可能
-```
-
-**ReplicateTool:**
-```swift
-public struct ReplicateTool: Tool {
-    public static let name = "replicate_agent"
-
-    private let agent: any Replicable
-
-    public init(agent: any Replicable) {
-        self.agent = agent
-    }
-
-    public func call(arguments: ReplicateArguments) async throws -> ReplicateOutput {
-        let member = try await agent.replicate()
-        return ReplicateOutput(success: true, agentID: member.id, accepts: Array(member.accepts), ...)
-    }
-}
-
-@Generable
-public struct ReplicateArguments: Sendable {
-    @Guide(description: "Reason for spawning a SubAgent")
-    public let reason: String
-}
-```
-
-**Replicable エージェントの実装:**
-```swift
-distributed actor WorkerAgent: Communicable, Replicable {
-    let community: Community
-
-    func replicate() async throws -> Member {
-        try await community.spawn {
-            WorkerAgent(community: self.community, actorSystem: self.actorSystem)
-        }
-    }
-}
-
-// LLMセッションでReplicateToolを使用
-let session = LanguageModelSession(model: model, tools: [ReplicateTool(agent: workerAgent)]) {
-    Instructions {
-        "You can spawn helper agents when tasks are complex."
-        "Use replicate_agent when you have many TODOs or parallelizable work."
-    }
-}
-```
-
-**LLMの判断基準:**
-- タスクに多数のTODOがある場合
-- 作業が並列化可能な場合
-- 専門的なサブタスク用のヘルパーが必要な場合
+| コンポーネント | 責務 |
+|---------------|------|
+| `PeerConnectivitySymbioTransport` | PeerConnectivity events / streams を Symbio transport semantics に変換 |
+| invocation stream | `SymbioInvocationEnvelope` と `SymbioInvocationReply` を交換 |
+| descriptor stream | `ParticipantDescriptor` を交換し routing view を更新 |
 
 #### 主要コンポーネント
 
 | コンポーネント | 責務 |
 |---------------|------|
-| `Community` | メンバー管理、spawn/terminate、send、変更通知 |
-| `SymbioActorSystem` | DistributedActorSystem実装、ActorRegistry統合 |
-| `Member` | コミュニティメンバーの情報（id, accepts, provides, isAvailable, metadata） |
-| `CommunityChange` | joined, left, updated, becameAvailable, becameUnavailable |
-| `Communicable` | 通信可能なエージェント（community, perceptions, receive） |
-| `Replicable` | 自己複製可能なエージェント（Sendable継承、柔軟な型サポート） |
-| `ReplicateTool` | LLMがSubAgentを生成するためのツール |
-
-#### SymbioActorSystem 内部構造
-
-```swift
-final class SymbioActorSystem: DistributedActorSystem {
-    let actorRegistry: ActorRuntime.ActorRegistry  // アクター登録（swift-actor-runtime）
-    let methodActors: Mutex<[String: Address]>     // メソッド名 → ActorID マッピング
-    var peerConnector: PeerConnector?              // リモート通信用
-
-    // DistributedActorSystem 必須メソッド
-    func actorReady(_:)    // ActorRegistry に登録
-    func resignID(_:)      // ActorRegistry から削除
-    func remoteCall(...)   // ローカル実行 or エラー（リモートは Community 経由）
-}
-```
+| `SymbioRuntime` | participant view 管理、spawn/terminate、send、route plan、変更通知 |
+| `SymbioActorSystem` | DistributedActorSystem 実装、ActorRegistry 統合、local invocation |
+| `SymbioTransport` | remote invocation と peer event の境界 |
+| `ParticipantDescriptor` | participant の identity、representation、capability contract、claim |
+| `ParticipantView` | local subjective view と availability / evidence |
+| `Affordance` | capability contract と delivery option |
+| `RoutePlan` | route step、policy decision、evidence input |
+| `SymbioRuntimeChange` | joined、left、updated、becameAvailable、becameUnavailable |
+| `Communicable` | 通信可能なエージェント |
+| `Replicable` | runtime 経由で自己複製できるエージェント |
+| `ReplicateTool` | LLM が subagent 生成を要求するための tool |
 
 #### 依存ライブラリ
 
 - `swift-actor-runtime`: ActorRegistry、InvocationEncoder/Decoder、ResultHandler
-- `swift-discovery`: PeerConnector、Transport、CapabilityID
+- `swift-peer-connectivity`: P2P session、peer discovery、stream transport
 
 ## AgentTools
 
@@ -1059,7 +981,11 @@ let parallel = Parallel<URL, ResizedImage> {
               ↓                            ↓
          MCP (swift-sdk)         swift-actor-runtime
                                           ↓
-                                   swift-discovery
+                                  SymbioTransport
+                                          ↓
+                         SwiftAgentSymbioPeerConnectivity
+                                          ↓
+                              swift-peer-connectivity
 ```
 
 ## ビルド

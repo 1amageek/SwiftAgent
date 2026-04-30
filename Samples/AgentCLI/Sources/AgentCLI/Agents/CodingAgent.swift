@@ -145,7 +145,7 @@ private struct CodingStep: Step {
 /// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
 /// try await runtime.run(conversation)
 /// ```
-public struct InteractiveCodingAgent: Agent {
+public struct InteractiveCodingAgent {
 
     private let configuration: AgentConfiguration
 
@@ -163,7 +163,7 @@ public struct InteractiveCodingAgent: Agent {
         }
     }
 
-    public var body: some Step<String, String> {
+    public var body: CodingAgent {
         CodingAgent(configuration: configuration)
     }
 }

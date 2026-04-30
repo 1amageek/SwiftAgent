@@ -7,16 +7,16 @@
 
 import Foundation
 import SwiftAgent
-import OpenFoundationModelsOpenAI
 
 /// Configuration for agent setup
 public struct AgentConfiguration: Sendable {
 
-    /// OpenAI API key
+    /// API key supplied by the CLI. The current sample uses the platform model
+    /// through SwiftAgent; provider-backed wiring belongs in a dedicated backend.
     public let apiKey: String
 
     /// Model to use
-    public let model: OpenAIModel
+    public let model: String
 
     /// Enable verbose logging
     public let verbose: Bool
@@ -26,7 +26,7 @@ public struct AgentConfiguration: Sendable {
 
     public init(
         apiKey: String,
-        model: OpenAIModel = .gpt41,
+        model: String = "gpt-4.1",
         verbose: Bool = false,
         workingDirectory: String = FileManager.default.currentDirectoryPath
     ) {
@@ -36,21 +36,13 @@ public struct AgentConfiguration: Sendable {
         self.workingDirectory = workingDirectory
     }
 
-    /// Creates an OpenAI language model instance
-    public func createModel() -> OpenAILanguageModel {
-        let config = OpenAIConfiguration(apiKey: apiKey)
-        return OpenAILanguageModel(configuration: config, model: model)
-    }
-
     /// Creates a LanguageModelSession with the specified tools and instructions
     public func createSession(
-        tools: [any OpenFoundationModels.Tool] = [],
+        tools: [any Tool] = [],
         instructions: Instructions
     ) -> LanguageModelSession {
-        LanguageModelSession(
-            model: createModel(),
-            tools: tools,
-            instructions: instructions
-        )
+        LanguageModelSession(tools: tools) {
+            instructions
+        }
     }
 }

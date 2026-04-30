@@ -152,7 +152,7 @@ extension SkillMetadata {
         }
     }
 
-    private static func isValidName(_ name: String) -> Bool {
+    static func isValidName(_ name: String) -> Bool {
         guard let first = name.first,
               let last = name.last,
               first != "-",

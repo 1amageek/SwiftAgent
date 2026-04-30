@@ -13,9 +13,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.7.0"),
-        .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels-OpenAI.git", branch: "main"),
-        .package(url: "https://github.com/1amageek/OpenFoundationModels-Claude.git", branch: "main")
+        .package(path: "../.."),
     ],
     targets: [
         .executableTarget(
@@ -24,8 +22,6 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SwiftAgent", package: "SwiftAgent"),
                 .product(name: "AgentTools", package: "SwiftAgent"),
-                .product(name: "OpenFoundationModelsOpenAI", package: "OpenFoundationModels-OpenAI"),
-                .product(name: "OpenFoundationModelsClaude", package: "OpenFoundationModels-Claude")
             ]
         )
     ]

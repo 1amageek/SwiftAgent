@@ -14,6 +14,12 @@ struct AgentTurnExecutor: Sendable {
     private let approvalHandler: (any ApprovalHandler)?
     private let eventHandler: @Sendable (RunEvent) async -> Void
 
+    private nonisolated func debugLog(_ message: String) {
+        if let data = "\(message)\n".data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
+
     init(
         conversation: Conversation,
         approvalHandler: (any ApprovalHandler)? = nil,
@@ -37,6 +43,9 @@ struct AgentTurnExecutor: Sendable {
             sessionID: request.sessionID,
             turnID: request.turnID
         )))
+        #if DEBUG
+        debugLog("[AgentTurnExecutor] runStarted sessionID=\(request.sessionID) turnID=\(request.turnID) timeout=\(String(describing: request.policy?.timeout))")
+        #endif
 
         guard case .text(let text) = request.input else {
             if case .cancel = request.input {
@@ -76,6 +85,9 @@ struct AgentTurnExecutor: Sendable {
         )
 
         do {
+            #if DEBUG
+            debugLog("[AgentTurnExecutor] conversation.send begin sessionID=\(request.sessionID) turnID=\(request.turnID) inputLength=\(text.count)")
+            #endif
             let response = try await withTimeout(
                 request.policy?.timeout,
                 cancellationToken: cancellationToken
@@ -90,6 +102,9 @@ struct AgentTurnExecutor: Sendable {
                     }
                 }
             }
+            #if DEBUG
+            debugLog("[AgentTurnExecutor] conversation.send completed sessionID=\(request.sessionID) turnID=\(request.turnID) outputLength=\(response.content.count) hasTextualStream=\(sink.hasTextualStream)")
+            #endif
 
             if !response.content.isEmpty && !sink.hasTextualStream {
                 await sink.emitTokenDelta(
@@ -108,6 +123,9 @@ struct AgentTurnExecutor: Sendable {
                 start: start
             )
         } catch let error as AgentTurnExecutorError {
+            #if DEBUG
+            debugLog("[AgentTurnExecutor] conversation.send executorError sessionID=\(request.sessionID) turnID=\(request.turnID) error=\(error)")
+            #endif
             let status: RunStatus = switch error {
             case .timedOut: .timedOut
             case .unsupportedInput: .failed
@@ -121,6 +139,9 @@ struct AgentTurnExecutor: Sendable {
                 start: start
             )
         } catch is CancellationError {
+            #if DEBUG
+            debugLog("[AgentTurnExecutor] conversation.send cancelled sessionID=\(request.sessionID) turnID=\(request.turnID)")
+            #endif
             return await finish(
                 request: request,
                 sink: sink,
@@ -130,6 +151,9 @@ struct AgentTurnExecutor: Sendable {
                 start: start
             )
         } catch {
+            #if DEBUG
+            debugLog("[AgentTurnExecutor] conversation.send failed sessionID=\(request.sessionID) turnID=\(request.turnID) type=\(type(of: error)) error=\(error)")
+            #endif
             return await finish(
                 request: request,
                 sink: sink,
@@ -190,6 +214,9 @@ struct AgentTurnExecutor: Sendable {
             turnID: request.turnID,
             status: status
         )))
+        #if DEBUG
+        debugLog("[AgentTurnExecutor] runCompleted sessionID=\(request.sessionID) turnID=\(request.turnID) status=\(status) duration=\(ContinuousClock.now - start) finalOutputLength=\(finalOutput?.count ?? 0) error=\(String(describing: error))")
+        #endif
         sink.finish()
 
         return RunResult(

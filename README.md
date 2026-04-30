@@ -955,21 +955,23 @@ See [docs/MCP.md](docs/MCP.md) for configuration and transport options.
 
 ### SwiftAgentSymbio
 
-Distributed agent communication using Swift Distributed Actors.
+Distributed agent communication using Swift Distributed Actors. `Community` is
+the philosophical social substrate described in `PHILOSOPHY.md`; the concrete
+runtime API is `SymbioRuntime`.
 
 ```swift
 import SwiftAgentSymbio
 
 let actorSystem = SymbioActorSystem()
-let community = Community(actorSystem: actorSystem)
+let runtime = SymbioRuntime(actorSystem: actorSystem)
 
-let worker = try await community.spawn {
-    WorkerAgent(community: community, actorSystem: actorSystem)
+let worker = try await runtime.spawn {
+    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
 }
 
-try await community.send(WorkSignal(task: "process"), to: worker, perception: "work")
+try await runtime.send(WorkSignal(task: "process"), to: worker.id, perception: "work")
 
-for await change in await community.changes {
+for await change in await runtime.changes {
     switch change {
     case .joined(let member): print("Joined: \(member.id)")
     case .left(let member): print("Left: \(member.id)")
@@ -978,7 +980,11 @@ for await change in await community.changes {
 }
 ```
 
-See [docs/SYMBIOSIS.md](docs/SYMBIOSIS.md) for protocols and SubAgent spawning.
+Remote communication is supplied through the `SymbioTransport` boundary. The
+`SwiftAgentSymbioPeerConnectivity` module adapts `PeerConnectivitySession` to
+that boundary.
+
+See [Docs/SYMBIOSIS.md](Docs/SYMBIOSIS.md) for protocols and SubAgent spawning.
 
 ### Skills
 
@@ -1019,7 +1025,11 @@ See [Docs/PLUGINS.md](Docs/PLUGINS.md) for the manifest contract and unsupported
               |                          |
          MCP (swift-sdk)         swift-actor-runtime
                                          |
-                                  swift-discovery
+                                  SymbioTransport
+                                         |
+                         SwiftAgentSymbioPeerConnectivity
+                                         |
+                              swift-peer-connectivity
 ```
 
 ## License

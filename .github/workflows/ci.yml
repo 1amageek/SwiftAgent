@@ -29,7 +29,7 @@ jobs:
             traits: "--traits OpenFoundationModels"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Swift version
         run: swift --version

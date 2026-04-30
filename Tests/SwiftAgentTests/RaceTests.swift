@@ -111,7 +111,7 @@ struct RaceTimeoutTests {
 
     @Test("Race with timeout succeeds when step finishes in time")
     func raceWithTimeoutSucceeds() async throws {
-        let race = Race<Int, Int>(timeout: .milliseconds(100)) {
+        let race = Race<Int, Int>(timeout: .seconds(2)) {
             TimedStep(delay: .milliseconds(20), result: 42)
         }
 

@@ -1,5 +1,5 @@
 {
-  "originHash" : "252e0976b139c4a4e976cfc851e6d8b30e5a098a4a776f7f72745cb9220393b9",
+  "originHash" : "2f5f92efd1e94ed599cae963b28ec7994c489609fc53b9e868722b82c1f6685f",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-libp2p.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "38c7bea7c5f3ae0a40dc8f66a3cbd8fc8f9c7036"
+        "revision" : "38c7bea7c5f3ae0a40dc8f66a3cbd8fc8f9c7036",
+        "version" : "0.1.2"
       }
     },
     {
@@ -204,8 +204,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/swift-peer-connectivity.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "dcd67b3af513308269fb91f4deb4cfb75f30ead3"
+        "revision" : "cb3bb5f080b22f10b3aef1a6bca2c0022c86f3de",
+        "version" : "0.1.0"
       }
     },
     {

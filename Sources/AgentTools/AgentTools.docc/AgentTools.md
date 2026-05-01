@@ -40,15 +40,22 @@ let tools: [any Tool] = [
 
 ### Security Integration
 
-Tools integrate with SwiftAgent's permission and sandbox systems:
+Tools integrate with SwiftAgent's permission and sandbox systems through `.guardrail { }` on a Step or by composing a `SecurityConfiguration`:
 
 ```swift
-let config = AgentConfiguration(...)
-    .withSecurity(.standard)
+// Per-step guardrail
+MyAgent()
+    .guardrail {
+        Allow(.tool("Read"))
+        Allow(.tool("Grep"))
+        Deny(.bash("rm:*"))
+        Sandbox(.standard)
+    }
 
-// Permission rules
-.allowing(.tool("Read"))
-.denying(.bash("rm:*"))
+// Or as a SecurityConfiguration
+let security = SecurityConfiguration.standard
+    .allowing(.tool("Read"))
+    .denying(.bash("rm:*"))
 ```
 
 ## Topics

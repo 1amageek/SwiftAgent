@@ -131,21 +131,25 @@ This enables dependency injection without explicit parameter passing.
 
 ### Session: Language Model Integration
 
-``Conversation`` manages interactive conversations with thread-safe message queuing:
+``Conversation`` manages interactive multimodal conversations with thread-safe message queuing. It wraps an externally-owned `LanguageModelSession` together with a `Step<Prompt, String>` pipeline that defines how each turn is processed:
 
 ```swift
-let session = Conversation(tools: myTools) {
+let session = LanguageModelSession(model: .default, tools: myTools) {
     Instructions("You are a helpful assistant.")
 }
 
-let response = try await session.send("Hello!")
+let conversation = Conversation(languageModelSession: session) {
+    GenerateText<Prompt>(session: session) { prompt in prompt }
+}
+
+let response = try await conversation.send("Hello!")
 print(response.content)
 ```
 
 Features:
 - FIFO message queue with cancellation support
-- Steering messages for context injection
-- Session replacement for transcript compaction
+- Steering messages applied to the *next* turn
+- Snapshot/restore via ``SessionSnapshot`` and ``SessionStore``
 
 ### Gate: Flow Control
 

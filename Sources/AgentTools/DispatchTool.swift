@@ -92,6 +92,9 @@ public struct DispatchTool: Tool {
     ///   - notebookStorage: Shared notebook storage. Defaults to a new instance.
     ///   - maxDepth: Maximum recursion depth. Defaults to 3.
     ///   - currentDepth: Current recursion depth. Defaults to 0.
+    ///   - runtimeConfiguration: Tool runtime configuration applied to dispatched sub-sessions.
+    ///   - additionalTools: Tools provided to dispatched sub-sessions in addition to the defaults.
+    ///   - instructions: Custom instructions for dispatched sub-sessions; falls back to a built-in default when nil.
     public init(
         languageModel: any LanguageModel,
         notebookStorage: NotebookStorage = NotebookStorage(),
@@ -116,6 +119,9 @@ public struct DispatchTool: Tool {
     ///   - notebookStorage: Shared notebook storage. Defaults to a new instance.
     ///   - maxDepth: Maximum recursion depth. Defaults to 3.
     ///   - currentDepth: Current recursion depth. Defaults to 0.
+    ///   - runtimeConfiguration: Tool runtime configuration applied to dispatched sub-sessions.
+    ///   - additionalTools: Tools provided to dispatched sub-sessions in addition to the defaults.
+    ///   - instructions: Custom instructions for dispatched sub-sessions; falls back to a built-in default when nil.
     public init(
         notebookStorage: NotebookStorage = NotebookStorage(),
         maxDepth: Int = defaultMaxDepth,

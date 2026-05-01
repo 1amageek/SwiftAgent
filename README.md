@@ -30,7 +30,7 @@ A type-safe, declarative framework for building AI agents in Swift, built on App
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main")
+    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.0")
 ]
 ```
 
@@ -50,7 +50,7 @@ SwiftAgent supports alternative LLM providers via SPM Traits. Enable the `OpenFo
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/1amageek/SwiftAgent.git", branch: "main", traits: ["OpenFoundationModels"])
+    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.0", traits: ["OpenFoundationModels"])
 ]
 ```
 
@@ -294,27 +294,39 @@ try await OuterStep()
 
 ### Conversation
 
-Thread-safe interactive conversation with FIFO message queuing and steering.
+Thread-safe interactive multimodal conversation with FIFO message queuing and steering. A `Conversation` wraps an externally-owned `LanguageModelSession` plus a Step pipeline (`Step<Prompt, String>`) that defines how each turn is processed.
 
 ```swift
-let conversation = Conversation(tools: myTools) {
+let lms = LanguageModelSession(model: .default, tools: myTools) {
     Instructions("You are a helpful assistant.")
 }
 
-// FIFO queuing
+let conversation = Conversation(languageModelSession: lms) {
+    GenerateText<Prompt>(session: lms) { $0 }
+}
+
+// FIFO queuing — accepts String or Prompt
 let response = try await conversation.send("Hello!")
 
-// Steering: add context to the next prompt
+// Steering: add context to the *next* prompt
 conversation.steer("Use async/await")
 conversation.steer("Add error handling")
-let response = try await conversation.send("Write a function...")
+let next = try await conversation.send("Write a function...")
 
-// Session replacement (safe during processing)
-conversation.replaceSession(with: compactedTranscript)
+// Persistence via SessionSnapshot / SessionStore
+let store = FileSessionStore(directory: .documentsDirectory)
+try await store.save(conversation.snapshot())
 
-// Persistence
-let snapshot = conversation.snapshot()
-let restored = Conversation.restore(from: snapshot, tools: myTools)
+if let saved = try await store.load(id: conversation.id) {
+    let resumed = LanguageModelSession(
+        model: .default,
+        tools: myTools,
+        transcript: saved.transcript
+    ) { Instructions("…") }
+    let restored = Conversation(id: saved.id, languageModelSession: resumed) {
+        GenerateText<Prompt>(session: resumed) { $0 }
+    }
+}
 ```
 
 | Property | Type | Description |
@@ -544,7 +556,7 @@ struct EventedWorkflow: Step {
 }
 
 let eventBus = EventBus()
-await eventBus.on(.sessionStarted) { payload in
+eventBus.on(.sessionStarted) { payload in
     print("Started: \(payload.value ?? "")")
 }
 
@@ -926,11 +938,13 @@ struct SecureWorkflow: Step {
 ### Security Presets
 
 ```swift
-let config = AgentConfiguration(...)
-    .withSecurity(.standard)      // Interactive ask, local network, working dir
-    .withSecurity(.development)   // Permissive, no sandbox
-    .withSecurity(.restrictive)   // Minimal, no network, read-only
-    .withSecurity(.readOnly)      // Read tools only
+let security = SecurityConfiguration.standard       // Interactive ask, local network, working dir
+let security = SecurityConfiguration.development    // Permissive, no sandbox
+let security = SecurityConfiguration.restrictive    // Minimal, no network, read-only
+let security = SecurityConfiguration.readOnly       // Read tools only
+
+// Apply per-step via guardrail
+MyStep().guardrail(.standard)
 ```
 
 ## Extension Modules

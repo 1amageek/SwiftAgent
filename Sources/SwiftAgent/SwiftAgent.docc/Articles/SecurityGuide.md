@@ -236,15 +236,15 @@ struct SecureWorkflow: Step {
 
 ## Custom Permission Handler
 
-Implement ``PermissionHandler`` for custom approval UI:
+Implement ``ApprovalHandler`` for custom approval UI:
 
 ```swift
-struct MyPermissionHandler: PermissionHandler {
-    func requestPermission(
+struct MyApprovalHandler: ApprovalHandler {
+    func requestApproval(
         for request: PermissionRequest
-    ) async -> PermissionResponse {
+    ) async throws -> PermissionResponse {
         // Show UI, get user decision
-        return .allow  // or .deny, .alwaysAllow, .block
+        return .allowOnce
     }
 }
 ```
@@ -253,10 +253,10 @@ Response types:
 
 | Response | Effect |
 |----------|--------|
-| `.allow` | Allow this request |
-| `.deny` | Deny this request |
-| `.alwaysAllow` | Allow and remember |
-| `.block` | Deny and remember |
+| `.allowOnce` | Allow this invocation |
+| `.alwaysAllow` | Allow and remember pattern for the session |
+| `.deny` | Deny this invocation |
+| `.denyAndBlock` | Deny and block pattern for the session |
 
 ## Security Configuration
 
@@ -317,6 +317,10 @@ SecurityConfiguration.standard
 
 ### Handler
 
-- ``PermissionHandler``
+- ``ApprovalHandler``
+- ``CLIPermissionHandler``
+- ``ClosurePermissionHandler``
+- ``AlwaysAllowHandler``
+- ``AlwaysDenyHandler``
 - ``PermissionRequest``
 - ``PermissionResponse``

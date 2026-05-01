@@ -1,14 +1,20 @@
 # ``SwiftAgentMCP``
 
-Model Context Protocol (MCP) integration for SwiftAgent.
+Model Context Protocol (MCP) integration for SwiftAgent, with first-class support for both consuming external MCP servers and exposing your own tools as a server.
 
 ## Overview
 
-SwiftAgentMCP provides seamless integration with MCP servers, enabling agents to use external tools and services. It supports the standard MCP configuration format.
+`SwiftAgentMCP` provides three things:
+
+- **MCP client integration** — discover and call tools exposed by external MCP servers, on stdio / HTTP / SSE transports.
+- **MCP server hosting** — expose any `[any Tool]` collection as a fully-fledged MCP server through the ``MCPServer`` protocol and `@ToolsBuilder`.
+- **Progressive tool disclosure** — group large tool collections behind `ToolSearchTool` (from `SwiftAgent`) so the model can search and dispatch tools through one stable entry point.
+
+The module builds on the upstream [modelcontextprotocol/swift-sdk](https://github.com/modelcontextprotocol/swift-sdk) (no fork required).
 
 ### Configuration
 
-Create a `.mcp.json` file in your project root:
+Drop a Claude-Code-compatible `.mcp.json` next to your project:
 
 ```json
 {
@@ -24,57 +30,104 @@ Create a `.mcp.json` file in your project root:
 }
 ```
 
-### Loading MCP Tools
+Environment variables in the form `${VAR}` are expanded at load time.
+
+### Consuming MCP Tools
 
 ```swift
-// Load from search paths
-let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
-let discoveredTools = try await manager.allTools()
-let tools = try discoveredTools.swiftAgentTools()
+// Multi-server: load every server in the manifest
+let manager = try await MCPClientManager.load(from: URL(fileURLWithPath: ".mcp.json"))
+let tools = try await manager.swiftAgentTools()
 
-// Connect to a single server
+// Single-server: connect to one transport directly
 let client = try await MCPClient.connect(config: MCPServerConfig(
     name: "github",
     transport: .stdio(command: "docker", arguments: ["run", "-i", "..."])
 ))
-let mcpTools = try await client.discoveredTools()
+let mcpTools = try await client.swiftAgentTools()
 ```
 
-### Tool Naming Convention
+`swiftAgentTools()` returns `[any Tool]` you can pass straight into a `LanguageModelSession`.
 
-MCP tools follow the naming pattern: `mcp:servername:toolname`
+### Hosting an MCP Server
+
+Any `[any Tool]` becomes a server through the ``MCPServer`` protocol:
 
 ```swift
-// Permission rules for MCP tools
-.allowing(.mcp("github"))           // Allow all tools from github server
-.allowing(.tool("mcp:github:*"))    // Same as above
+@main
+struct CodingTools: MCPServer {
+    @ToolsBuilder
+    var tools: [any Tool] {
+        ReadTool(workingDirectory: ".")
+        WriteTool(workingDirectory: ".")
+        GrepTool(workingDirectory: ".")
+    }
+}
 ```
 
-### Transport Types
+The default `main()` runs over stdio. Override `run(transport:)` for custom transports (HTTP, SSE, in-process).
+
+### Progressive Disclosure with ToolSearch
+
+When a session has dozens of tools, declaring them all up-front bloats the model's tool schema. `ToolSearchTool` (from `SwiftAgent`) groups tools behind a single gateway: the model first searches by description, then dispatches the chosen tool through the gateway:
+
+```swift
+import SwiftAgent
+
+let gateway = ToolSearchTool {
+    ReadTool(workingDirectory: ".")
+    WriteTool(workingDirectory: ".")
+    GrepTool(workingDirectory: ".")
+    GitTool()
+    URLFetchTool()
+}
+
+let session = LanguageModelSession(
+    model: .default,
+    tools: gateway.gatewayTools()
+) { Instructions("…") }
+```
+
+Inner tools are not registered as directly-callable tools; the gateway alone is. This works on runtimes whose tool list is fixed at session creation.
+
+### Tool Naming and Permissions
+
+External MCP tools follow the pattern `mcp:servername:toolname`:
+
+```swift
+.guardrail {
+    Allow(.mcp("github"))           // entire server
+    Allow(.tool("mcp:github:*"))    // equivalent
+    Deny(.tool("mcp:github:delete*"))
+}
+```
+
+### Transport Reference
 
 | Transport | Description |
 |-----------|-------------|
-| `.stdio()` | Standard I/O communication |
-| `.http()` | HTTP transport |
-| `.sse()` | Server-Sent Events |
+| `.stdio(command:arguments:)` | Subprocess over standard I/O |
+| `.http(endpoint:)` | Plain HTTP request/response |
+| `.sse(endpoint:)` | HTTP with Server-Sent Events streaming |
 
 ## Topics
 
-### Client Management
+### Client Integration
 
-- ``MCPClientManager``
 - ``MCPClient``
+- ``MCPClientManager``
+- ``MCPDiscoveredTool``
 
 ### Configuration
 
 - ``MCPConfiguration``
 - ``MCPServerConfig``
+- ``MCPTransportConfig``
 
-### Tools
+### Server Hosting
 
-- ``MCPDiscoveredTool``
+- ``MCPServer``
+
+### Tool Adapters
+
 - ``MCPToolAdapter``
-
-### Authentication
-
-- ``MCPAuth``

@@ -4,184 +4,180 @@ Learn how to build a production-ready agent loop with Conversation.
 
 ## Overview
 
-``Conversation`` is a thread-safe class for managing interactive conversations with language models. This guide shows how to build a complete agent application step by step.
+``Conversation`` is a thread-safe class for managing interactive multimodal conversations with language models. A `Conversation` wraps an externally-owned `LanguageModelSession` and a user-defined ``Step`` pipeline that maps a `Prompt` to a `String`. This guide shows how to build a complete agent application step by step.
 
 ## Basic Agent Loop
 
-The simplest agent loop:
+The simplest agent loop wraps a generation step and feeds it user input:
 
 ```swift
 import SwiftAgent
 
-// Create session
-let session = Conversation(tools: []) {
+let session = LanguageModelSession(
+    model: .default,
+    tools: []
+) {
     Instructions("You are a helpful assistant.")
 }
 
-// Agent loop
+let conversation = Conversation(languageModelSession: session) {
+    GenerateText<Prompt>(session: session) { prompt in prompt }
+}
+
 while true {
     print("You> ", terminator: "")
     guard let input = readLine(), !input.isEmpty else { continue }
     if input == "exit" { break }
 
-    let response = try await session.send(input)
+    let response = try await conversation.send(input)
     print("Agent> \(response.content)")
 }
 ```
 
+### Why two pieces?
+
+The `LanguageModelSession` owns the model, tool list, and instructions. The Step pipeline owns *how* prompts are processed (validation, retrieval augmentation, post-processing). Separating them lets you reuse a session across multiple Conversations or share a Step pipeline across sessions.
+
 ## Adding Tools
 
-Tools give the agent capabilities to interact with the environment:
+Tools are attached to the `LanguageModelSession`, not to the Conversation:
 
 ```swift
 import AgentTools
 
+let workingDir = FileManager.default.currentDirectoryPath
 let tools: [any Tool] = [
-    ReadTool(workingDirectory: "/path/to/work"),
-    WriteTool(workingDirectory: "/path/to/work"),
-    EditTool(workingDirectory: "/path/to/work"),
-    GlobTool(workingDirectory: "/path/to/work"),
-    GrepTool(workingDirectory: "/path/to/work"),
-    ExecuteCommandTool(workingDirectory: "/path/to/work"),
+    ReadTool(workingDirectory: workingDir),
+    WriteTool(workingDirectory: workingDir),
+    EditTool(workingDirectory: workingDir),
+    GlobTool(workingDirectory: workingDir),
+    GrepTool(workingDirectory: workingDir),
+    ExecuteCommandTool(workingDirectory: workingDir),
     GitTool(),
     URLFetchTool(),
 ]
 
-let session = Conversation(tools: tools) {
+let session = LanguageModelSession(model: .default, tools: tools) {
     Instructions("""
         You are a coding assistant.
         Available tools: read, write, edit, glob, grep, bash, git
         """)
 }
+
+let conversation = Conversation(languageModelSession: session) {
+    GenerateText<Prompt>(session: session) { $0 }
+}
 ```
+
+## Multimodal Prompts
+
+`Conversation/send(_:)` accepts a `Prompt`, which can carry text, images, or other modalities supported by the model:
+
+```swift
+let prompt = Prompt {
+    "Describe the contents of this image."
+    Image(data: pngData)
+}
+let response = try await conversation.send(prompt)
+```
+
+A `String`-overload is provided for convenience and is wrapped in a `Prompt` automatically.
 
 ## Response Structure
 
-``Conversation/Response`` contains:
+``Conversation/Response`` carries the rendered text plus the transcript entries produced during the turn:
 
 ```swift
-let response = try await session.send("Explain this code")
+let response = try await conversation.send("Explain this code")
 
-// Generated text
-print(response.content)
-
-// All transcript entries (prompt, tool calls, response)
-for entry in response.entries {
+print(response.content)            // Generated text
+for entry in response.entries {    // Prompt, tool calls, response
     print(entry)
 }
-
-// Processing time
 print("Took: \(response.duration)")
 ```
 
 ## Steering
 
-Add context to influence the next response without a separate message:
+`steer()` adds context that will be merged into the **next** prompt instead of sending a separate message:
 
 ```swift
-// Add hints before sending
-session.steer("Focus on performance")
-session.steer("Use Swift concurrency")
+conversation.steer("Focus on performance")
+conversation.steer("Use Swift concurrency")
 
-// Steering is consumed by next send()
-let response = try await session.send("Review this function")
-
-// Check pending steering
-print(session.pendingSteeringCount)  // 0 after send
+let response = try await conversation.send("Review this function")
+print(conversation.pendingSteeringCount)  // 0 after send
 ```
 
-**Timing:** Steering added during processing applies to the *next* message, not the current one.
+Steering enqueued during processing applies to the *next* turn, not the in-flight one.
 
-## Message Queue
+## Message Queue and Cancellation
 
-Messages are processed in FIFO order:
+Concurrent `send` calls are processed in FIFO order. A cancelled `Task` is removed from the queue before it consumes a slot:
 
 ```swift
-// Concurrent sends are queued
-Task { try await session.send("First") }   // 1st
-Task { try await session.send("Second") }  // 2nd
-Task { try await session.send("Third") }   // 3rd
+Task { try await conversation.send("First") }   // 1st
+Task { try await conversation.send("Second") }  // 2nd
 
-// Check if processing
-if session.isResponding {
-    print("Session is busy")
+let cancellable = Task {
+    try await conversation.send("Maybe later")
 }
+cancellable.cancel()
 ```
 
-### Cancellation
+Use ``Conversation/isResponding`` to check whether a turn is in flight.
 
-Tasks waiting in queue can be cancelled:
+## Persistence
+
+Conversations are persisted via ``SessionSnapshot`` and the ``SessionStore`` protocol. ``FileSessionStore`` and ``InMemorySessionStore`` are provided.
 
 ```swift
-let task = Task {
-    try await session.send("Long task")
-}
+let store = FileSessionStore(directory: .documentsDirectory)
 
-// Cancel before processing starts
-task.cancel()  // Removed from queue, doesn't consume slot
+// Save the current state
+let snapshot = conversation.snapshot()
+try await store.save(snapshot)
+
+// Resume in a future run by replaying the transcript into a new session
+if let saved = try await store.load(id: snapshot.id) {
+    let resumed = LanguageModelSession(
+        model: .default,
+        tools: tools,
+        transcript: saved.transcript
+    ) { Instructions("…") }
+
+    let conversation = Conversation(
+        id: saved.id,
+        languageModelSession: resumed
+    ) {
+        GenerateText<Prompt>(session: resumed) { $0 }
+    }
+}
 ```
 
 ## Event Handling
 
-Monitor step lifecycle with ``EventBus`` and the `.emit()` modifier:
+Inject an ``EventBus`` via ``Step/context(_:)`` and decorate steps with `.emit(_:on:)`:
 
 ```swift
+extension EventName {
+    static let processingStarted = EventName("processingStarted")
+    static let processingCompleted = EventName("processingCompleted")
+}
+
 let eventBus = EventBus()
+eventBus.on(.processingStarted) { _ in print("[Started]") }
+eventBus.on(.processingCompleted) { _ in print("[Completed]") }
 
-eventBus.on(.processingStarted) { event in
-    print("[Started]")
-}
-
-eventBus.on(.processingCompleted) { event in
-    print("[Completed]")
-}
-
-// Use .context(eventBus) to inject, .emit() to fire events
-MyStep()
+let pipeline = GenerateText<Prompt>(session: session) { $0 }
     .emit(.processingStarted, on: .before)
     .emit(.processingCompleted, on: .after)
     .context(eventBus)
 ```
 
-## Session Persistence
-
-Save and restore conversations:
-
-```swift
-// Save
-let snapshot = session.snapshot()
-let data = try JSONEncoder().encode(snapshot)
-try data.write(to: fileURL)
-
-// Restore
-let data = try Data(contentsOf: fileURL)
-let snapshot = try JSONDecoder().decode(SessionSnapshot.self, from: data)
-let restored = Conversation.restore(from: snapshot, tools: tools)
-
-// Continue conversation
-let response = try await restored.send("Continue from where we left off")
-```
-
-## Session Replacement
-
-Replace the underlying session for transcript compaction:
-
-```swift
-// Compact transcript (your logic)
-let compactedTranscript = compactTranscript(session.transcript)
-
-// Replace session
-session.replaceSession(with: compactedTranscript)
-
-// Next message uses new session
-let response = try await session.send("Continue")
-```
-
-Safe to call during processing - current message continues with original session.
-
 ## Composable Agent Architecture
 
-The power of SwiftAgent is that agents are Steps, and Steps can be nested and composed declaratively.
+A Conversation is built from Steps, and Steps are themselves Conversation-friendly. This is what lets you scale from a one-line wrapper to a multi-stage agent.
 
 ### Agent as a Step
 
@@ -189,153 +185,43 @@ The power of SwiftAgent is that agents are Steps, and Steps can be nested and co
 struct ChatAgent: Step {
     @Session var session: LanguageModelSession
 
-    func run(_ input: String) async throws -> String {
-        try await session.respond(to: input).content
+    func run(_ input: Prompt) async throws -> String {
+        try await session.respond { input }.content
     }
 }
 ```
 
-### Nesting Agents
-
-Agents can contain other agents:
-
-```swift
-struct ReviewAgent: Step {
-    var body: some Step<String, String> {
-        // First agent analyzes the code
-        AnalyzeAgent()
-        // Second agent suggests improvements
-        SuggestAgent()
-        // Third agent formats the output
-        FormatAgent()
-    }
-}
-
-struct AnalyzeAgent: Step {
-    @Session var session: LanguageModelSession
-
-    func run(_ code: String) async throws -> String {
-        try await session.respond {
-            Prompt("Analyze this code for issues:\n\(code)")
-        }.content
-    }
-}
-```
-
-### REPL as a Step
-
-Even a REPL can be a Step that composes other Steps:
-
-```swift
-struct AgentREPL: Step {
-    let tools: [any Tool]
-
-    func run(_ input: Void) async throws -> Void {
-        let session = Conversation(tools: tools) {
-            Instructions("You are a coding assistant.")
-        }
-
-        print("Type 'exit' to quit.\n")
-
-        while true {
-            print("You> ", terminator: "")
-            guard let input = readLine()?.trimmingCharacters(in: .whitespaces),
-                  !input.isEmpty else { continue }
-
-            if input.lowercased() == "exit" { break }
-
-            do {
-                let response = try await session.send(input)
-                print("Agent> \(response.content)\n")
-            } catch {
-                print("Error: \(error)\n")
-            }
-        }
-    }
-}
-```
-
-### Declarative Agent Pipeline
-
-Compose a complete agent workflow declaratively:
+### Declarative Pipeline
 
 ```swift
 struct CodingAssistant: Step {
-    let workingDirectory: String
+    @Session var session: LanguageModelSession
 
-    var body: some Step<String, String> {
-        // Input validation
-        Gate { input in
-            guard !input.isEmpty else { return .block(reason: "Empty input") }
-            return .pass(input)
+    var body: some Step<Prompt, String> {
+        Gate { prompt in
+            guard !prompt.isEmpty else { return .block(reason: "Empty prompt") }
+            return .pass(prompt)
         }
-
-        // Main processing
-        ProcessingAgent(workingDirectory: workingDirectory)
-
-        // Output formatting
-        Transform { output in
-            "## Result\n\n\(output)"
-        }
+        GenerateText<Prompt>(session: session) { $0 }
+        Transform { "## Result\n\n\($0)" }
     }
 }
 
-struct ProcessingAgent: Step {
-    let workingDirectory: String
-    @Session var session: LanguageModelSession
-
-    func run(_ input: String) async throws -> String {
-        try await session.respond {
-            Prompt("""
-                Working directory: \(workingDirectory)
-                User request: \(input)
-                """)
-        }.content
-    }
+let conversation = Conversation(languageModelSession: session) {
+    CodingAssistant()
 }
 ```
 
-### Hierarchical Agent Structure
-
-Build complex agents by nesting:
+### Hierarchical Structure
 
 ```
 MyApp
-└── AgentREPL (Step)
+└── REPL loop
     └── Conversation
-        └── CodingAssistant (Step)
+        └── CodingAssistant (Step with Prompt → String body)
             ├── Gate (validation)
-            ├── ProcessingAgent (Step)
-            │   └── LanguageModelSession
-            └── Transform (formatting)
-```
-
-## Complete Example
-
-```swift
-import Foundation
-import SwiftAgent
-import AgentTools
-
-@main
-struct MyApp {
-    static func main() async throws {
-        let workingDir = FileManager.default.currentDirectoryPath
-        let tools: [any Tool] = [
-            ReadTool(workingDirectory: workingDir),
-            WriteTool(workingDirectory: workingDir),
-            EditTool(workingDirectory: workingDir),
-            GlobTool(workingDirectory: workingDir),
-            GrepTool(workingDirectory: workingDir),
-            ExecuteCommandTool(workingDirectory: workingDir),
-            GitTool(),
-            URLFetchTool(),
-        ]
-
-        try await AgentREPL(tools: tools)
-            .run(())
-    }
-}
+            ├── GenerateText (LLM call)
+            └── Transform (post-processing)
 ```
 
 ## Topics
@@ -346,8 +232,10 @@ struct MyApp {
 
 ### Sending Messages
 
-- ``Conversation/send(_:)``
-- ``Conversation/steer(_:)``
+- ``Conversation/send(_:)-(Prompt)``
+- ``Conversation/send(_:)-(String)``
+- ``Conversation/steer(_:)-(Prompt)``
+- ``Conversation/steer(_:)-(String)``
 - ``Conversation/Response``
 
 ### Session State
@@ -359,8 +247,13 @@ struct MyApp {
 ### Events
 
 - ``EventBus``
+- ``EventName``
+- ``EventTiming``
 
 ### Persistence
 
 - ``Conversation/snapshot()``
 - ``SessionSnapshot``
+- ``SessionStore``
+- ``FileSessionStore``
+- ``InMemorySessionStore``

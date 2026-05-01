@@ -15,13 +15,15 @@ The core abstraction is the ``Step`` protocol, which represents an async transfo
 ```swift
 // A simple pipeline that transforms input through multiple steps
 struct MyPipeline: Step {
-    var body: some Step<String, String> {
-        Transform { $0.trimmingCharacters(in: .whitespaces) }
-        GenerateText { Prompt($0) }
-        Transform { $0.uppercased() }
+    @Session var session: LanguageModelSession
+
+    var body: some Step<Prompt, String> {
+        GenerateText(session: session) { input in input }
     }
 }
 ```
+
+`Generate` and `GenerateText` accept a `@PromptBuilder` closure that produces a `Prompt`, enabling multimodal inputs (text, images, and structured content) through the same pipeline.
 
 ### Key Design Principles
 
@@ -29,6 +31,7 @@ struct MyPipeline: Step {
 - **Async-first**: All operations are async/await based
 - **Functional pipelines**: Data flows through composable transformations
 - **Context propagation**: Values flow through TaskLocal-based context system
+- **Multimodal-ready**: `Prompt` is the canonical input type for language model steps
 
 ## Topics
 
@@ -98,13 +101,34 @@ Type erasure and debugging.
 - <doc:ConversationGuide>
 - ``Session``
 - ``Conversation``
-- ``LanguageModelSessionDelegate``
+- ``SessionSnapshot``
+- ``SessionStore``
+- ``FileSessionStore``
+- ``InMemorySessionStore``
 
 ### Events
 
 - ``EventBus``
 - ``EventName``
-- ``Event``
+- ``EventTiming``
+
+### Workflow Runtime
+
+Coordinate multi-step plans across local and remote handlers.
+
+- ``AgentWorkflowExecutor``
+- ``AgentWorkflowPlan``
+- ``AgentWorkflowStep``
+- ``AgentWorkflowResult``
+- ``AgentWorkflowPolicy``
+- ``AgentWorkflowStatus``
+
+### Tool Runtime
+
+Dispatch tool invocations through a middleware-driven pipeline.
+
+- ``ToolRuntime``
+- ``ToolSearchTool``
 
 ### Security
 

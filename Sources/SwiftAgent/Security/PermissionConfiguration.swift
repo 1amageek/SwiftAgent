@@ -90,6 +90,7 @@ public struct PermissionConfiguration: Sendable {
     ///   - defaultAction: Action when no rule matches.
     ///   - handler: Handler for interactive confirmation.
     ///   - enableSessionMemory: Whether to remember session decisions.
+    ///   - permissionMode: Optional runtime execution mode used for plugin tool permission escalation.
     public init(
         allow: [PermissionRule] = [],
         deny: [PermissionRule] = [],

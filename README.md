@@ -978,6 +978,7 @@ import SwiftAgentSymbio
 
 let actorSystem = SymbioActorSystem()
 let runtime = SymbioRuntime(actorSystem: actorSystem)
+try await runtime.start()  // required to begin transport observation
 
 let worker = try await runtime.spawn {
     WorkerAgent(runtime: runtime, actorSystem: actorSystem)
@@ -1002,11 +1003,23 @@ See [Docs/SYMBIOSIS.md](Docs/SYMBIOSIS.md) for protocols and SubAgent spawning.
 
 ### Skills
 
-Portable skill packages discovered from local roots, independently of plugins.
+Portable skill packages discovered from local roots, independently of plugins. The 2.0 entry point is `SkillRuntime.prepare(_:)`, which returns a snapshot containing the activation tool, a permission set, and a prompt fragment listing available skills:
 
 ```swift
-let registry = try await SkillRegistry.discover()
-let prompt = await registry.generateAvailableSkillsPrompt()
+import SwiftAgentSkills
+
+let runtime = try await SkillRuntime.prepare(.autoDiscover())
+
+let session = LanguageModelSession(
+    model: .default,
+    tools: runtime.tools  // includes activate_skill (SkillTool)
+) {
+    Instructions("You are a coding assistant.")
+    runtime.instructions  // injects <skill_policy> + skill catalog
+}
+
+// Wire dynamic permissions into a ToolRuntimeConfiguration
+let configured = runtime.applying(to: .standard)
 ```
 
 See [Docs/SKILLS_DESIGN.md](Docs/SKILLS_DESIGN.md) for the discovery model and SKILL.md format.

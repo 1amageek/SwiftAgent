@@ -30,7 +30,7 @@ A type-safe, declarative framework for building AI agents in Swift, built on App
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.0")
+    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.1")
 ]
 ```
 
@@ -50,7 +50,7 @@ SwiftAgent supports alternative LLM providers via SPM Traits. Enable the `OpenFo
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.0", traits: ["OpenFoundationModels"])
+    .package(url: "https://github.com/1amageek/SwiftAgent.git", from: "2.0.1", traits: ["OpenFoundationModels"])
 ]
 ```
 

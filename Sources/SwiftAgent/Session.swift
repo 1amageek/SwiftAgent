@@ -84,7 +84,7 @@ public struct Session: Sendable {
 /// - Returns: The result of the operation
 func withSession<T: Sendable>(
     _ session: LanguageModelSession,
-    operation: () async throws -> T
+    operation: nonisolated(nonsending) () async throws -> T
 ) async rethrows -> T {
     try await SessionContext.$current.withValue(session, operation: operation)
 }

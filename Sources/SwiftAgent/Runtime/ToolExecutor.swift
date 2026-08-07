@@ -110,7 +110,7 @@ public enum ToolExecutorContext {
     /// `ToolExecutorContext.current`.
     public static func withValue<T: Sendable>(
         _ executor: any ToolExecutor,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await $current.withValue(executor, operation: operation)
     }

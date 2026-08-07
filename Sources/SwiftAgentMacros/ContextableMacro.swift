@@ -44,7 +44,7 @@ public struct ContextableMacro: PeerMacro, ExtensionMacro {
 
                 \(raw: accessPrefix)static func withValue<T: Sendable>(
                     _ value: \(raw: typeName),
-                    operation: () async throws -> T
+                    operation: nonisolated(nonsending) () async throws -> T
                 ) async rethrows -> T {
                     try await $_current.withValue(value, operation: operation)
                 }

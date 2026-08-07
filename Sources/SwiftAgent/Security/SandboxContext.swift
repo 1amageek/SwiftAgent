@@ -22,7 +22,7 @@ public enum SandboxContext: ContextKey {
 
     public static func withValue<T: Sendable>(
         _ value: SandboxExecutor.Configuration,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await $_current.withValue(value, operation: operation)
     }

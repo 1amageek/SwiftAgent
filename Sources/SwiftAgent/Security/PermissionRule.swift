@@ -179,8 +179,7 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     /// - Parameter path: The path to normalize.
     /// - Returns: The normalized path with `.` and `..` resolved.
     private func normalizePath(_ path: String) -> String {
-        // Use URL.standardized to resolve . and .. components
-        URL(fileURLWithPath: path).standardized.path
+        (path as NSString).standardizingPath
     }
 
     /// Separator characters recognized for `prefix:*` patterns.

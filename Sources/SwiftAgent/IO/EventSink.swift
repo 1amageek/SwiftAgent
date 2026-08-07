@@ -122,7 +122,7 @@ public enum EventSinkContext: ContextKey {
 
     public static func withValue<T: Sendable>(
         _ value: EventSink,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await $_current.withValue(value, operation: operation)
     }

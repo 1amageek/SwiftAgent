@@ -226,7 +226,7 @@ enum URLTrackerContext: ContextKey {
 
     static func withValue<T: Sendable>(
         _ value: URLTracker,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await $_current.withValue(value, operation: operation)
     }

@@ -164,6 +164,29 @@ struct PeerConnectivitySymbioTransportTests {
     }
 
     @Test
+    func backendErrorPreservesPeerConnectivityContext() async throws {
+        let backend = MockPeerConnectivityBackend()
+        let session = PeerConnectivitySession(backend: backend)
+        let transport = PeerConnectivitySymbioTransport(session: session)
+        var iterator = transport.events.makeAsyncIterator()
+        let errorEvent = PeerConnectivityErrorEvent(
+            operation: .discovery,
+            error: TestBackendError.discoveryFailed
+        )
+
+        try await transport.start()
+        await backend.emit(.error(errorEvent))
+
+        let event = try await nextEvent(from: &iterator)
+        guard case .error(let error as PeerConnectivityErrorEvent) = event else {
+            Issue.record("expected contextual PeerConnectivityErrorEvent")
+            return
+        }
+        #expect(error.operation == .discovery)
+        try await transport.shutdown()
+    }
+
+    @Test
     func shutdownFinishesEventsWhenBackendShutdownThrows() async throws {
         let backend = ThrowingShutdownBackend()
         let session = PeerConnectivitySession(backend: backend)
@@ -207,6 +230,7 @@ struct PeerConnectivitySymbioTransportTests {
 }
 
 private enum TestBackendError: Error {
+    case discoveryFailed
     case shutdownFailed
 }
 

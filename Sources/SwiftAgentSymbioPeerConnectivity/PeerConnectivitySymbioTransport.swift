@@ -43,14 +43,24 @@ public actor PeerConnectivitySymbioTransport: SymbioTransport {
 
     public func start() async throws {
         try session.require(.streamMultiplexing)
-        try await session.start()
         if eventTask != nil {
             return
         }
-        eventTask = Task { [weak self, session] in
-            for await event in session.events {
+
+        let sessionEvents = session.subscribe()
+        let task = Task { [weak self] in
+            for await event in sessionEvents {
                 await self?.handle(event)
             }
+        }
+        eventTask = task
+
+        do {
+            try await session.start()
+        } catch {
+            task.cancel()
+            eventTask = nil
+            throw error
         }
     }
 

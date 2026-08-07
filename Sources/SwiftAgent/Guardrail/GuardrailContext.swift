@@ -70,7 +70,7 @@ public enum GuardrailContext: ContextKey {
     /// - Returns: The result of the operation.
     public static func withValue<T: Sendable>(
         _ value: GuardrailConfiguration,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await $_current.withValue(value, operation: operation)
     }

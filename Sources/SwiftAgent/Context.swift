@@ -26,7 +26,7 @@ import Foundation
 ///
 ///     static func withValue<T: Sendable>(
 ///         _ value: URLTracker,
-///         operation: () async throws -> T
+///         operation: nonisolated(nonsending) () async throws -> T
 ///     ) async rethrows -> T {
 ///         try await $_current.withValue(value, operation: operation)
 ///     }
@@ -59,7 +59,7 @@ public protocol ContextKey {
     /// Runs an operation with the given value in context.
     static func withValue<T: Sendable>(
         _ value: Value,
-        operation: () async throws -> T
+        operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T
 }
 
@@ -113,7 +113,7 @@ public struct Context<Value: Contextable>: Sendable {
 func withContext<Key: ContextKey, T: Sendable>(
     _ key: Key.Type,
     value: Key.Value,
-    operation: () async throws -> T
+    operation: nonisolated(nonsending) () async throws -> T
 ) async rethrows -> T {
     try await Key.withValue(value, operation: operation)
 }
@@ -173,7 +173,7 @@ extension Step {
 //
 //     static func withValue<T: Sendable>(
 //         _ value: URLTracker,
-//         operation: () async throws -> T
+//         operation: nonisolated(nonsending) () async throws -> T
 //     ) async rethrows -> T {
 //         try await $_current.withValue(value, operation: operation)
 //     }

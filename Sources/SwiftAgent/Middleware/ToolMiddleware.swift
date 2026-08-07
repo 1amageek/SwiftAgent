@@ -74,7 +74,7 @@ public struct ToolContext: Sendable {
     /// - Parameter operation: The operation to execute.
     /// - Returns: The result of the operation.
     public func withCurrent<T: Sendable>(
-        _ operation: () async throws -> T
+        _ operation: nonisolated(nonsending) () async throws -> T
     ) async rethrows -> T {
         try await ToolContext.$current.withValue(self, operation: operation)
     }

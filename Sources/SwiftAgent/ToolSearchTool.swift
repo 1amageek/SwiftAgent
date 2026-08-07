@@ -21,16 +21,12 @@ public struct ToolSearchTool: Tool {
 
     public var description: String {
         var text = """
-        Searches and executes the grouped tools listed below.
+        Searches and calls grouped tools.
 
-        Use operation "search" to inspect matching tool schemas. Use operation "call" to execute \
-        a selected tool through this gateway. The selected tool arguments must be provided in the \
-        arguments object.
+        Use operation "search" to retrieve matching schemas. Use operation "call" with toolName \
+        and arguments to execute a result.
 
-        If a call operation fails, ToolSearch returns the failure details as tool output. Read that \
-        output, correct the selected tool name or arguments, and retry by calling ToolSearch again.
-
-        Directly invoking the grouped tools is not supported; execute them through this gateway.
+        On failure, correct the request from the returned details and retry through this gateway.
 
         Available tools:
         """
@@ -170,8 +166,7 @@ public struct ToolSearchTool: Tool {
 
         let blocks = try matches.map(Self.renderFunctionBlock(for:))
         return """
-        Matching grouped tools are listed below. To execute one, call \(name) with operation "call", \
-        toolName set to the selected name, and arguments containing a JSON object matching its parameters.
+        Call \(name) with operation "call", the exact toolName, and arguments matching its parameters.
         \(blocks.joined(separator: "\n"))
         """
     }

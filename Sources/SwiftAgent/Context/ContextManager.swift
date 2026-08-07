@@ -182,6 +182,11 @@ public actor ContextManager {
         case .toolOutput(let output):
             return String(describing: output).count
 
+        #if !OpenFoundationModels
+        case .reasoning(let reasoning):
+            return String(describing: reasoning).count
+        #endif
+
         @unknown default:
             return 100 // Fallback estimate for unknown entry types
         }

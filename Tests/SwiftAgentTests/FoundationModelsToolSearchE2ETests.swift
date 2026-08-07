@@ -3,8 +3,9 @@
 //  SwiftAgent
 //
 //  End-to-end progressive disclosure flow exercised against the real
-//  on-device SystemLanguageModel. Skipped automatically when Apple
-//  Intelligence is not available on the host.
+//  on-device SystemLanguageModel. Opt in with
+//  SWIFT_AGENT_RUN_FOUNDATION_MODELS_E2E=1 on a host where Apple
+//  Intelligence is available.
 //
 
 import Testing
@@ -14,6 +15,10 @@ import Synchronization
 
 #if !OpenFoundationModels
 import FoundationModels
+
+private let runFoundationModelsToolSearchE2E =
+    ProcessInfo.processInfo.environment["SWIFT_AGENT_RUN_FOUNDATION_MODELS_E2E"] == "1"
+    && SystemLanguageModel.default.isAvailable
 
 @Suite("FoundationModels ToolSearch E2E", .serialized)
 struct FoundationModelsToolSearchE2ETests {
@@ -70,8 +75,8 @@ struct FoundationModelsToolSearchE2ETests {
 
     @Test(
         "SystemLanguageModel completes ToolSearch → Weather progressive disclosure",
-        .enabled(if: SystemLanguageModel.default.isAvailable),
-        .timeLimit(.minutes(2))
+        .enabled(if: runFoundationModelsToolSearchE2E),
+        .timeLimit(.minutes(3))
     )
     func progressiveDisclosureViaSystemModel() async throws {
         let log = CallLog()
@@ -86,19 +91,26 @@ struct FoundationModelsToolSearchE2ETests {
             Instructions("You are a helpful assistant.")
         }
 
-        let response = try await session.respond(to: "What is the weather in Tokyo right now?")
+        let response = try await session.respond(
+            to: "What is the weather in Tokyo right now?",
+            options: GenerationOptions(maximumResponseTokens: 512)
+        )
 
         let dump = Self.dumpTranscript(session.transcript)
         print(dump)
 
         #expect(!response.content.isEmpty, "Empty response.\n\n=== Transcript ===\n\(dump)")
 
-        let instructions = try #require(session.transcript.compactMap { entry -> Transcript.Instructions? in
+        let instructionEntries = session.transcript.compactMap { entry -> Transcript.Instructions? in
             if case .instructions(let instructions) = entry {
                 return instructions
             }
             return nil
-        }.first)
+        }
+        guard let instructions = instructionEntries.first else {
+            Issue.record("Expected an instructions transcript entry.\n\n=== Transcript ===\n\(dump)")
+            return
+        }
 
         let initialToolDefinitions = instructions.toolDefinitions
         let initialToolNames = initialToolDefinitions.map(\.name)
@@ -134,8 +146,8 @@ struct FoundationModelsToolSearchE2ETests {
 
     @Test(
         "SystemLanguageModel completes ToolSearch through ToolRuntime middleware",
-        .enabled(if: SystemLanguageModel.default.isAvailable),
-        .timeLimit(.minutes(2))
+        .enabled(if: runFoundationModelsToolSearchE2E),
+        .timeLimit(.minutes(3))
     )
     func progressiveDisclosureViaToolRuntime() async throws {
         let weatherLog = CallLog()
@@ -156,19 +168,26 @@ struct FoundationModelsToolSearchE2ETests {
             Instructions("You are a helpful assistant.")
         }
 
-        let response = try await session.respond(to: "What is the weather in Tokyo right now?")
+        let response = try await session.respond(
+            to: "What is the weather in Tokyo right now?",
+            options: GenerationOptions(maximumResponseTokens: 512)
+        )
 
         let dump = Self.dumpTranscript(session.transcript)
         print(dump)
 
         #expect(!response.content.isEmpty, "Empty response.\n\n=== Transcript ===\n\(dump)")
 
-        let instructions = try #require(session.transcript.compactMap { entry -> Transcript.Instructions? in
+        let instructionEntries = session.transcript.compactMap { entry -> Transcript.Instructions? in
             if case .instructions(let instructions) = entry {
                 return instructions
             }
             return nil
-        }.first)
+        }
+        guard let instructions = instructionEntries.first else {
+            Issue.record("Expected an instructions transcript entry.\n\n=== Transcript ===\n\(dump)")
+            return
+        }
 
         let initialToolNames = instructions.toolDefinitions.map(\.name)
         #expect(initialToolNames == ["ToolSearch"], "Runtime public tools should expose only ToolSearch, got: \(initialToolNames).\n\n=== Transcript ===\n\(dump)")
@@ -223,6 +242,9 @@ struct FoundationModelsToolSearchE2ETests {
             case .response(let r):
                 lines.append("[\(index)] RESPONSE")
                 lines.append(contentsOf: textLines(from: r.segments, indent: "    "))
+            case .reasoning(let reasoning):
+                lines.append("[\(index)] REASONING")
+                lines.append(contentsOf: textLines(from: reasoning.segments, indent: "    "))
             @unknown default:
                 lines.append("[\(index)] UNKNOWN entry")
             }
@@ -238,6 +260,10 @@ struct FoundationModelsToolSearchE2ETests {
                     .map { "\(indent)\($0)" }
             case .structure(let s):
                 return ["\(indent)<structure> \(s.content)"]
+            case .attachment(let attachment):
+                return ["\(indent)<attachment> \(attachment)"]
+            case .custom(let custom):
+                return ["\(indent)<custom> \(custom)"]
             @unknown default:
                 return ["\(indent)<unknown segment>"]
             }

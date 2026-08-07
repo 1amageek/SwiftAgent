@@ -266,6 +266,8 @@ struct FoundationModelsTranscriptTests {
                 return count + 1
             case .toolOutput:
                 return count + 1
+            case .reasoning:
+                return count + 1
             @unknown default:
                 return count
             }

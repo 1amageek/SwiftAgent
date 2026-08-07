@@ -227,6 +227,10 @@ public struct PriorityCompactionStrategy: CompactionStrategy {
             typeName = "toolCalls"
         case .toolOutput:
             typeName = "toolOutput"
+        #if !OpenFoundationModels
+        case .reasoning:
+            typeName = "reasoning"
+        #endif
         @unknown default:
             typeName = "unknown"
         }

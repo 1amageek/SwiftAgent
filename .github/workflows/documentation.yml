@@ -27,10 +27,13 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Install pinned Swift toolchain
+        run: scripts/install-swift-ci.sh
 
       - name: Cache Swift packages
         uses: actions/cache@v5

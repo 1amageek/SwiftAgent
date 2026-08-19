@@ -68,7 +68,7 @@ private struct CodingStep: Step {
     let modifiedFiles: Relay<Set<String>>
 
     func run(_ input: String) async throws -> String {
-        let tools: [any Tool] = [
+        var tools: [any Tool] = [
             ReadTool(workingDirectory: configuration.workingDirectory),
             WriteTool(workingDirectory: configuration.workingDirectory),
             EditTool(workingDirectory: configuration.workingDirectory),
@@ -77,8 +77,10 @@ private struct CodingStep: Step {
             GlobTool(workingDirectory: configuration.workingDirectory),
             ExecuteCommandTool(workingDirectory: configuration.workingDirectory),
             GitTool(),
-            URLFetchTool(),
         ]
+        if let fetcher = configuration.webDocumentFetcher {
+            tools.append(URLFetchTool(fetcher: fetcher))
+        }
 
         let session = configuration.createSession(
             tools: tools,
@@ -132,7 +134,7 @@ private struct CodingStep: Step {
 
 // MARK: - Interactive Mode
 
-/// Interactive coding agent using Conversation + StdioTransport pattern.
+/// Interactive coding agent using Conversation + StdioConnection pattern.
 ///
 /// Usage:
 /// ```swift
@@ -141,8 +143,9 @@ private struct CodingStep: Step {
 /// let conversation = Conversation(languageModelSession: session) {
 ///     CodingAgent(configuration: config)
 /// }
-/// let transport = StdioTransport(prompt: "You: ")
-/// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// let connection = StdioConnection(prompt: "You: ")
+/// let approvals = StdioApprovalHandler(connection: connection)
+/// let runtime = AgentSession(connection: connection, approvalHandler: approvals)
 /// try await runtime.run(conversation)
 /// ```
 public struct InteractiveCodingAgent {

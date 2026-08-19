@@ -6,13 +6,26 @@ Share configuration and state across nested Steps using TaskLocal-based context.
 
 When building complex pipelines with nested Steps, you often need to share configuration or state without explicitly passing parameters through every level. SwiftAgent's ``Context`` system provides TaskLocal-based propagation that automatically flows through the Step hierarchy.
 
+## Ownership and Isolation
+
+| Type | Responsibility |
+| --- | --- |
+| ``Contextable`` | Defines a value's default, current value, and scoped installation contract |
+| ``ContextValueKey`` | Implements the default type-indexed TaskLocal storage |
+| ``ContextKey`` | Provides an explicit TaskLocal boundary for runtime infrastructure with custom semantics |
+| ``ContextStep`` | Owns one installed value for the duration of the wrapped Step |
+
+The core context API depends only on Swift Concurrency. Compiler plugins and
+model-provider dependencies do not participate in context propagation. Each
+scope installs an immutable value-map snapshot, child tasks inherit that
+snapshot, and TaskLocal restores the parent snapshot on success or failure.
+
 ## Defining a Contextable Type
 
-Use the `@Contextable` macro to define types that can be propagated:
+Conform value types directly to ``Contextable``:
 
 ```swift
-@Contextable
-struct CrawlerConfig {
+struct CrawlerConfig: Contextable {
     let maxDepth: Int
     let timeout: TimeInterval
     let userAgent: String
@@ -23,9 +36,9 @@ struct CrawlerConfig {
 }
 ```
 
-The macro generates:
-- A `CrawlerConfigContext` enum conforming to ``ContextKey``
-- A `typealias ContextKeyType = CrawlerConfigContext` on `CrawlerConfig`
+``Contextable`` supplies a type-indexed ``ContextValueKey`` by default. This
+keeps context propagation independent of compiler plugins while preserving
+TaskLocal inheritance and nested-scope restoration.
 
 ## Accessing Context in Steps
 
@@ -91,14 +104,12 @@ try await CrawlerPipeline()
 Chain multiple contexts together:
 
 ```swift
-@Contextable
-struct DatabaseConfig {
+struct DatabaseConfig: Contextable {
     let connectionString: String
     static var defaultValue: DatabaseConfig { DatabaseConfig(connectionString: "") }
 }
 
-@Contextable
-struct LoggingConfig {
+struct LoggingConfig: Contextable {
     let level: LogLevel
     static var defaultValue: LoggingConfig { LoggingConfig(level: .info) }
 }
@@ -125,13 +136,12 @@ struct DataStep: Step {
 
 ## Context with Reference Types
 
-Use classes for mutable shared state:
+Use an actor for mutable shared state:
 
 ```swift
-@Contextable
-class WorkspaceContext {
-    let workingDirectory: String
-    var processedFiles: Set<String> = []
+actor WorkspaceContext: Contextable {
+    nonisolated let workingDirectory: String
+    private var processedFiles: Set<String> = []
 
     init(workingDirectory: String) {
         self.workingDirectory = workingDirectory
@@ -140,6 +150,10 @@ class WorkspaceContext {
     static var defaultValue: WorkspaceContext {
         WorkspaceContext(workingDirectory: FileManager.default.currentDirectoryPath)
     }
+
+    func processedFileNames() -> [String] {
+        processedFiles.sorted()
+    }
 }
 
 struct CodingAgent: Step {
@@ -147,10 +161,11 @@ struct CodingAgent: Step {
     @Session var session: LanguageModelSession
 
     func run(_ task: String) async throws -> String {
+        let processedFiles = await workspace.processedFileNames()
         try await session.respond {
             Prompt("""
                 Working directory: \(workspace.workingDirectory)
-                Already processed: \(workspace.processedFiles.joined(separator: ", "))
+                Already processed: \(processedFiles.joined(separator: ", "))
                 Task: \(task)
                 """)
         }.content
@@ -234,8 +249,16 @@ enum URLTrackerContext: ContextKey {
 
 // Make URLTracker contextable
 extension URLTracker: Contextable {
-    typealias ContextKeyType = URLTrackerContext
     static var defaultValue: URLTracker { URLTracker() }
+
+    static var current: URLTracker { URLTrackerContext.current }
+
+    static func withValue<T: Sendable>(
+        _ value: URLTracker,
+        operation: nonisolated(nonsending) () async throws -> T
+    ) async rethrows -> T {
+        try await URLTrackerContext.withValue(value, operation: operation)
+    }
 }
 ```
 
@@ -245,4 +268,6 @@ extension URLTracker: Contextable {
 
 - ``Context``
 - ``ContextKey``
+- ``ContextValueKey``
 - ``Contextable``
+- ``ContextStep``

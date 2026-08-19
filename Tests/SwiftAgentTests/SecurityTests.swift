@@ -179,10 +179,10 @@ struct PatternMatchingTests {
 
     @Test("PM-5c: Tool name wildcard")
     func testToolNameWildcard() {
-        let rule = PermissionRule("mcp:github:*")
-        let context1 = ToolContext(toolName: "mcp:github:list_repos", arguments: "{}")
-        let context2 = ToolContext(toolName: "mcp:github:create_pr", arguments: "{}")
-        let context3 = ToolContext(toolName: "mcp:slack:send", arguments: "{}")
+        let rule = PermissionRule("remote__6_github__*")
+        let context1 = ToolContext(toolName: "remote__6_github__list_repos", arguments: "{}")
+        let context2 = ToolContext(toolName: "remote__6_github__create_pr", arguments: "{}")
+        let context3 = ToolContext(toolName: "remote__5_slack__send", arguments: "{}")
 
         #expect(rule.matches(context1))
         #expect(rule.matches(context2))

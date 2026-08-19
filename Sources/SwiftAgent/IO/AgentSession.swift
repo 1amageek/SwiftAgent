@@ -6,7 +6,7 @@
 import Foundation
 import Synchronization
 
-/// The orchestrator between `AgentTransport` and `Conversation`.
+/// The orchestrator between an ``AgentConnection`` and `Conversation`.
 ///
 /// `AgentSession` uses a two-task architecture:
 /// - **Receive loop** (background Task): Always running, drains transport messages immediately
@@ -15,9 +15,10 @@ import Synchronization
 /// This separation ensures that `.approvalResponse` and `.cancel` messages
 /// are processed promptly even while a turn is executing.
 ///
-/// When a transport does **not** support background receive (e.g., `StdioTransport`
-/// shares stdin with `CLIPermissionHandler`), the receive loop is paused during
-/// turn execution via a `TurnGate` to prevent stdin contention.
+/// When a connection does **not** support concurrent receive, the receive loop
+/// is paused during turn execution via a `TurnGate`. Such connections require a
+/// ``TurnGatedApprovalHandler``; ``StdioApprovalHandler`` routes approval
+/// through the same stdin owner instead of opening a competing reader.
 ///
 /// ## Usage
 ///
@@ -33,8 +34,9 @@ import Synchronization
 ///     GenerateText { (input: String) in Prompt(input) }
 /// }
 ///
-/// let transport = StdioTransport(prompt: "> ")
-/// let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// let connection = StdioConnection(prompt: "> ")
+/// let approvals = StdioApprovalHandler(connection: connection)
+/// let session = AgentSession(connection: connection, approvalHandler: approvals)
 /// try await session.run(conversation)
 /// ```
 ///
@@ -49,10 +51,23 @@ import Synchronization
 ///         .cancel → match turnID to active token or record as pending cancel
 /// ```
 public final class AgentSession: Sendable {
+    private nonisolated func debugLog(_ message: String) {
+        #if DEBUG
+        if let data = (message + "\n").data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+        #endif
+    }
 
-    private let transport: any AgentTransport
+    private enum Lifecycle {
+        case idle
+        case running
+        case finished
+    }
+
+    private let connection: any AgentConnection
     private let approvalHandler: (any ApprovalHandler)?
-    private let transportApprovalHandler: TransportApprovalHandler?
+    private let connectionApprovalHandler: ConnectionApprovalHandler?
     /// Generational tracker for completed turn IDs.
     ///
     /// Uses a two-generation design to bound memory:
@@ -61,6 +76,7 @@ public final class AgentSession: Sendable {
     /// - Lookups check both generations, so recently-evicted IDs are still recognized.
     /// - Total memory is bounded to approximately `2 * generationCapacity` entries.
     private let completedTurns: Mutex<CompletedTurnTracker>
+    private let lifecycle = Mutex(Lifecycle.idle)
 
     /// Per-turnID cancellation state: active tokens, sentinel tokens, and pre-emptive cancels.
     ///
@@ -75,8 +91,12 @@ public final class AgentSession: Sendable {
 
     /// High water mark for best-effort collections (`pendingCancels`, sentinel tokens).
     static let turnStateHighWaterMark = 10_000
+    static let turnQueueCapacity = 1_024
 
     private struct TurnState {
+        /// Terminal session failures prevent buffered turns from starting.
+        var isSessionAborted = false
+
         // MARK: - Sentinel tokens (two-generation)
 
         /// Current generation: active tokens and recent sentinels.
@@ -153,17 +173,15 @@ public final class AgentSession: Sendable {
     /// Creates an agent session.
     ///
     /// - Parameters:
-    ///   - transport: The transport for receiving requests and sending events.
+    ///   - connection: The connection for receiving requests and sending events.
     ///   - approvalHandler: Optional approval handler for interactive approval flows.
-    ///   - transportApprovalHandler: Optional transport-based approval handler for resolving approvals from transport messages.
     public init(
-        transport: any AgentTransport,
-        approvalHandler: (any ApprovalHandler)? = nil,
-        transportApprovalHandler: TransportApprovalHandler? = nil
+        connection: any AgentConnection,
+        approvalHandler: (any ApprovalHandler)? = nil
     ) {
-        self.transport = transport
+        self.connection = connection
         self.approvalHandler = approvalHandler
-        self.transportApprovalHandler = transportApprovalHandler
+        self.connectionApprovalHandler = approvalHandler as? ConnectionApprovalHandler
         self.completedTurns = Mutex(CompletedTurnTracker())
         self.turnState = Mutex(TurnState())
     }
@@ -174,32 +192,63 @@ public final class AgentSession: Sendable {
     /// When using raw tools, prefer `run(tools:pipeline:instructions:step:)` so `EventEmittingMiddleware`
     /// and the configured pipeline are applied consistently.
     public func run(_ conversation: Conversation) async throws {
-        let (turnStream, turnContinuation) = AsyncStream<RunRequest>.makeStream()
+        if approvalHandler != nil,
+           !connection.supportsConcurrentReceive,
+           !(approvalHandler is any TurnGatedApprovalHandler) {
+            throw AgentSessionError.approvalRequiresConcurrentReceive
+        }
+        let enteredRun = lifecycle.withLock { lifecycle -> Bool in
+            guard case .idle = lifecycle else {
+                return false
+            }
+            lifecycle = .running
+            return true
+        }
+        guard enteredRun else {
+            throw AgentSessionError.connectionAlreadyConsumed
+        }
+        defer {
+            lifecycle.withLock { $0 = .finished }
+        }
 
-        // Create TurnGate only for transports that don't support background receive
-        // (e.g., StdioTransport shares stdin with CLIPermissionHandler).
-        let turnGate: TurnGate? = transport.supportsBackgroundReceive ? nil : TurnGate()
+        let (turnStream, turnContinuation) = AsyncThrowingStream<RunRequest, Error>.makeStream(
+            bufferingPolicy: .bufferingOldest(Self.turnQueueCapacity)
+        )
+
+        // Create TurnGate only for connections that cannot receive concurrently.
+        let turnGate: TurnGate? = connection.supportsConcurrentReceive ? nil : TurnGate()
 
         // Background receive loop: captures only `self` (Sendable),
         // `turnContinuation` (Sendable), and `turnGate` (Sendable).
-        // For transports with `supportsBackgroundReceive = false`,
+        // For connections with `supportsConcurrentReceive = false`,
         // the gate pauses this loop during turn execution to avoid stdin contention.
         let receiveTask = Task { [self, turnContinuation, turnGate] in
             defer { turnContinuation.finish() }
             while !Task.isCancelled {
-                // Wait if a turn is currently executing (only for gated transports)
+                // Wait if a turn is currently executing (only for gated connections)
                 if let turnGate {
                     await turnGate.waitIfNeeded()
+                    guard !Task.isCancelled else {
+                        return
+                    }
                 }
 
                 let request: RunRequest
                 do {
-                    request = try await self.transport.receive()
-                } catch is TransportError {
-                    return
+                    guard let nextRequest = try await self.connection.receive() else {
+                        return
+                    }
+                    request = nextRequest
                 } catch is CancellationError {
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    self.abortTrackedTurns()
+                    turnContinuation.finish(throwing: CancellationError())
                     return
                 } catch {
+                    self.abortTrackedTurns()
+                    turnContinuation.finish(throwing: error)
                     return
                 }
 
@@ -208,32 +257,66 @@ public final class AgentSession: Sendable {
 
                 switch request.input {
                 case .text:
-                    #if DEBUG
-                    print("[AgentSession] queued text turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
-                    #endif
+                    self.debugLog(
+                        "[AgentSession] queued text turn sessionID=\(request.sessionID) turnID=\(request.turnID)"
+                    )
+                    // Close the receive gate before publishing the turn. The
+                    // processor may resume as soon as yield succeeds and must
+                    // never race an approval reader for the same connection.
                     turnGate?.enterTurn()
-                    turnContinuation.yield(request)
+                    switch turnContinuation.yield(request) {
+                    case .enqueued:
+                        break
+                    case .dropped:
+                        turnGate?.leaveTurn()
+                        self.abortTrackedTurns()
+                        turnContinuation.finish(throwing: AgentSessionError.requestQueueFull(Self.turnQueueCapacity))
+                        return
+                    case .terminated:
+                        turnGate?.leaveTurn()
+                        return
+                    @unknown default:
+                        turnGate?.leaveTurn()
+                        self.abortTrackedTurns()
+                        turnContinuation.finish(throwing: AgentSessionError.requestQueueFull(Self.turnQueueCapacity))
+                        return
+                    }
 
                 case .approvalResponse(let response):
-                    if let handler = self.transportApprovalHandler {
+                    if let handler = self.connectionApprovalHandler {
                         let decision = self.mapApprovalDecision(response.decision)
-                        handler.resolve(
+                        let didResolve = handler.resolve(
                             approvalID: response.approvalID,
                             decision: decision
                         )
+                        if !didResolve {
+                            let warning = RunEvent.WarningEvent(
+                                message: "Received approvalResponse for unknown approvalID '\(response.approvalID)'.",
+                                code: "APPROVAL_ID_UNKNOWN",
+                                sessionID: request.sessionID,
+                                turnID: request.turnID
+                            )
+                            do {
+                                try await self.connection.send(.warning(warning))
+                            } catch {
+                                self.abortTrackedTurns()
+                                turnContinuation.finish(throwing: error)
+                                return
+                            }
+                        }
                     } else {
                         let warning = RunEvent.WarningEvent(
-                            message: "Received approvalResponse for approvalID '\(response.approvalID)' but no TransportApprovalHandler is configured. The response was dropped.",
+                            message: "Received approvalResponse for approvalID '\(response.approvalID)' but no ConnectionApprovalHandler is configured. The response was dropped.",
                             code: "APPROVAL_HANDLER_MISSING",
                             sessionID: request.sessionID,
                             turnID: request.turnID
                         )
                         do {
-                            try await self.transport.send(.warning(warning))
+                            try await self.connection.send(.warning(warning))
                         } catch {
-                            #if DEBUG
-                            print("[AgentSession] failed to send warning: \(error)")
-                            #endif
+                            self.abortTrackedTurns()
+                            turnContinuation.finish(throwing: error)
+                            return
                         }
                     }
 
@@ -257,55 +340,100 @@ public final class AgentSession: Sendable {
 
         // Turn processor: runs in the current async context (no Sendable
         // boundary crossing for conversation). Processes turns sequentially.
-        for await request in turnStream {
-            #if DEBUG
-            print("[AgentSession] processing turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
-            #endif
-            // Definitive idempotency check: the receive loop checks at receive time,
-            // but a duplicate may pass if it arrives before the first attempt completes.
-            // This check runs after the previous turn finishes (sequential processing).
-            let alreadyCompleted = completedTurns.withLock { $0.contains(request.turnID) }
-            if alreadyCompleted {
-                turnGate?.leaveTurn()
-                continue
-            }
-            let token = TurnCancellationToken()
-            turnState.withLock { state in
-                // Overwrites any sentinel (in either generation) from a previous cancelled attempt.
-                state.setToken(token, for: request.turnID)
-                if state.pendingCancels.remove(request.turnID) != nil {
-                    token.cancel()
-                }
-            }
-            let result = await executeTurn(conversation: conversation, request: request, cancellationToken: token)
-            #if DEBUG
-            print("[AgentSession] finished turn sessionID=\(request.sessionID) turnID=\(request.turnID)")
-            #endif
-            if result.status != .cancelled {
-                completedTurns.withLock { _ = $0.insert(request.turnID) }
-            }
-            let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
-            turnState.withLock { state in
-                if isTerminal {
-                    // Terminal: completedTurns guards against future cancels.
-                    state.removeToken(for: request.turnID)
-                }
-                // Cancelled: token stays as sentinel to absorb late cancels.
-                // Retry will overwrite with a fresh token.
-                state.pendingCancels.remove(request.turnID)
+        var sessionError: (any Error)?
+        await withTaskCancellationHandler {
+            do {
+                for try await request in turnStream {
+                    debugLog(
+                        "[AgentSession] processing turn sessionID=\(request.sessionID) turnID=\(request.turnID)"
+                    )
+                    // Definitive idempotency check: the receive loop checks at receive time,
+                    // but a duplicate may pass if it arrives before the first attempt completes.
+                    // This check runs after the previous turn finishes (sequential processing).
+                    let alreadyCompleted = completedTurns.withLock { $0.contains(request.turnID) }
+                    if alreadyCompleted {
+                        turnGate?.leaveTurn()
+                        continue
+                    }
+                    let token = TurnCancellationToken()
+                    let sessionAborted = turnState.withLock { state -> Bool in
+                        guard !state.isSessionAborted else {
+                            return true
+                        }
+                        // Overwrites any sentinel (in either generation) from a previous cancelled attempt.
+                        state.setToken(token, for: request.turnID)
+                        if state.pendingCancels.remove(request.turnID) != nil {
+                            token.cancel()
+                        }
+                        return false
+                    }
+                    guard !sessionAborted else {
+                        turnGate?.leaveTurn()
+                        continue
+                    }
+                    let result: RunResult
+                    do {
+                        result = try await executeTurn(
+                            conversation: conversation,
+                            request: request,
+                            cancellationToken: token
+                        )
+                    } catch {
+                        turnGate?.leaveTurn()
+                        throw error
+                    }
+                    debugLog(
+                        "[AgentSession] finished turn sessionID=\(request.sessionID) turnID=\(request.turnID)"
+                    )
+                    if result.status != .cancelled {
+                        completedTurns.withLock { _ = $0.insert(request.turnID) }
+                    }
+                    let isTerminal = completedTurns.withLock { $0.contains(request.turnID) }
+                    turnState.withLock { state in
+                        if isTerminal {
+                            // Terminal: completedTurns guards against future cancels.
+                            state.removeToken(for: request.turnID)
+                        }
+                        // Cancelled: token stays as sentinel to absorb late cancels.
+                        // Retry will overwrite with a fresh token.
+                        state.pendingCancels.remove(request.turnID)
 
-                // Rotate sentinel generations to bound memory. Sentinels survive
-                // at least one full generation cycle before eviction, ensuring
-                // late cancels within that window are absorbed (not leaked to pendingCancels).
-                state.rotateTokensIfNeeded(capacity: Self.turnStateHighWaterMark)
+                        // Rotate sentinel generations to bound memory. Sentinels survive
+                        // at least one full generation cycle before eviction, ensuring
+                        // late cancels within that window are absorbed (not leaked to pendingCancels).
+                        state.rotateTokensIfNeeded(capacity: Self.turnStateHighWaterMark)
+                    }
+                    turnGate?.leaveTurn()
+                }
+            } catch {
+                sessionError = error
             }
-            turnGate?.leaveTurn()
+        } onCancel: {
+            receiveTask.cancel()
+            abortTrackedTurns()
+            turnContinuation.finish(throwing: CancellationError())
         }
 
-        // Clean shutdown
+        receiveTask.cancel()
+        connectionApprovalHandler?.rejectAll(error: sessionError ?? CancellationError())
+
+        do {
+            try await connection.shutdown()
+        } catch {
+            if let existingError = sessionError {
+                sessionError = AgentSessionError.sessionAndShutdownFailed(
+                    session: existingError.localizedDescription,
+                    shutdown: error.localizedDescription
+                )
+            } else {
+                sessionError = error
+            }
+        }
         _ = await receiveTask.result
-        transportApprovalHandler?.rejectAll(error: CancellationError())
-        await transport.close()
+
+        if let sessionError {
+            throw sessionError
+        }
     }
 
     // MARK: - Convenience Run (tools + pipeline)
@@ -321,8 +449,8 @@ public final class AgentSession: Sendable {
     /// ## Usage
     ///
     /// ```swift
-    /// let transport = StdioTransport(prompt: "> ")
-    /// let session = AgentSession(transport: transport)
+    /// let connection = StdioConnection(prompt: "> ")
+    /// let session = AgentSession(connection: connection)
     /// try await session.run(
     ///     model: myModel,
     ///     tools: [ReadTool(), WriteTool(), ExecuteCommandTool()]
@@ -367,8 +495,8 @@ public final class AgentSession: Sendable {
     /// ## Usage
     ///
     /// ```swift
-    /// let transport = StdioTransport(prompt: "> ")
-    /// let session = AgentSession(transport: transport)
+    /// let connection = StdioConnection(prompt: "> ")
+    /// let session = AgentSession(connection: connection)
     /// try await session.run(
     ///     tools: [ReadTool(), WriteTool(), ExecuteCommandTool()]
     /// ) {
@@ -407,89 +535,46 @@ public final class AgentSession: Sendable {
         conversation: Conversation,
         request: RunRequest,
         cancellationToken: TurnCancellationToken
-    ) async -> RunResult {
-        let transport = self.transport
+    ) async throws -> RunResult {
+        let connection = self.connection
+        let deliveryFailure = EventDeliveryFailure()
         let executor = AgentTurnExecutor(
             conversation: conversation,
             approvalHandler: approvalHandler
         ) { event in
             do {
-                try await transport.send(event)
+                try await connection.send(event)
             } catch {
-                // The session loop will observe transport closure separately.
+                deliveryFailure.record(error)
+                cancellationToken.cancel()
             }
         }
-        return await executor.execute(request: request, cancellationToken: cancellationToken)
+        let result = await executor.execute(request: request, cancellationToken: cancellationToken)
+        if let description = deliveryFailure.errorDescription {
+            throw AgentSessionError.eventDeliveryFailed(description)
+        }
+        return result
     }
 
     // MARK: - Helpers
 
-    /// Maps an `ApprovalDecision` (from transport) to `PermissionResponse` (for middleware).
+    private func abortTrackedTurns() {
+        let tokens = turnState.withLock { state in
+            state.isSessionAborted = true
+            return Array(state.tokens.values) + Array(state.previousTokens.values)
+        }
+        for token in tokens {
+            token.cancel()
+        }
+    }
+
+    /// Maps an `ApprovalDecision` from the connection to a middleware response.
     private func mapApprovalDecision(_ decision: ApprovalDecision) -> PermissionResponse {
         switch decision {
         case .allowOnce: .allowOnce
         case .alwaysAllow: .alwaysAllow
         case .deny: .deny
         case .denyAndBlock: .denyAndBlock
-        }
-    }
-}
-
-// MARK: - TurnGate
-
-/// Controls the receive loop for transports that cannot receive while a turn executes.
-///
-/// When `StdioTransport` is used with `CLIPermissionHandler`, both compete for stdin.
-/// `TurnGate` pauses the receive loop during turn execution to prevent this contention.
-final class TurnGate: Sendable {
-    private let state: Mutex<GateState>
-
-    private struct GateState {
-        var inTurn: Bool = false
-        var waiters: [CheckedContinuation<Void, Never>] = []
-    }
-
-    init() {
-        self.state = Mutex(GateState())
-    }
-
-    /// Called from the receive loop when a `.text` request is forwarded to the turn processor.
-    /// Marks that a turn is about to execute, causing subsequent `waitIfNeeded()` calls to suspend.
-    func enterTurn() {
-        state.withLock { $0.inTurn = true }
-    }
-
-    /// Called from the turn processor after a turn completes.
-    /// Resumes the receive loop so it can read the next request.
-    func leaveTurn() {
-        let waiters = state.withLock { state in
-            state.inTurn = false
-            let w = state.waiters
-            state.waiters = []
-            return w
-        }
-        for waiter in waiters {
-            waiter.resume()
-        }
-    }
-
-    /// Called at the top of the receive loop. Suspends if a turn is currently executing.
-    func waitIfNeeded() async {
-        let shouldWait: Bool = state.withLock { $0.inTurn }
-        guard shouldWait else { return }
-
-        await withCheckedContinuation { continuation in
-            let resumed = state.withLock { state -> Bool in
-                if state.inTurn {
-                    state.waiters.append(continuation)
-                    return false
-                } else {
-                    return true
-                }
-            }
-            if resumed {
-                continuation.resume()
-            }
         }
     }
 }

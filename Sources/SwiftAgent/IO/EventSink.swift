@@ -30,32 +30,19 @@ import Synchronization
 ///     }
 /// }
 /// ```
-public final class EventSink: @unchecked Sendable {
-
-    private let _continuation: AsyncStream<RunEvent>.Continuation?
+public final class EventSink: Sendable {
     private let handler: @Sendable (RunEvent) async -> Void
     private let state: Mutex<State>
 
-    private struct State {
+    private struct State: Sendable {
         var isFinished = false
         var hasTextualStream = false
-    }
-
-    /// Creates an EventSink backed by an AsyncStream continuation.
-    ///
-    /// Events emitted to this sink are yielded to the stream, which can
-    /// be consumed by the transport adapter.
-    public init(continuation: AsyncStream<RunEvent>.Continuation) {
-        self._continuation = continuation
-        self.state = Mutex(State())
-        self.handler = { event in
-            continuation.yield(event)
-        }
+        var deliveryTail: Task<Void, Never>?
+        var finishTask: Task<Void, Never>?
     }
 
     /// Creates an EventSink backed by a closure.
     public init(handler: @escaping @Sendable (RunEvent) async -> Void) {
-        self._continuation = nil
         self.state = Mutex(State())
         self.handler = handler
     }
@@ -65,17 +52,26 @@ public final class EventSink: @unchecked Sendable {
 
     /// Emits an event to the sink. No-op after `finish()` has been called.
     public func emit(_ event: RunEvent) async {
-        let finished = state.withLock { state -> Bool in
+        let handler = self.handler
+        let delivery = state.withLock { state -> Task<Void, Never>? in
+            guard !state.isFinished else {
+                return nil
+            }
             if case .tokenDelta = event {
                 state.hasTextualStream = true
             }
             if case .reasoningDelta = event {
                 state.hasTextualStream = true
             }
-            return state.isFinished
+            let previous = state.deliveryTail
+            let delivery = Task {
+                await previous?.value
+                await handler(event)
+            }
+            state.deliveryTail = delivery
+            return delivery
         }
-        guard !finished else { return }
-        await handler(event)
+        await delivery?.value
     }
 
     /// Emits a token delta event.
@@ -103,32 +99,23 @@ public final class EventSink: @unchecked Sendable {
         state.withLock(\.hasTextualStream)
     }
 
-    /// Signals that the event stream for this turn is finished.
-    public func finish() {
-        state.withLock { $0.isFinished = true }
-        _continuation?.finish()
+    /// Rejects subsequent events and drains every delivery already accepted.
+    public func finish() async {
+        let finishTask = state.withLock { state -> Task<Void, Never> in
+            if let finishTask = state.finishTask {
+                return finishTask
+            }
+            state.isFinished = true
+            let pendingDelivery = state.deliveryTail
+            state.deliveryTail = nil
+            let finishTask = Task<Void, Never> {
+                if let pendingDelivery {
+                    await pendingDelivery.value
+                }
+            }
+            state.finishTask = finishTask
+            return finishTask
+        }
+        await finishTask.value
     }
-}
-
-// MARK: - Contextable Conformance (manual)
-
-/// ContextKey for EventSink, enabling `@Context var events: EventSink`.
-public enum EventSinkContext: ContextKey {
-    @TaskLocal private static var _current: EventSink?
-
-    public static var defaultValue: EventSink { .null }
-
-    public static var current: EventSink { _current ?? defaultValue }
-
-    public static func withValue<T: Sendable>(
-        _ value: EventSink,
-        operation: nonisolated(nonsending) () async throws -> T
-    ) async rethrows -> T {
-        try await $_current.withValue(value, operation: operation)
-    }
-}
-
-extension EventSink: Contextable {
-    public static var defaultValue: EventSink { .null }
-    public typealias ContextKeyType = EventSinkContext
 }

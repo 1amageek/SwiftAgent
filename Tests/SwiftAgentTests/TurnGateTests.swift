@@ -30,7 +30,7 @@ struct TurnGateTests {
     }
 
     @Test("waitIfNeeded suspends during active turn", .timeLimit(.minutes(1)))
-    func waitSuspendsDuringTurn() async {
+    func waitSuspendsDuringTurn() async throws {
         let gate = TurnGate()
         gate.enterTurn()
 
@@ -42,7 +42,7 @@ struct TurnGateTests {
         }
 
         // Give the waiter time to suspend
-        try? await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(100))
         #expect(resumed.withLock { $0 } == false)
 
         // Leave turn should resume the waiter
@@ -52,7 +52,7 @@ struct TurnGateTests {
     }
 
     @Test("Multiple waiters are all resumed on leaveTurn", .timeLimit(.minutes(1)))
-    func multipleWaitersResumed() async {
+    func multipleWaitersResumed() async throws {
         let gate = TurnGate()
         gate.enterTurn()
 
@@ -66,7 +66,7 @@ struct TurnGateTests {
         }
 
         // Give waiters time to suspend
-        try? await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(100))
         #expect(counter.value == 0)
 
         gate.leaveTurn()
@@ -78,7 +78,7 @@ struct TurnGateTests {
     }
 
     @Test("Gate can be reused across cycles", .timeLimit(.minutes(1)))
-    func gateReusable() async {
+    func gateReusable() async throws {
         let gate = TurnGate()
 
         // Cycle 1
@@ -88,7 +88,7 @@ struct TurnGateTests {
             await gate.waitIfNeeded()
             resumed1.withLock { $0 = true }
         }
-        try? await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(for: .milliseconds(50))
         gate.leaveTurn()
         _ = await task1.result
         #expect(resumed1.withLock { $0 } == true)
@@ -100,9 +100,25 @@ struct TurnGateTests {
             await gate.waitIfNeeded()
             resumed2.withLock { $0 = true }
         }
-        try? await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(for: .milliseconds(50))
         gate.leaveTurn()
         _ = await task2.result
         #expect(resumed2.withLock { $0 } == true)
+    }
+
+    @Test("Cancelling a waiter releases it without ending the turn", .timeLimit(.minutes(1)))
+    func cancellationReleasesWaiter() async {
+        let gate = TurnGate()
+        gate.enterTurn()
+
+        let waiter = Task {
+            await gate.waitIfNeeded()
+        }
+        await Task.yield()
+        waiter.cancel()
+        _ = await waiter.result
+
+        gate.leaveTurn()
+        await gate.waitIfNeeded()
     }
 }

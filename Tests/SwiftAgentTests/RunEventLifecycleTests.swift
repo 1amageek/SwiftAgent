@@ -22,6 +22,45 @@ struct RunEventLifecycleTests {
         }
     }
 
+    final class ConcurrentDeliveryProbe: Sendable {
+        private struct State: Sendable {
+            var activeHandlers = 0
+            var maximumActiveHandlers = 0
+            var handledEvents = 0
+        }
+
+        private let state = Mutex(State())
+
+        var snapshot: (
+            maximumActiveHandlers: Int,
+            handledEvents: Int
+        ) {
+            state.withLock {
+                (
+                    maximumActiveHandlers: $0.maximumActiveHandlers,
+                    handledEvents: $0.handledEvents
+                )
+            }
+        }
+
+        func handle(_ event: RunEvent) async {
+            state.withLock {
+                $0.activeHandlers += 1
+                $0.maximumActiveHandlers = max(
+                    $0.maximumActiveHandlers,
+                    $0.activeHandlers
+                )
+            }
+            for _ in 0..<16 {
+                await Task.yield()
+            }
+            state.withLock {
+                $0.activeHandlers -= 1
+                $0.handledEvents += 1
+            }
+        }
+    }
+
     @Test("EventEmittingMiddleware emits typed tool lifecycle events and compatibility events")
     func eventMiddlewareEmitsLifecycleEvents() async throws {
         let recorder = EventRecorder()
@@ -97,6 +136,58 @@ struct RunEventLifecycleTests {
         } else {
             Issue.record("Expected toolFinished")
         }
+    }
+
+    @Test("Concurrent emissions use one ordered handler chain")
+    func concurrentEmissionsAreSerialized() async {
+        let probe = ConcurrentDeliveryProbe()
+        let sink = EventSink { event in
+            await probe.handle(event)
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<32 {
+                group.addTask {
+                    await sink.emit(.warning(RunEvent.WarningEvent(
+                        message: "event-\(index)",
+                        sessionID: "session",
+                        turnID: "turn"
+                    )))
+                }
+            }
+        }
+        await sink.finish()
+
+        let snapshot = probe.snapshot
+        #expect(snapshot.maximumActiveHandlers == 1)
+        #expect(snapshot.handledEvents == 32)
+    }
+
+    @Test("Finish is idempotent and rejects later emissions")
+    func finishRejectsLateEmissions() async {
+        let recorder = EventRecorder()
+        let sink = EventSink { event in
+            recorder.append(event)
+        }
+        let first = RunEvent.warning(RunEvent.WarningEvent(
+            message: "before",
+            sessionID: "session",
+            turnID: "turn"
+        ))
+        let late = RunEvent.warning(RunEvent.WarningEvent(
+            message: "after",
+            sessionID: "session",
+            turnID: "turn"
+        ))
+
+        await sink.emit(first)
+        async let firstFinish: Void = sink.finish()
+        async let secondFinish: Void = sink.finish()
+        _ = await (firstFinish, secondFinish)
+        await sink.emit(late)
+
+        #expect(recorder.events.count == 1)
+        #expect(Self.kind(recorder.events[0]) == "warning")
     }
 
     private static func kind(_ event: RunEvent) -> String {

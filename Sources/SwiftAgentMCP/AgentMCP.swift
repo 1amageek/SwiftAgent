@@ -1,219 +1,44 @@
-//
-//  AgentMCP.swift
-//  SwiftAgentMCP
-//
-//  Created by SwiftAgent on 2025/01/31.
-//
-
-/// SwiftAgentMCP provides MCP (Model Context Protocol) integration for SwiftAgent.
+/// SwiftAgentMCP owns the boundary between SwiftAgent and the upstream MCP SDK.
 ///
-/// This module enables SwiftAgent to use tools, resources, and prompts from MCP servers.
-/// MCP tools are automatically converted to Tool protocol for seamless integration.
-/// Implementation follows standard MCP conventions.
-///
-/// ## Overview
-///
-/// MCP (Model Context Protocol) is a standard protocol for providing tools, resources,
-/// and prompts to language models. SwiftAgentMCP bridges MCP servers with SwiftAgent,
-/// allowing you to use MCP tools in your agent workflows.
-///
-/// ## Features
-///
-/// - **Standard naming**: Tool names use `mcp:servername:toolname` format
-/// - **Configuration file support**: Load from `.mcp.json` files with `${VAR}` expansion
-/// - **Multiple server management**: Connect to multiple MCP servers via `MCPClientManager`
-/// - **Transport options**: stdio, HTTP, SSE (Server-Sent Events)
-/// - **Authentication**: OAuth 2.0, Bearer token, Basic auth with proactive token refresh
-/// - **Timeout configuration**: Configurable startup and tool execution timeouts
-/// - **Server enable/disable**: Dynamically enable or disable servers
-///
-/// ## Quick Start
+/// Client connections use either stdio or MCP Streamable HTTP. Configuration
+/// is validated before any process or network resource is created. HTTP
+/// authorization is separate from ordinary headers, and obsolete HTTP/SSE
+/// transport cases are rejected instead of silently mapped.
 ///
 /// ```swift
-/// import SwiftAgent
-/// import SwiftAgentMCP
-///
-/// // Load from search paths
-/// let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
-///
-/// // Get all MCP-native tool descriptors from all connected servers
-/// let discoveredTools = try await manager.allTools()
-/// let tools = try discoveredTools.swiftAgentTools()
-///
-/// // Use with LanguageModelSession
-/// let session = LanguageModelSession(model: model, tools: tools) {
-///     Instructions("...")
-/// }
-///
-/// // Server management
-/// await manager.disable(serverName: "filesystem")
-/// await manager.enable(serverName: "filesystem")
-///
-/// // Cleanup
-/// await manager.disconnectAll()
+/// let manager = try await MCPClientManager.load(
+///     searchPaths: [".mcp.json"]
+/// )
+/// let tools = try await manager.allSwiftAgentTools()
+/// try await manager.disconnectAll()
 /// ```
 ///
-/// ## Manual Configuration
+/// MCP-native discovery is represented by ``MCPDiscoveredTool``. Conversion
+/// into a model-facing SwiftAgent tool is explicit through
+/// ``MCPToolAdapter``. Model-facing names use a collision-free
+/// `mcp__<server-byte-count>_<server>__<tool>` encoding.
 ///
 /// ```swift
-/// // Create manager
-/// let manager = MCPClientManager()
-///
-/// // Connect to a stdio server
-/// try await manager.connect(config: MCPServerConfig(
-///     name: "github",
-///     transport: .stdio(
-///         command: "docker",
-///         arguments: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"],
-///         environment: ["GITHUB_TOKEN": "..."]
-///     )
-/// ))
-///
-/// // Connect to an SSE server
-/// try await manager.connect(config: MCPServerConfig(
-///     name: "slack",
-///     transport: .sse(
-///         endpoint: URL(string: "https://slack-mcp.example.com/sse")!,
-///         headers: ["Authorization": "Bearer ..."]
-///     )
-/// ))
-///
-/// // Get tools
-/// let discoveredTools = try await manager.allTools()
-/// let tools = try discoveredTools.swiftAgentTools()
-/// // Tool names: mcp:github:get_issue, mcp:slack:send_message, etc.
-/// ```
-///
-/// ## Configuration File (.mcp.json)
-///
-/// Standard MCP configuration format with environment variable expansion:
-///
-/// ```json
-/// {
-///   "mcpServers": {
-///     "github": {
-///       "command": "docker",
-///       "args": ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"],
-///       "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
-///     },
-///     "slack": {
-///       "url": "https://slack-mcp.example.com/sse",
-///       "transport": "sse",
-///       "auth": {
-///         "type": "bearer",
-///         "token": "${SLACK_TOKEN}"
-///       }
-///     },
-///     "api": {
-///       "url": "https://api.example.com/mcp",
-///       "transport": "http",
-///       "timeout": 60000,
-///       "toolTimeout": 300000
-///     }
-///   }
-/// }
-/// ```
-///
-/// ## Transport Options
-///
-/// | Transport | Config | MCP SDK Implementation |
-/// |-----------|--------|------------------------|
-/// | stdio | `command`, `args`, `env` | `StdioTransport` |
-/// | HTTP | `url`, `transport: "http"` | `HTTPClientTransport(streaming: false)` |
-/// | SSE | `url`, `transport: "sse"` | `HTTPClientTransport(streaming: true)` |
-///
-/// ## Authentication
-///
-/// Supports OAuth 2.0, Bearer, and Basic authentication with proactive token refresh
-/// (refreshes 5 minutes before expiration):
-///
-/// ```json
-/// {
-///   "auth": {
-///     "type": "oauth2",
-///     "authorizationUrl": "https://example.com/oauth/authorize",
-///     "tokenUrl": "https://example.com/oauth/token",
-///     "clientId": "${CLIENT_ID}",
-///     "scopes": ["read", "write"]
-///   }
-/// }
-/// ```
-///
-/// ## Timeout Configuration
-///
-/// Configure via environment variables or JSON:
-///
-/// | Setting | Environment Variable | JSON Field | Default |
-/// |---------|---------------------|------------|---------|
-/// | Startup | `MCP_TIMEOUT` | `timeout` | 30s |
-/// | Tool Execution | `MCP_TOOL_TIMEOUT` | `toolTimeout` | 120s |
-///
-/// ## Permission Integration
-///
-/// MCP tool names follow the format `mcp:servername:toolname`, enabling
-/// per-server permission rules:
-///
-/// ```swift
-/// let security = SecurityConfiguration.standard
-///     .allowing(.mcp("github"))      // Allow all GitHub tools (mcp:github:*)
-///     .denying(.mcp("filesystem"))   // Deny filesystem tools (mcp:filesystem:*)
-/// ```
-///
-/// ## Single Server Usage
-///
-/// For simple cases with a single server:
-///
-/// ```swift
-/// let config = MCPServerConfig(
-///     name: "filesystem",
-///     transport: .stdio(
-///         command: "/usr/local/bin/npx",
-///         arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+/// let configuration = try MCPServerConfig(
+///     name: "remote",
+///     transport: .streamableHTTP(
+///         endpoint: URL(string: "https://mcp.example.com/rpc")!,
+///         streaming: true
 ///     ),
-///     timeout: MCPTimeoutConfig(startup: .seconds(60), toolExecution: .seconds(300))
+///     authorization: .bearer(token: token)
 /// )
-///
-/// let mcpClient = try await MCPClient.connect(config: config)
-/// defer { Task { await mcpClient.disconnect() } }
-///
-/// let discoveredTools = try await mcpClient.discoveredTools()
-/// let mcpTools = try discoveredTools.swiftAgentTools()
+/// let client = try await MCPClient.connect(config: configuration)
+/// let tools = try await client.swiftAgentTools()
+/// try await client.disconnect()
 /// ```
 ///
-/// ## Resources and Prompts
-///
-/// ```swift
-/// // List and read resources
-/// let resources = try await mcpClient.listResources()
-/// let content = try await mcpClient.resourceAsText(uri: "file:///path/to/file.txt")
-///
-/// // List and get prompts
-/// let prompts = try await mcpClient.listPrompts()
-/// let (description, messages) = try await mcpClient.getPrompt(
-///     name: "code_review",
-///     arguments: ["language": "swift"]
-/// )
-/// ```
-///
-/// ## Server Status
-///
-/// ```swift
-/// // Check server status
-/// let statuses = await manager.serverStatuses()
-/// for status in statuses {
-///     print("\(status.name): connected=\(status.isConnected), enabled=\(status.isEnabled)")
-/// }
-///
-/// // Get specific client
-/// if let githubClient = await manager.client(named: "github") {
-///     let tools = try await githubClient.tools()
-/// }
-/// ```
-
+/// `MCPClientManager` retains connection ownership. It exposes operations and
+/// discovered tools rather than mutable client references, so external code
+/// cannot desynchronize manager state by disconnecting an owned client.
 import MCP
 
-/// Typealias for MCP.Tool to avoid naming collision with SwiftAgent's Tool
+/// Typealias for MCP.Tool to avoid naming collision with SwiftAgent's Tool.
 public typealias MCPTool = MCP.Tool
 
-/// Typealias for MCP.Value
+/// Typealias for MCP.Value.
 public typealias MCPValue = MCP.Value

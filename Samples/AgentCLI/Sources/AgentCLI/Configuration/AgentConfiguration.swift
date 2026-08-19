@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import AgentTools
 import SwiftAgent
 
 /// Configuration for agent setup
@@ -24,16 +25,21 @@ public struct AgentConfiguration: Sendable {
     /// Working directory for file operations
     public let workingDirectory: String
 
+    /// Explicitly policy-enforced web access. A nil value keeps networking disabled.
+    public let webDocumentFetcher: (any WebDocumentFetching)?
+
     public init(
         apiKey: String,
         model: String = "gpt-4.1",
         verbose: Bool = false,
-        workingDirectory: String = FileManager.default.currentDirectoryPath
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        webDocumentFetcher: (any WebDocumentFetching)? = nil
     ) {
         self.apiKey = apiKey
         self.model = model
         self.verbose = verbose
         self.workingDirectory = workingDirectory
+        self.webDocumentFetcher = webDocumentFetcher
     }
 
     /// Creates a LanguageModelSession with the specified tools and instructions

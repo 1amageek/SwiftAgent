@@ -88,7 +88,7 @@ public struct Context<Value: Contextable>: Sendable {
     public init() {}
 
     public var wrappedValue: Value {
-        Value.ContextKeyType.current
+        Value.current
     }
 }
 
@@ -121,21 +121,21 @@ func withContext<Key: ContextKey, T: Sendable>(
 // MARK: - ContextStep
 
 /// A Step wrapper that provides a context value during execution.
-public struct ContextStep<S: Step, Key: ContextKey>: Step {
+public struct ContextStep<S: Step, Value: Contextable>: Step {
     public typealias Input = S.Input
     public typealias Output = S.Output
 
     private let step: S
-    private let value: Key.Value
+    private let value: Value
 
-    public init(step: S, key: Key.Type, value: Key.Value) {
+    public init(step: S, value: Value) {
         self.step = step
         self.value = value
     }
 
     @discardableResult
     public func run(_ input: Input) async throws -> Output {
-        try await withContext(Key.self, value: value) {
+        try await Value.withValue(value) {
             try await step.run(input)
         }
     }
@@ -154,8 +154,8 @@ extension Step {
     /// ```
     public func context<T: Contextable>(
         _ value: T
-    ) -> ContextStep<Self, T.ContextKeyType> {
-        ContextStep(step: self, key: T.ContextKeyType.self, value: value)
+    ) -> ContextStep<Self, T> {
+        ContextStep(step: self, value: value)
     }
 }
 

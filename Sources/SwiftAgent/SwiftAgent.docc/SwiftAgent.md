@@ -94,7 +94,9 @@ Type erasure and debugging.
 - <doc:ContextGuide>
 - ``Context``
 - ``ContextKey``
+- ``ContextValueKey``
 - ``Contextable``
+- ``ContextStep``
 
 ### Session Management
 
@@ -105,6 +107,17 @@ Type erasure and debugging.
 - ``SessionStore``
 - ``FileSessionStore``
 - ``InMemorySessionStore``
+
+### Agent I/O
+
+- ``AgentSession``
+- ``AgentConnection``
+- ``AgentRequestSource``
+- ``AgentEventWriter``
+- ``StdioConnection``
+- ``StdioApprovalHandler``
+- ``ConnectionApprovalHandler``
+- ``TurnGatedApprovalHandler``
 
 ### Events
 

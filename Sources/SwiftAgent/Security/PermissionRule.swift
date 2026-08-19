@@ -14,7 +14,6 @@ import Foundation
 /// - `"Bash(git:*)"` - matches Bash tool with git commands
 /// - `"Bash(git status)"` - matches exact command
 /// - `"Write(/tmp/*)"` - matches Write to /tmp paths
-/// - `"mcp:server:*"` - wildcard for MCP tools
 ///
 /// ## Pattern Syntax
 ///
@@ -54,7 +53,6 @@ public struct PermissionRule: Sendable, Equatable, Hashable {
     /// Examples:
     /// - `"Read"` → `"Read"`
     /// - `"Bash(git:*)"` → `"Bash"`
-    /// - `"mcp:server:*"` → `"mcp:server:*"`
     public var toolName: String {
         if let parenIndex = pattern.firstIndex(of: "(") {
             return String(pattern[..<parenIndex])
@@ -294,13 +292,6 @@ extension PermissionRule {
         PermissionRule("Read(\(pathPattern))")
     }
 
-    /// Creates a rule that matches all MCP tools from a server.
-    ///
-    /// - Parameter serverName: The MCP server name.
-    /// - Returns: A permission rule.
-    public static func mcp(_ serverName: String) -> PermissionRule {
-        PermissionRule("mcp:\(serverName):*")
-    }
 }
 
 // MARK: - ExpressibleByStringLiteral

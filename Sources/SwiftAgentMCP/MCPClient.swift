@@ -1,448 +1,662 @@
-//
-//  MCPClient.swift
-//  AgentMCP
-//
-//  Created by SwiftAgent on 2025/01/31.
-//
-
 import Foundation
-import System
-import SwiftAgent
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import MCP
+import SwiftAgent
 
-// MARK: - MCP Server Configuration
-
-/// Transport configuration for MCP server connection
-public enum MCPTransportConfig: Sendable {
-    /// Stdio transport - communicate with a local subprocess
-    case stdio(
-        command: String,
-        arguments: [String] = [],
-        environment: [String: String]? = nil,
-        workingDirectory: URL? = nil
-    )
-
-    /// HTTP transport - communicate with a remote server
-    case http(
-        endpoint: URL,
-        headers: [String: String] = [:]
-    )
-
-    /// SSE (Server-Sent Events) transport - for real-time bidirectional communication
-    case sse(
-        endpoint: URL,
-        headers: [String: String] = [:],
-        autoReconnect: Bool = true
-    )
-}
-
-// MARK: - Timeout Configuration
-
-/// Timeout configuration for MCP operations
-public struct MCPTimeoutConfig: Sendable {
-
-    /// Server startup timeout (default: 30 seconds)
-    public let startup: Duration
-
-    /// Tool execution timeout (default: 120 seconds)
-    public let toolExecution: Duration
-
-    /// Default timeout configuration
-    public static let `default` = MCPTimeoutConfig(
-        startup: .seconds(30),
-        toolExecution: .seconds(120)
-    )
-
-    public init(startup: Duration, toolExecution: Duration) {
-        self.startup = startup
-        self.toolExecution = toolExecution
-    }
-
-    /// Load timeout configuration from environment variables
-    ///
-    /// - `MCP_TIMEOUT`: Server startup timeout in milliseconds
-    /// - `MCP_TOOL_TIMEOUT`: Tool execution timeout in milliseconds
-    public static func fromEnvironment() -> MCPTimeoutConfig {
-        let startup = ProcessInfo.processInfo.environment["MCP_TIMEOUT"]
-            .flatMap { Int($0) }
-            .map { Duration.milliseconds($0) } ?? .seconds(30)
-
-        let tool = ProcessInfo.processInfo.environment["MCP_TOOL_TIMEOUT"]
-            .flatMap { Int($0) }
-            .map { Duration.milliseconds($0) } ?? .seconds(120)
-
-        return MCPTimeoutConfig(startup: startup, toolExecution: tool)
-    }
-}
-
-/// Configuration for an MCP server
-public struct MCPServerConfig: Sendable {
-    /// Unique name for this server
-    public let name: String
-
-    /// Transport configuration
-    public let transport: MCPTransportConfig
-
-    /// Authentication configuration (optional)
-    public let auth: MCPConfiguration.MCPAuthConfig?
-
-    /// Timeout configuration (optional)
-    public let timeout: MCPTimeoutConfig?
-
-    /// Creates a new MCP server configuration
-    /// - Parameters:
-    ///   - name: Unique name for this server
-    ///   - transport: Transport configuration
-    ///   - auth: Authentication configuration (optional)
-    ///   - timeout: Timeout configuration (optional)
-    public init(
-        name: String,
-        transport: MCPTransportConfig,
-        auth: MCPConfiguration.MCPAuthConfig? = nil,
-        timeout: MCPTimeoutConfig? = nil
-    ) {
-        self.name = name
-        self.transport = transport
-        self.auth = auth
-        self.timeout = timeout
-    }
-}
-
-// MARK: - MCP Client
-
-/// An actor that manages connection to an MCP server and provides tools
+/// Owns one upstream MCP client, its transport, and any spawned server process.
 public actor MCPClient {
-    private let config: MCPServerConfig
-    private let client: Client
-    private let timeoutConfig: MCPTimeoutConfig
-    #if os(macOS)
-    private var process: Process?
-    private var stderrTask: Task<Void, Never>?
-    #endif
-    private var transport: (any Transport)?
-    private var isConnected: Bool = false
+    private enum State {
+        case idle
+        case connecting
+        case connected
+        case transportFailed(String)
+        case disconnecting
+        case cleanupFailed
+        case disconnected
+    }
 
-    /// The server-provided instructions captured at initialization, if any.
-    ///
-    /// MCP servers may return free-form `instructions` text in their
-    /// `initialize` response. `MCPClient` captures that string so higher-level
-    /// helpers (e.g. `MCPClientManager.sessionPayload(toolSearchName:)`) can
-    /// fold it into the enclosing session's system prompt.
+    public nonisolated let name: String
     public private(set) var instructions: String?
 
-    /// Creates a new MCP client with the given configuration
-    /// - Parameter config: The server configuration
-    private init(config: MCPServerConfig) {
+    private let config: MCPServerConfig
+    private let client: Client
+    private let timeout: MCPTimeoutConfig
+    private var state: State = .idle
+    private var connectionGeneration: UUID?
+    private var transport: (any Transport)?
+    private var transportOwner: MCPClientTransportOwner?
+    private var processLease: MCPProcessLease?
+    private var cleanupOperationID: UUID?
+    private var cleanupTask: Task<Result<Void, MCPClientError>, Never>?
+
+    private init(config: MCPServerConfig, timeout: MCPTimeoutConfig) {
+        self.name = config.name
         self.config = config
-        self.client = Client(name: SwiftAgent.Info.name, version: SwiftAgent.Info.version)
-        self.timeoutConfig = config.timeout ?? MCPTimeoutConfig.fromEnvironment()
+        self.timeout = timeout
+        self.client = Client(
+            name: SwiftAgent.Info.name,
+            version: SwiftAgent.Info.version,
+            configuration: .strict
+        )
     }
 
-    /// Connects to an MCP server using the provided configuration
-    /// - Parameter config: The server configuration
-    /// - Returns: A connected MCP client
     public static func connect(config: MCPServerConfig) async throws -> MCPClient {
-        let mcpClient = MCPClient(config: config)
-        try await mcpClient.establishConnection()
-        return mcpClient
+        let timeout: MCPTimeoutConfig
+        if let configuredTimeout = config.timeout {
+            timeout = configuredTimeout
+        } else {
+            timeout = try MCPTimeoutConfig.fromEnvironment()
+        }
+        let client = MCPClient(config: config, timeout: timeout)
+        try await client.establishConnection()
+        return client
     }
 
-    /// Establishes connection to the MCP server with timeout
-    private func establishConnection() async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            // Connection task
-            group.addTask {
-                try await self.connectTransport()
-            }
-
-            // Timeout task
-            group.addTask {
-                try await Task.sleep(for: self.timeoutConfig.startup)
-                throw MCPClientError.connectionTimeout
-            }
-
-            // Wait for first to complete (success or timeout)
+    public func disconnect() async throws {
+        switch state {
+        case .disconnected:
+            return
+        case .disconnecting:
             do {
-                try await group.next()
-                group.cancelAll()
+                try await cleanupOwnedResources()
+                state = .disconnected
             } catch {
-                group.cancelAll()
+                state = .cleanupFailed
                 throw error
             }
+            return
+        case .idle, .connecting, .connected, .transportFailed, .cleanupFailed:
+            state = .disconnecting
+            connectionGeneration = nil
+        }
+
+        do {
+            try await cleanupOwnedResources()
+            state = .disconnected
+        } catch {
+            state = .cleanupFailed
+            throw error
         }
     }
 
-    /// Connects via the configured transport
-    private func connectTransport() async throws {
+    func lifecycleSnapshot() async -> MCPClientLifecycleSnapshot {
+        await refreshTransportState()
+        switch state {
+        case .connected:
+            return MCPClientLifecycleSnapshot(
+                isConnected: true,
+                requiresCleanup: false
+            )
+        case .transportFailed, .disconnecting, .cleanupFailed:
+            return MCPClientLifecycleSnapshot(
+                isConnected: false,
+                requiresCleanup: true
+            )
+        case .idle, .connecting, .disconnected:
+            return MCPClientLifecycleSnapshot(
+                isConnected: false,
+                requiresCleanup: false
+            )
+        }
+    }
+
+    public func listTools() async throws -> [MCP.Tool] {
+        try await requireConnected()
+        var tools: [MCP.Tool] = []
+        var cursor: String?
+        var seen: Set<String> = []
+
+        for _ in 0..<config.paginationPageLimit {
+            let request: Request<ListTools>
+            if let cursor {
+                request = ListTools.request(.init(cursor: cursor))
+            } else {
+                request = ListTools.request(.init())
+            }
+            let result = try await executeRequest(
+                request,
+                operation: "tools/list",
+                timeout: timeout.requestExecution
+            )
+            tools.append(contentsOf: result.tools)
+            guard let nextCursor = result.nextCursor else {
+                return tools
+            }
+            guard seen.insert(nextCursor).inserted else {
+                throw MCPClientError.paginationCycle(
+                    server: name,
+                    operation: "tools",
+                    cursor: nextCursor
+                )
+            }
+            cursor = nextCursor
+        }
+        throw MCPClientError.paginationLimitExceeded(
+            server: name,
+            operation: "tools",
+            limit: config.paginationPageLimit
+        )
+    }
+
+    public func callTool(
+        name toolName: String,
+        arguments: [String: Value]?
+    ) async throws -> MCPToolResult {
+        try await requireConnected()
+        let request = CallTool.request(.init(name: toolName, arguments: arguments))
+        let result = try await executeRequest(
+            request,
+            operation: "tools/call/\(toolName)",
+            timeout: timeout.toolExecution
+        )
+        return MCPToolResult(
+            content: result.content,
+            structuredContent: result.structuredContent,
+            isError: result.isError ?? false
+        )
+    }
+
+    public func listResources() async throws -> [Resource] {
+        try await requireConnected()
+        var resources: [Resource] = []
+        var cursor: String?
+        var seen: Set<String> = []
+
+        for _ in 0..<config.paginationPageLimit {
+            let request: Request<ListResources>
+            if let cursor {
+                request = ListResources.request(.init(cursor: cursor))
+            } else {
+                request = ListResources.request(.init())
+            }
+            let result = try await executeRequest(
+                request,
+                operation: "resources/list",
+                timeout: timeout.requestExecution
+            )
+            resources.append(contentsOf: result.resources)
+            guard let nextCursor = result.nextCursor else {
+                return resources
+            }
+            guard seen.insert(nextCursor).inserted else {
+                throw MCPClientError.paginationCycle(
+                    server: name,
+                    operation: "resources",
+                    cursor: nextCursor
+                )
+            }
+            cursor = nextCursor
+        }
+        throw MCPClientError.paginationLimitExceeded(
+            server: name,
+            operation: "resources",
+            limit: config.paginationPageLimit
+        )
+    }
+
+    public func readResource(uri: String) async throws -> [Resource.Content] {
+        try await requireConnected()
+        let result = try await executeRequest(
+            ReadResource.request(.init(uri: uri)),
+            operation: "resources/read",
+            timeout: timeout.requestExecution
+        )
+        return result.contents
+    }
+
+    public func resourceAsText(uri: String) async throws -> String {
+        let contents = try await readResource(uri: uri)
+        var text: [String] = []
+        text.reserveCapacity(contents.count)
+        for content in contents {
+            guard let value = content.text else {
+                throw MCPClientError.nonTextResource(server: name, uri: uri)
+            }
+            text.append(value)
+        }
+        return text.joined(separator: "\n")
+    }
+
+    public func listPrompts() async throws -> [MCP.Prompt] {
+        try await requireConnected()
+        var prompts: [MCP.Prompt] = []
+        var cursor: String?
+        var seen: Set<String> = []
+
+        for _ in 0..<config.paginationPageLimit {
+            let request: Request<ListPrompts>
+            if let cursor {
+                request = ListPrompts.request(.init(cursor: cursor))
+            } else {
+                request = ListPrompts.request(.init())
+            }
+            let result = try await executeRequest(
+                request,
+                operation: "prompts/list",
+                timeout: timeout.requestExecution
+            )
+            prompts.append(contentsOf: result.prompts)
+            guard let nextCursor = result.nextCursor else {
+                return prompts
+            }
+            guard seen.insert(nextCursor).inserted else {
+                throw MCPClientError.paginationCycle(
+                    server: name,
+                    operation: "prompts",
+                    cursor: nextCursor
+                )
+            }
+            cursor = nextCursor
+        }
+        throw MCPClientError.paginationLimitExceeded(
+            server: name,
+            operation: "prompts",
+            limit: config.paginationPageLimit
+        )
+    }
+
+    public func getPrompt(
+        name: String,
+        arguments: [String: String]?
+    ) async throws -> (String?, [MCP.Prompt.Message]) {
+        try await requireConnected()
+        let result = try await executeRequest(
+            GetPrompt.request(.init(name: name, arguments: arguments)),
+            operation: "prompts/get/\(name)",
+            timeout: timeout.requestExecution
+        )
+        return (result.description, result.messages)
+    }
+
+    private func establishConnection() async throws {
+        guard case .idle = state else {
+            throw MCPClientError.notConnected(server: name)
+        }
+        state = .connecting
+
+        do {
+            let created = try await makeTransport()
+            transport = created.transport
+            transportOwner = created.owner
+            processLease = created.processLease
+            let serverName = name
+            let upstreamClient = client
+            let startupProcessLease = created.processLease
+
+            let result = try await withMCPDeadline(
+                timeout.startup,
+                timeoutError: {
+                    MCPClientError.connectionTimeout(server: serverName)
+                },
+                onCancellation: { _ in
+                    try await Self.terminateConnection(
+                        client: upstreamClient,
+                        processLease: startupProcessLease
+                    )
+                },
+                operation: {
+                    try await upstreamClient.connect(transport: created.transport)
+                }
+            )
+            if let failure = await created.owner.operationalFailure() {
+                throw failure
+            }
+            instructions = result.instructions
+            connectionGeneration = UUID()
+            state = .connected
+        } catch {
+            let connectionError = Self.normalizedCancellation(
+                error,
+                server: name,
+                operation: "connect"
+            )
+            state = .disconnecting
+            connectionGeneration = nil
+            do {
+                try await cleanupOwnedResources()
+                state = .disconnected
+            } catch let cleanupError {
+                state = .cleanupFailed
+                throw MCPClientError.connectionAndCleanupFailed(
+                    server: name,
+                    connection: connectionError.localizedDescription,
+                    cleanup: cleanupError.localizedDescription
+                )
+            }
+            throw connectionError
+        }
+    }
+
+    private func makeTransport() async throws -> (
+        transport: any Transport,
+        owner: MCPClientTransportOwner,
+        processLease: MCPProcessLease?
+    ) {
+        let rawTransport: any Transport
+        let processLease: MCPProcessLease?
         switch config.transport {
         case .stdio(let command, let arguments, let environment, let workingDirectory):
-            #if os(macOS)
-            try await connectViaStdio(
+            #if os(macOS) || os(Linux)
+            let launched = try MCPProcessLease.launch(
+                serverName: name,
                 command: command,
                 arguments: arguments,
                 environment: environment,
                 workingDirectory: workingDirectory
             )
+            rawTransport = launched.transport
+            processLease = launched.lease
             #else
-            throw MCPClientError.connectionFailed("stdio transport is only available on macOS")
+            throw MCPClientError.processLaunchFailed(
+                server: name,
+                reason: "Child-process stdio is unavailable on this platform"
+            )
             #endif
-        case .http(let endpoint, let headers):
-            try await connectViaHTTP(endpoint: endpoint, headers: headers)
-        case .sse(let endpoint, let headers, _):
-            try await connectViaSSE(endpoint: endpoint, headers: headers)
-        }
-    }
 
-    #if os(macOS)
-    /// Connects via stdio transport (subprocess) — macOS only
-    private func connectViaStdio(
-        command: String,
-        arguments: [String],
-        environment: [String: String]?,
-        workingDirectory: URL?
-    ) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command)
-        process.arguments = arguments
-
-        if let env = environment {
-            var processEnv = ProcessInfo.processInfo.environment
-            for (key, value) in env {
-                processEnv[key] = value
-            }
-            process.environment = processEnv
-        }
-
-        if let workDir = workingDirectory {
-            process.currentDirectoryURL = workDir
+        case .streamableHTTP(let endpoint, let streaming, let headers):
+            let authorizationHeader = config.authorization.staticAuthorizationHeader()
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpShouldSetCookies = false
+            configuration.httpCookieStorage = nil
+            configuration.urlCredentialStorage = nil
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            configuration.urlCache = nil
+            rawTransport = HTTPClientTransport(
+                endpoint: endpoint,
+                configuration: configuration,
+                streaming: streaming,
+                authorizer: config.authorization.makeAuthorizer(),
+                requestModifier: { request in
+                    var request = request
+                    for (name, value) in headers {
+                        request.setValue(value, forHTTPHeaderField: name)
+                    }
+                    if let authorizationHeader {
+                        request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+                    }
+                    return request
+                }
+            )
+            processLease = nil
         }
 
-        let stdinPipe = Pipe()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-        self.process = process
-
-        let stderrHandle = stderrPipe.fileHandleForReading
-        stderrTask = Task.detached {
-            while true {
-                let data = stderrHandle.availableData
-                if data.isEmpty { break }
-            }
-        }
-
-        let inputFD = FileDescriptor(rawValue: stdoutPipe.fileHandleForReading.fileDescriptor)
-        let outputFD = FileDescriptor(rawValue: stdinPipe.fileHandleForWriting.fileDescriptor)
-
-        let transport = StdioTransport(
-            input: inputFD,
-            output: outputFD
+        let owner = MCPClientTransportOwner(
+            serverName: name,
+            transport: rawTransport,
+            maximumMessageBytes: config.maximumMessageBytes,
+            logger: await rawTransport.logger
         )
-        self.transport = transport
-
-        let result = try await client.connect(transport: transport)
-        self.instructions = result.instructions
-        isConnected = true
-    }
-    #endif
-
-    /// Connects via HTTP transport (standard request-response mode)
-    ///
-    /// - Note: Custom headers are currently not supported by the MCP SDK's HTTPClientTransport.
-    ///   This is a known limitation. For OAuth authentication, consider using bearer tokens
-    ///   configured through the MCP server's native authentication mechanism.
-    private func connectViaHTTP(endpoint: URL, headers: [String: String] = [:]) async throws {
-        // TODO: MCP SDK HTTPClientTransport does not currently support custom headers.
-        // When the SDK adds support, inject headers here for OAuth/bearer auth.
-        // streaming: false = standard HTTP request-response mode
-        let transport = HTTPClientTransport(endpoint: endpoint, streaming: false)
-        self.transport = transport
-
-        let result = try await client.connect(transport: transport)
-        self.instructions = result.instructions
-        isConnected = true
+        return (owner, owner, processLease)
     }
 
-    /// Connects via SSE (Server-Sent Events) transport
-    ///
-    /// SSE mode uses HTTPClientTransport with `streaming: true` to enable
-    /// Server-Sent Events for real-time server-pushed updates.
-    ///
-    /// - Note: Custom headers are currently not supported by the MCP SDK's HTTPClientTransport.
-    ///   This is a known limitation. For OAuth authentication, consider using bearer tokens
-    ///   configured through the MCP server's native authentication mechanism.
-    private func connectViaSSE(endpoint: URL, headers: [String: String] = [:]) async throws {
-        // TODO: MCP SDK HTTPClientTransport does not currently support custom headers.
-        // When the SDK adds support, inject headers here for OAuth/bearer auth.
-        // streaming: true = SSE mode for server-pushed events
-        let transport = HTTPClientTransport(endpoint: endpoint, streaming: true)
-        self.transport = transport
-
-        let result = try await client.connect(transport: transport)
-        self.instructions = result.instructions
-        isConnected = true
-    }
-
-    /// Disconnects from the MCP server
-    public func disconnect() async {
-        isConnected = false
-
-        #if os(macOS)
-        stderrTask?.cancel()
-        stderrTask = nil
-
-        if let process = process, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+    private func requireConnected() async throws {
+        await refreshTransportState()
+        if case .transportFailed(let reason) = state {
+            throw MCPClientError.transportTerminated(
+                server: name,
+                reason: reason
+            )
         }
-        process = nil
-        #endif
+        guard case .connected = state, connectionGeneration != nil else {
+            throw MCPClientError.notConnected(server: name)
+        }
+    }
 
+    private func requireConnected(
+        generation expectedGeneration: UUID
+    ) async throws {
+        try await requireConnected()
+        guard case .connected = state,
+              connectionGeneration == expectedGeneration else {
+            throw MCPClientError.notConnected(server: name)
+        }
+    }
+
+    private func executeRequest<M: MCP.Method>(
+        _ request: Request<M>,
+        operation: String,
+        timeout duration: Duration
+    ) async throws -> M.Result {
+        try Task.checkCancellation()
+        try await requireConnected()
+        guard let expectedGeneration = connectionGeneration else {
+            throw MCPClientError.notConnected(server: name)
+        }
+        let context = try await client.send(request)
+        let serverName = name
+        let connectionOwner = self
+
+        do {
+            let result = try await withMCPDeadline(
+                duration,
+                timeoutError: {
+                    MCPClientError.requestTimeout(
+                        server: serverName,
+                        operation: operation
+                    )
+                },
+                onCancellation: { cancellation in
+                    try await connectionOwner.cancelConnectionForRequest(
+                        expectedGeneration: expectedGeneration,
+                        operation: operation,
+                        cancellation: cancellation
+                    )
+                },
+                operation: {
+                    try await context.value
+                }
+            )
+            try await requireConnected(generation: expectedGeneration)
+            return result
+        } catch {
+            let requestError = Self.normalizedCancellation(
+                error,
+                server: name,
+                operation: operation
+            )
+            if Self.requiresForcedDisconnection(requestError),
+               shouldFinishForcedDisconnection(
+                   expectedGeneration: expectedGeneration
+               ) {
+                try await finishForcedDisconnection(after: requestError)
+            } else {
+                await refreshTransportState()
+                if case .transportFailed(let reason) = state {
+                    throw MCPClientError.transportTerminated(
+                        server: name,
+                        reason: reason
+                    )
+                }
+            }
+            throw requestError
+        }
+    }
+
+    private func finishForcedDisconnection(
+        after operationError: any Error
+    ) async throws {
+        state = .disconnecting
+        connectionGeneration = nil
+        do {
+            try await cleanupOwnedResources()
+            state = .disconnected
+        } catch {
+            state = .cleanupFailed
+            throw MCPClientError.requestCancellationAndCleanupFailed(
+                server: name,
+                cancellation: operationError.localizedDescription,
+                cleanup: error.localizedDescription
+            )
+        }
+    }
+
+    private func cancelConnectionForRequest(
+        expectedGeneration: UUID,
+        operation: String,
+        cancellation: MCPDeadlineCancellation
+    ) async throws {
+        switch state {
+        case .connected:
+            guard connectionGeneration == expectedGeneration else {
+                return
+            }
+            state = .disconnecting
+            connectionGeneration = nil
+        case .transportFailed, .cleanupFailed:
+            state = .disconnecting
+            connectionGeneration = nil
+        case .disconnecting:
+            break
+        case .disconnected:
+            return
+        case .idle, .connecting:
+            return
+        }
+
+        do {
+            try await cleanupOwnedResources()
+            state = .disconnected
+        } catch {
+            state = .cleanupFailed
+            let reason: String
+            switch cancellation {
+            case .timedOut:
+                reason = "MCP request '\(operation)' exceeded its deadline"
+            case .callerCancelled:
+                reason = "MCP request '\(operation)' caller was cancelled"
+            }
+            throw MCPClientError.requestCancellationAndCleanupFailed(
+                server: name,
+                cancellation: reason,
+                cleanup: error.localizedDescription
+            )
+        }
+    }
+
+    private func refreshTransportState() async {
+        guard case .connected = state,
+              let failure = await transportOwner?.operationalFailure() else {
+            return
+        }
+        connectionGeneration = nil
+        state = .transportFailed(failure.localizedDescription)
+    }
+
+    private func cleanupOwnedResources() async throws {
+        if let cleanupOperationID, let cleanupTask {
+            let result = await cleanupTask.value
+            finishCleanupOperation(cleanupOperationID)
+            try result.get()
+            return
+        }
+
+        let operationID = UUID()
+        let task = Task { [self] () -> Result<Void, MCPClientError> in
+            await performOwnedResourceCleanup()
+        }
+        cleanupOperationID = operationID
+        cleanupTask = task
+
+        let result = await task.value
+        finishCleanupOperation(operationID)
+        try result.get()
+    }
+
+    private func performOwnedResourceCleanup() async -> Result<Void, MCPClientError> {
+        let lease = processLease
+        async let processResult = Self.shutdownProcess(lease)
+        await client.disconnect()
+        let result = await processResult
         transport = nil
-    }
-
-    /// Lists all available tools from the MCP server
-    /// - Returns: Array of MCP tools
-    public func listTools() async throws -> [MCP.Tool] {
-        guard isConnected else {
-            throw MCPClientError.notConnected
-        }
-        let (tools, _) = try await client.listTools()
-        return tools
-    }
-
-    /// Calls a tool on the MCP server with timeout
-    /// - Parameters:
-    ///   - name: The name of the tool
-    ///   - arguments: The arguments to pass
-    /// - Returns: The tool result content and error flag
-    /// - Throws: `MCPClientError.toolCallTimeout` if the tool execution exceeds the timeout
-    public func callTool(name: String, arguments: [String: Value]?) async throws -> ([MCP.Tool.Content], Bool) {
-        guard isConnected else {
-            throw MCPClientError.notConnected
-        }
-
-        // Execute with timeout
-        return try await withThrowingTaskGroup(of: ([MCP.Tool.Content], Bool).self) { group in
-            // Tool execution task
-            group.addTask {
-                let result = try await self.client.callTool(name: name, arguments: arguments)
-                return (result.content, result.isError ?? false)
+        transportOwner = nil
+        switch result {
+        case .success:
+            processLease = nil
+            return .success(())
+        case .failure(let error):
+            if let clientError = error as? MCPClientError {
+                return .failure(clientError)
             }
-
-            // Timeout task
-            group.addTask {
-                try await Task.sleep(for: self.timeoutConfig.toolExecution)
-                throw MCPClientError.toolCallTimeout(name)
-            }
-
-            // Wait for first to complete
-            do {
-                let result = try await group.next()!
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                throw error
-            }
+            return .failure(.processCleanupFailed(
+                server: name,
+                reasons: [error.localizedDescription]
+            ))
         }
     }
 
-    /// Lists all available resources from the MCP server
-    /// - Returns: Array of resources
-    public func listResources() async throws -> [Resource] {
-        guard isConnected else {
-            throw MCPClientError.notConnected
+    private func finishCleanupOperation(_ operationID: UUID) {
+        guard cleanupOperationID == operationID else {
+            return
         }
-        let (resources, _) = try await client.listResources()
-        return resources
+        cleanupOperationID = nil
+        cleanupTask = nil
     }
 
-    /// Reads a resource from the MCP server
-    /// - Parameter uri: The resource URI
-    /// - Returns: The resource contents
-    public func readResource(uri: String) async throws -> [Resource.Content] {
-        guard isConnected else {
-            throw MCPClientError.notConnected
+    private static func terminateConnection(
+        client: Client,
+        processLease: MCPProcessLease?
+    ) async throws {
+        async let processResult = shutdownProcess(processLease)
+        await client.disconnect()
+        try await processResult.get()
+    }
+
+    private static func shutdownProcess(
+        _ processLease: MCPProcessLease?
+    ) async -> Result<Void, any Error> {
+        #if os(macOS) || os(Linux)
+        do {
+            try await processLease?.shutdown()
+            return .success(())
+        } catch {
+            return .failure(error)
         }
-        return try await client.readResource(uri: uri)
+        #else
+        return .success(())
+        #endif
     }
 
-    /// Reads a resource and returns its text content
-    /// - Parameter uri: The resource URI
-    /// - Returns: The text content of the resource
-    public func resourceAsText(uri: String) async throws -> String {
-        let contents = try await readResource(uri: uri)
-        return contents.compactMap { $0.text }.joined(separator: "\n")
-    }
-
-    /// Lists all available prompts from the MCP server
-    /// - Returns: Array of prompts
-    public func listPrompts() async throws -> [MCP.Prompt] {
-        guard isConnected else {
-            throw MCPClientError.notConnected
+    private static func requiresForcedDisconnection(_ error: any Error) -> Bool {
+        if error is CancellationError {
+            return true
         }
-        let (prompts, _) = try await client.listPrompts()
-        return prompts
-    }
-
-    /// Gets a prompt from the MCP server
-    /// - Parameters:
-    ///   - name: The prompt name
-    ///   - arguments: The arguments to pass
-    /// - Returns: The prompt description and messages
-    public func getPrompt(name: String, arguments: [String: String]?) async throws -> (String?, [MCP.Prompt.Message]) {
-        guard isConnected else {
-            throw MCPClientError.notConnected
+        guard let clientError = error as? MCPClientError else {
+            return false
         }
-        return try await client.getPrompt(name: name, arguments: arguments)
+        switch clientError {
+        case .requestTimeout, .unexpectedCancellation:
+            return true
+        default:
+            return false
+        }
     }
 
-    /// The server name
-    public var name: String {
-        config.name
+    private static func normalizedCancellation(
+        _ error: any Error,
+        server: String,
+        operation: String
+    ) -> any Error {
+        guard error is CancellationError, !Task.isCancelled else {
+            return error
+        }
+        return MCPClientError.unexpectedCancellation(
+            server: server,
+            operation: operation
+        )
     }
-}
 
-// MARK: - MCP Client Errors
-
-/// Errors that can occur with MCP client operations
-public enum MCPClientError: Error, LocalizedError {
-    case notConnected
-    case connectionFailed(String)
-    case connectionTimeout
-    case toolCallFailed(String, String)
-    case toolCallTimeout(String)
-    case processLaunchFailed(String)
-    case serverNotFound(String)
-    case authenticationFailed(String)
-    case reconnectionFailed(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .notConnected:
-            return "MCP client is not connected"
-        case .connectionFailed(let message):
-            return "MCP connection failed: \(message)"
-        case .connectionTimeout:
-            return "MCP connection timed out"
-        case .toolCallFailed(let name, let message):
-            return "MCP tool '\(name)' call failed: \(message)"
-        case .toolCallTimeout(let name):
-            return "MCP tool '\(name)' call timed out"
-        case .processLaunchFailed(let message):
-            return "Failed to launch MCP server process: \(message)"
-        case .serverNotFound(let name):
-            return "MCP server '\(name)' not found"
-        case .authenticationFailed(let message):
-            return "MCP authentication failed: \(message)"
-        case .reconnectionFailed(let message):
-            return "MCP reconnection failed: \(message)"
+    private func shouldFinishForcedDisconnection(
+        expectedGeneration: UUID
+    ) -> Bool {
+        switch state {
+        case .connected:
+            return connectionGeneration == expectedGeneration
+        case .transportFailed:
+            return true
+        case .idle, .connecting, .disconnecting, .cleanupFailed, .disconnected:
+            return false
         }
     }
 }

@@ -106,8 +106,7 @@ The ``Context`` system propagates values through the call stack using TaskLocal:
 
 ```swift
 // Define a contextable type
-@Contextable
-struct AppConfig {
+struct AppConfig: Contextable {
     static var defaultValue: AppConfig { AppConfig(maxRetries: 3) }
     let maxRetries: Int
 }

@@ -11,7 +11,7 @@ import Foundation
 /// approval request, then delegates to the inner handler.
 ///
 /// Created by `AgentSession` and injected via `ApprovalHandlerContext`.
-final class ApprovalBridgeHandler: ApprovalHandler, @unchecked Sendable {
+final class ApprovalBridgeHandler: ApprovalHandler, Sendable {
     private let inner: any ApprovalHandler
     private let eventSink: EventSink
     private let sessionID: String

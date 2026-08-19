@@ -53,7 +53,7 @@ struct ToolSearchToolTests {
     }
 
     struct GitHubSearchTool: Tool {
-        let name = "mcp__github__search_repos"
+        let name = "mcp__6_github__search_repos"
         let description = "Search for GitHub repositories by query string"
 
         @Generable
@@ -148,7 +148,7 @@ struct ToolSearchToolTests {
 
         #expect(output.contains("\"name\":\"Weather\""))
         #expect(output.contains("\"name\":\"Calculator\""))
-        #expect(!output.contains("\"name\":\"mcp__github__search_repos\""))
+        #expect(!output.contains("\"name\":\"mcp__6_github__search_repos\""))
     }
 
     @Test("select: with unknown name produces no match for that name")
@@ -176,7 +176,7 @@ struct ToolSearchToolTests {
             "maxResults": 1,
         ]))
         // "search" appears in GitHub tool's name — should rank highest
-        #expect(output.contains("\"name\":\"mcp__github__search_repos\""))
+        #expect(output.contains("\"name\":\"mcp__6_github__search_repos\""))
     }
 
     @Test("Keyword query returns top-N by maxResults")

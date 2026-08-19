@@ -122,8 +122,7 @@ public struct AgentWorkflowExecutor: Sendable {
         let workflowContext = try renderContext(accessibleResults)
         let existingSteering = step.envelope.context?.steering ?? []
         let context = ContextPayload(
-            steering: existingSteering + [workflowContext],
-            systemOverrides: step.envelope.context?.systemOverrides
+            steering: existingSteering + [workflowContext]
         )
 
         return AgentTaskEnvelope(

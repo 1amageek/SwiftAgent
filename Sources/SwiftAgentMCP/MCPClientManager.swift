@@ -1,325 +1,461 @@
-//
-//  MCPClientManager.swift
-//  SwiftAgentMCP
-//
-//  Created by SwiftAgent on 2025/01/05.
-//
-
 import Foundation
 import SwiftAgent
 
-// MARK: - MCP Client Manager
-
-/// Manages multiple MCP server connections
-///
-/// Features:
-/// - Load configuration from `.mcp.json` files
-/// - Connect to multiple servers simultaneously
-/// - Enable/disable servers dynamically
-/// - Discover MCP-native tools from all connected servers
-/// - OAuth authentication management
-///
-/// ## Usage
-///
-/// ```swift
-/// // Load from search paths
-/// let manager = try await MCPClientManager.load(searchPaths: ["./mcp.json"])
-///
-/// // Or load from a specific file
-/// let manager = try await MCPClientManager.load(from: URL(fileURLWithPath: ".mcp.json"))
-///
-/// // Get all discovered tools from all servers
-/// let discoveredTools = try await manager.allTools()
-/// let tools = try discoveredTools.swiftAgentTools()
-///
-/// // Use with LanguageModelSession
-/// let session = LanguageModelSession(model: model, tools: tools) {
-///     Instructions("...")
-/// }
-///
-/// // Server management
-/// await manager.disable(serverName: "filesystem")
-/// await manager.enable(serverName: "filesystem")
-///
-/// // Cleanup
-/// await manager.disconnectAll()
-/// ```
+/// Owns a named set of MCP connections and serializes lifecycle changes per server.
 public actor MCPClientManager {
-
-    /// Connected MCP clients by server name
     private var clients: [String: MCPClient] = [:]
-
-    /// Server configurations for reconnection
+    private var retiredClients: [String: [MCPClient]] = [:]
     private var serverConfigs: [String: MCPServerConfig] = [:]
-
-    /// Disabled server names
     private var disabledServers: Set<String> = []
+    private var transitioningServers: Set<String> = []
+    private var isBulkTransition = false
+    private var catalogGeneration = UUID()
 
-    /// OAuth manager for authentication
-    public let oauthManager: MCPOAuthManager
+    public init() {}
 
-    /// Creates a new MCP client manager
-    public init() {
-        self.oauthManager = MCPOAuthManager()
-    }
-
-    // MARK: - Configuration Loading
-
-    /// Loads configuration from a file and connects to all servers
-    ///
-    /// - Parameter configURL: The URL of the `.mcp.json` file
-    /// - Returns: A configured and connected manager
     public static func load(from configURL: URL) async throws -> MCPClientManager {
-        let config = try MCPConfiguration.load(from: configURL)
+        let configuration = try MCPConfiguration.load(from: configURL)
             .expandEnvironmentVariables()
-
-        let manager = MCPClientManager()
-
-        for serverConfig in config.serverConfigs() {
-            await manager.storeConfig(serverConfig)
-            try await manager.connect(config: serverConfig)
-        }
-
-        return manager
+        return try await load(configuration: configuration)
     }
 
-    /// Searches for configuration in the given paths and loads the first one found
-    ///
-    /// - Parameter searchPaths: Ordered list of file paths to search
-    /// - Returns: A configured manager (may be empty if no config found)
+    public static func load(from jsonData: Data) async throws -> MCPClientManager {
+        let configuration = try MCPConfiguration.load(from: jsonData)
+            .expandEnvironmentVariables()
+        return try await load(configuration: configuration)
+    }
+
     public static func load(searchPaths: [String]) async throws -> MCPClientManager {
-        for path in searchPaths {
-            let url = URL(fileURLWithPath: path)
-            if FileManager.default.fileExists(atPath: path) {
-                return try await load(from: url)
+        guard let configuration = try MCPConfiguration.load(
+            searchPaths: searchPaths
+        ) else {
+            return MCPClientManager()
+        }
+        return try await load(
+            configuration: configuration.expandEnvironmentVariables()
+        )
+    }
+
+    public func connect(config: MCPServerConfig) async throws {
+        try beginTransition(for: config.name)
+        defer { endTransition(for: config.name) }
+        guard !disabledServers.contains(config.name) else {
+            throw MCPClientError.disabledServer(config.name)
+        }
+        try await replaceConnection(with: config)
+    }
+
+    public func disconnect(serverName: String) async throws {
+        try beginTransition(for: serverName)
+        defer { endTransition(for: serverName) }
+        guard allServers.contains(serverName) else {
+            throw MCPClientError.serverNotFound(serverName)
+        }
+        try await disconnectOwnedClient(serverName: serverName)
+        try await cleanupRetiredClients(serverName: serverName)
+    }
+
+    public func disconnectAll() async throws {
+        guard !isBulkTransition, transitioningServers.isEmpty else {
+            throw MCPClientError.serverTransitionInProgress(
+                transitioningServers.sorted().first ?? "all"
+            )
+        }
+        isBulkTransition = true
+        catalogGeneration = UUID()
+        defer { isBulkTransition = false }
+
+        var failures: [String] = []
+        let activeNames = clients.keys.sorted()
+        for name in activeNames {
+            do {
+                try await disconnectOwnedClient(serverName: name)
+            } catch {
+                failures.append("\(name): \(error.localizedDescription)")
             }
         }
-        return MCPClientManager()
-    }
-
-    /// Stores a server configuration for later reconnection
-    private func storeConfig(_ config: MCPServerConfig) {
-        serverConfigs[config.name] = config
-    }
-
-    // MARK: - Server Connection
-
-    /// Connects to an MCP server
-    ///
-    /// - Parameter config: The server configuration
-    /// - Throws: If connection fails
-    public func connect(config: MCPServerConfig) async throws {
-        // Skip if disabled
-        guard !disabledServers.contains(config.name) else {
-            return
+        let retiredNames = retiredClients.keys.sorted()
+        for name in retiredNames {
+            do {
+                try await cleanupRetiredClients(serverName: name)
+            } catch {
+                failures.append("\(name) retired: \(error.localizedDescription)")
+            }
         }
-
-        // Store config for reconnection
-        serverConfigs[config.name] = config
-
-        // Set up auth if needed
-        if let authConfig = config.auth {
-            await oauthManager.setConfig(authConfig, for: config.name)
+        if !failures.isEmpty {
+            throw MCPClientError.multipleDisconnectFailures(failures)
         }
-
-        // Connect
-        let client = try await MCPClient.connect(config: config)
-        clients[config.name] = client
     }
 
-    /// Disconnects from an MCP server
-    ///
-    /// - Parameter serverName: The name of the server to disconnect
-    public func disconnect(serverName: String) async {
-        await clients[serverName]?.disconnect()
-        clients.removeValue(forKey: serverName)
-    }
-
-    /// Disconnects from all servers
-    public func disconnectAll() async {
-        for (_, client) in clients {
-            await client.disconnect()
-        }
-        clients.removeAll()
-    }
-
-    /// Reconnects to a server using stored configuration
-    ///
-    /// - Parameter serverName: The name of the server to reconnect
-    /// - Throws: If reconnection fails
     public func reconnect(serverName: String) async throws {
-        await disconnect(serverName: serverName)
-
+        try beginTransition(for: serverName)
+        defer { endTransition(for: serverName) }
+        guard !disabledServers.contains(serverName) else {
+            throw MCPClientError.disabledServer(serverName)
+        }
         guard let config = serverConfigs[serverName] else {
             throw MCPClientError.serverNotFound(serverName)
         }
-
-        try await connect(config: config)
+        try await replaceConnection(with: config)
     }
 
-    // MARK: - Server Enable/Disable
-
-    /// Enables a server and connects to it
-    ///
-    /// - Parameter serverName: The name of the server to enable
-    /// - Throws: If connection fails
     public func enable(serverName: String) async throws {
+        try beginTransition(for: serverName)
+        defer { endTransition(for: serverName) }
+        guard let config = serverConfigs[serverName] else {
+            throw MCPClientError.serverNotFound(serverName)
+        }
+        if let client = clients[serverName] {
+            let lifecycle = await client.lifecycleSnapshot()
+            if !lifecycle.isConnected {
+                try await disconnectOwnedClient(serverName: serverName)
+            }
+        }
+        if clients[serverName] == nil {
+            let client = try await MCPClient.connect(config: config)
+            clients[serverName] = client
+        }
         disabledServers.remove(serverName)
-
-        // Reconnect if we have a config
-        if let config = serverConfigs[serverName], clients[serverName] == nil {
-            try await connect(config: config)
-        }
     }
 
-    /// Disables a server and disconnects from it
-    ///
-    /// - Parameter serverName: The name of the server to disable
-    public func disable(serverName: String) async {
+    public func disable(serverName: String) async throws {
+        try beginTransition(for: serverName)
+        defer { endTransition(for: serverName) }
+        guard serverConfigs[serverName] != nil || clients[serverName] != nil else {
+            throw MCPClientError.serverNotFound(serverName)
+        }
         disabledServers.insert(serverName)
-        await disconnect(serverName: serverName)
+        try await disconnectOwnedClient(serverName: serverName)
+        try await cleanupRetiredClients(serverName: serverName)
     }
 
-    /// Checks if a server is enabled
-    ///
-    /// - Parameter serverName: The name of the server
-    /// - Returns: Whether the server is enabled
     public func isEnabled(serverName: String) -> Bool {
-        !disabledServers.contains(serverName)
+        serverConfigs[serverName] != nil
+            && !disabledServers.contains(serverName)
     }
 
-    /// Checks if a server is connected
-    ///
-    /// - Parameter serverName: The name of the server
-    /// - Returns: Whether the server is connected
-    public func isConnected(serverName: String) -> Bool {
-        clients[serverName] != nil
-    }
-
-    // MARK: - Client Access
-
-    /// Gets a client by name
-    ///
-    /// - Parameter name: The server name
-    /// - Returns: The client if connected
-    public func client(named name: String) -> MCPClient? {
-        clients[name]
-    }
-
-    // MARK: - Tools
-
-    /// Gets all discovered MCP tools from all connected servers.
-    ///
-    /// - Returns: Array of discovered MCP tools from all servers
-    public func allTools() async throws -> [MCPDiscoveredTool] {
-        var tools: [MCPDiscoveredTool] = []
-
-        for (_, client) in clients {
-            let serverTools = try await client.discoveredTools()
-            tools.append(contentsOf: serverTools)
+    public func isConnected(serverName: String) async -> Bool {
+        guard !isBulkTransition,
+              !disabledServers.contains(serverName),
+              !transitioningServers.contains(serverName),
+              let client = clients[serverName] else {
+            return false
         }
+        let lifecycle = await client.lifecycleSnapshot()
+        guard clients[serverName] === client,
+              !isBulkTransition,
+              !disabledServers.contains(serverName),
+              !transitioningServers.contains(serverName) else {
+            return false
+        }
+        return lifecycle.isConnected
+    }
 
+    func connectedClientSnapshot() async -> [(name: String, client: MCPClient)] {
+        guard !isBulkTransition else {
+            return []
+        }
+        let unavailable = disabledServers.union(transitioningServers)
+        let candidates = clients
+            .filter { !unavailable.contains($0.key) }
+            .sorted { $0.key < $1.key }
+            .map {
+                (name: $0.key, client: $0.value)
+            }
+        var connected: [(name: String, client: MCPClient)] = []
+        connected.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            let lifecycle = await candidate.client.lifecycleSnapshot()
+            if lifecycle.isConnected,
+               clients[candidate.name] === candidate.client,
+               !isBulkTransition,
+               !disabledServers.contains(candidate.name),
+               !transitioningServers.contains(candidate.name) {
+                connected.append(candidate)
+            }
+        }
+        return connected
+    }
+
+    public func allTools() async throws -> [MCPDiscoveredTool] {
+        let expectedGeneration = catalogGeneration
+        try requireNoCatalogTransition()
+        let snapshot = await connectedClientSnapshot()
+        try requireStableCatalog(expectedGeneration)
+        var tools: [MCPDiscoveredTool] = []
+        for entry in snapshot {
+            let discovered = try await entry.client.discoveredTools()
+            try requireStableCatalog(expectedGeneration)
+            try await validateOwnedConnectedClient(entry)
+            tools.append(contentsOf: discovered)
+        }
+        try requireStableCatalog(expectedGeneration)
         return tools
     }
 
-    /// Gets all connected MCP tools bridged into SwiftAgent's `Tool` runtime.
     public func allSwiftAgentTools() async throws -> [any SwiftAgent.Tool] {
         try await allTools().swiftAgentTools()
     }
 
-    /// Gets discovered MCP tools from a specific server.
-    ///
-    /// - Parameter serverName: The server name
-    /// - Returns: Array of tools from the server
-    /// - Throws: If the server is not found
     public func tools(from serverName: String) async throws -> [MCPDiscoveredTool] {
-        guard let client = clients[serverName] else {
+        let expectedGeneration = catalogGeneration
+        guard !isBulkTransition,
+              let client = clients[serverName],
+              !disabledServers.contains(serverName),
+              !transitioningServers.contains(serverName) else {
+            if serverConfigs[serverName] != nil {
+                throw MCPClientError.notConnected(server: serverName)
+            }
             throw MCPClientError.serverNotFound(serverName)
         }
-        return try await client.discoveredTools()
+        let lifecycle = await client.lifecycleSnapshot()
+        guard lifecycle.isConnected,
+              clients[serverName] === client,
+              !isBulkTransition,
+              !disabledServers.contains(serverName),
+              !transitioningServers.contains(serverName) else {
+            throw MCPClientError.notConnected(server: serverName)
+        }
+        let tools = try await client.discoveredTools()
+        try requireStableCatalog(expectedGeneration)
+        try await validateOwnedConnectedClient((
+            name: serverName,
+            client: client
+        ))
+        return tools
     }
 
-    /// Gets SwiftAgent `Tool` adapters for a specific server.
-    public func swiftAgentTools(from serverName: String) async throws -> [any SwiftAgent.Tool] {
+    public func swiftAgentTools(
+        from serverName: String
+    ) async throws -> [any SwiftAgent.Tool] {
         try await tools(from: serverName).swiftAgentTools()
     }
 
-    // MARK: - Server Information
-
-    /// Names of connected servers
-    public var connectedServers: [String] {
-        Array(clients.keys).sorted()
+    public func connectedServerNames() async -> [String] {
+        let connected = await connectedClientSnapshot()
+        return connected.map { $0.name }
     }
 
-    /// Names of all known servers (connected + disabled)
     public var allServers: [String] {
-        Array(Set(clients.keys).union(disabledServers).union(serverConfigs.keys)).sorted()
+        Set(clients.keys)
+            .union(retiredClients.keys)
+            .union(disabledServers)
+            .union(serverConfigs.keys)
+            .sorted()
     }
 
-    /// Names of disabled servers
     public var disabledServerNames: [String] {
-        Array(disabledServers).sorted()
+        disabledServers.sorted()
     }
 
-    /// Number of connected servers
-    public var connectedCount: Int {
-        clients.count
+    public func connectedServerCount() async -> Int {
+        let connected = await connectedClientSnapshot()
+        return connected.count
     }
 
-    /// Server status information
-    public struct ServerStatus: Sendable {
-        public let name: String
-        public let isConnected: Bool
-        public let isEnabled: Bool
-    }
-
-    /// Gets status for all known servers
-    public func serverStatuses() -> [ServerStatus] {
-        allServers.map { name in
-            ServerStatus(
+    public func serverStatuses() async -> [MCPServerStatus] {
+        let names = allServers
+        var statuses: [MCPServerStatus] = []
+        statuses.reserveCapacity(names.count)
+        for name in names {
+            var lifecycle: MCPClientLifecycleSnapshot?
+            while true {
+                let candidate = clients[name]
+                let snapshot = await candidate?.lifecycleSnapshot()
+                let current = clients[name]
+                switch (candidate, current) {
+                case (.none, .none):
+                    lifecycle = nil
+                    break
+                case (.some(let candidate), .some(let current))
+                    where candidate === current:
+                    lifecycle = snapshot
+                    break
+                default:
+                    continue
+                }
+                break
+            }
+            guard allServers.contains(name) else {
+                continue
+            }
+            statuses.append(MCPServerStatus(
                 name: name,
-                isConnected: clients[name] != nil,
-                isEnabled: !disabledServers.contains(name)
-            )
+                isConnected: lifecycle?.isConnected == true
+                    && !isBulkTransition
+                    && !disabledServers.contains(name)
+                    && !transitioningServers.contains(name),
+                isEnabled: serverConfigs[name] != nil
+                    && !disabledServers.contains(name),
+                isTransitioning: isBulkTransition
+                    || transitioningServers.contains(name),
+                hasPendingCleanup: lifecycle?.requiresCleanup == true
+                    || retiredClients[name]?.isEmpty == false
+            ))
         }
-    }
-}
-
-// MARK: - Convenience Extensions
-
-extension MCPClientManager {
-
-    /// Loads and connects with environment variable expansion
-    ///
-    /// - Parameter jsonData: The JSON configuration data
-    /// - Returns: A configured manager
-    public static func load(from jsonData: Data) async throws -> MCPClientManager {
-        let config = try MCPConfiguration.load(from: jsonData)
-            .expandEnvironmentVariables()
-
-        let manager = MCPClientManager()
-
-        for serverConfig in config.serverConfigs() {
-            await manager.storeConfig(serverConfig)
-            try await manager.connect(config: serverConfig)
-        }
-
-        return manager
+        return statuses
     }
 
-    /// Adds a server configuration without connecting
-    ///
-    /// - Parameter config: The server configuration
-    public func addServer(config: MCPServerConfig) async {
+    public func addServer(config: MCPServerConfig) throws {
+        guard !isBulkTransition,
+              !transitioningServers.contains(config.name) else {
+            throw MCPClientError.serverTransitionInProgress(config.name)
+        }
+        guard serverConfigs[config.name] == nil,
+              clients[config.name] == nil,
+              retiredClients[config.name] == nil else {
+            throw MCPClientError.duplicateServer(config.name)
+        }
+        catalogGeneration = UUID()
         serverConfigs[config.name] = config
     }
 
-    /// Removes a server completely
-    ///
-    /// - Parameter serverName: The name of the server to remove
-    public func removeServer(serverName: String) async {
-        await disconnect(serverName: serverName)
+    public func removeServer(serverName: String) async throws {
+        try beginTransition(for: serverName)
+        defer { endTransition(for: serverName) }
+        guard serverConfigs[serverName] != nil || clients[serverName] != nil else {
+            throw MCPClientError.serverNotFound(serverName)
+        }
+        try await disconnectOwnedClient(serverName: serverName)
+        try await cleanupRetiredClients(serverName: serverName)
         serverConfigs.removeValue(forKey: serverName)
         disabledServers.remove(serverName)
+    }
+
+    private func replaceConnection(with config: MCPServerConfig) async throws {
+        let replacement = try await MCPClient.connect(config: config)
+        let previous = clients.updateValue(replacement, forKey: config.name)
+        serverConfigs[config.name] = config
+        guard let previous else {
+            return
+        }
+        do {
+            try await previous.disconnect()
+        } catch {
+            retiredClients[config.name, default: []].append(previous)
+            throw MCPClientError.connectionReplacementCleanupFailed(
+                server: config.name,
+                cleanup: error.localizedDescription
+            )
+        }
+    }
+
+    private func disconnectOwnedClient(serverName: String) async throws {
+        guard let client = clients[serverName] else {
+            return
+        }
+        try await client.disconnect()
+        clients.removeValue(forKey: serverName)
+    }
+
+    private func cleanupRetiredClients(serverName: String) async throws {
+        guard let retired = retiredClients[serverName], !retired.isEmpty else {
+            retiredClients.removeValue(forKey: serverName)
+            return
+        }
+        var remaining: [MCPClient] = []
+        var failures: [String] = []
+        for client in retired {
+            do {
+                try await client.disconnect()
+            } catch {
+                remaining.append(client)
+                failures.append(error.localizedDescription)
+            }
+        }
+        if remaining.isEmpty {
+            retiredClients.removeValue(forKey: serverName)
+        } else {
+            retiredClients[serverName] = remaining
+        }
+        if !failures.isEmpty {
+            throw MCPClientError.multipleDisconnectFailures(failures)
+        }
+    }
+
+    private func beginTransition(for serverName: String) throws {
+        guard !isBulkTransition,
+              transitioningServers.insert(serverName).inserted else {
+            throw MCPClientError.serverTransitionInProgress(serverName)
+        }
+        catalogGeneration = UUID()
+    }
+
+    func validateOwnedConnectedClient(
+        _ entry: (name: String, client: MCPClient)
+    ) async throws {
+        guard !isBulkTransition,
+              clients[entry.name] === entry.client,
+              !disabledServers.contains(entry.name),
+              !transitioningServers.contains(entry.name) else {
+            throw MCPClientError.notConnected(server: entry.name)
+        }
+        let lifecycle = await entry.client.lifecycleSnapshot()
+        guard lifecycle.isConnected,
+              !isBulkTransition,
+              clients[entry.name] === entry.client,
+              !disabledServers.contains(entry.name),
+              !transitioningServers.contains(entry.name) else {
+            throw MCPClientError.notConnected(server: entry.name)
+        }
+    }
+
+    func requireNoCatalogTransition() throws {
+        guard !isBulkTransition, transitioningServers.isEmpty else {
+            throw MCPClientError.serverTransitionInProgress(
+                transitioningServers.sorted().first ?? "all"
+            )
+        }
+    }
+
+    func requireStableCatalog(_ expectedGeneration: UUID) throws {
+        guard catalogGeneration == expectedGeneration,
+              !isBulkTransition,
+              transitioningServers.isEmpty else {
+            throw MCPClientError.serverCatalogChanged
+        }
+    }
+
+    func currentCatalogGeneration() -> UUID {
+        catalogGeneration
+    }
+
+    private func endTransition(for serverName: String) {
+        if transitioningServers.remove(serverName) != nil {
+            catalogGeneration = UUID()
+        }
+    }
+
+    private func registerDisabled(config: MCPServerConfig) {
+        catalogGeneration = UUID()
+        serverConfigs[config.name] = config
+        disabledServers.insert(config.name)
+    }
+
+    private static func load(
+        configuration: MCPConfiguration
+    ) async throws -> MCPClientManager {
+        let manager = MCPClientManager()
+        do {
+            for resolved in try configuration.resolvedServerConfigs() {
+                if resolved.isEnabled {
+                    try await manager.connect(config: resolved.config)
+                } else {
+                    await manager.registerDisabled(config: resolved.config)
+                }
+            }
+            return manager
+        } catch {
+            do {
+                try await manager.disconnectAll()
+            } catch let cleanupError {
+                throw MCPClientError.loadAndCleanupFailed(
+                    load: error.localizedDescription,
+                    cleanup: cleanupError.localizedDescription,
+                    recovery: manager
+                )
+            }
+            throw error
+        }
     }
 }

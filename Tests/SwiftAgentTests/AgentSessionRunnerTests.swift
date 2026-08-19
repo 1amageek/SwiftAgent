@@ -183,6 +183,30 @@ struct AgentSessionRunnerTests {
         })
     }
 
+    @Test("Unexpected operation cancellation is a failure", .timeLimit(.minutes(1)))
+    func unexpectedOperationCancellationIsFailure() async throws {
+        let configuration = AgentSessionRunnerConfiguration(
+            runtimeConfiguration: .empty
+        ) {
+            Instructions("Surface unexpected cancellation.")
+        } step: {
+            Transform { (_: Prompt) -> String in
+                throw CancellationError()
+            }
+        }
+        let runner = AgentSessionRunner(
+            model: MockLanguageModel(),
+            configuration: configuration
+        )
+
+        let result = try await runner.run(AgentTaskEnvelope(
+            input: .text("cancel internally")
+        ))
+
+        #expect(result.status == .failed)
+        #expect(result.error != nil)
+    }
+
     @Test("Stream cancellation cancels the running task", .timeLimit(.minutes(1)))
     func streamCancellationCancelsRunningTask() async throws {
         let probe = CancellationProbe()
@@ -222,21 +246,24 @@ struct AgentSessionRunnerTests {
         #expect(await probe.waitUntilCancelled())
     }
 
-    @Test("Turn timeout cancels token without waiting for non-cooperative operation", .timeLimit(.minutes(1)))
-    func turnTimeoutCancelsTokenWithoutWaiting() async throws {
+    @Test("Turn timeout cancels and drains a cooperative operation", .timeLimit(.minutes(1)))
+    func turnTimeoutDrainsCooperativeOperation() async throws {
+        let probe = CancellationProbe()
         let configuration = AgentSessionRunnerConfiguration(
             runtimeConfiguration: .empty
         ) {
-            Instructions("Never finish.")
+            Instructions("Wait until cancelled.")
         } step: {
             Transform { (_: Prompt) in
-                try await withCheckedThrowingContinuation { continuation in
-                    Task.detached {
-                        do {
-                            try await Task.sleep(for: .seconds(2))
-                            continuation.resume(returning: "late")
-                        } catch {
-                        }
+                await probe.markEntered()
+                return try await withTaskCancellationHandler {
+                    while true {
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                    return "unreachable"
+                } onCancel: {
+                    Task {
+                        await probe.markCancelled()
                     }
                 }
             }
@@ -258,16 +285,15 @@ struct AgentSessionRunnerTests {
             policy: ExecutionPolicy(timeout: .milliseconds(10))
         )
 
-        let start = ContinuousClock.now
         let result = await executor.execute(
             request: request,
             cancellationToken: token
         )
-        let elapsed = ContinuousClock.now - start
 
         #expect(result.status == .timedOut)
         #expect(token.isCancelled)
-        #expect(elapsed < .milliseconds(500))
+        #expect(await probe.waitUntilEntered())
+        #expect(await probe.waitUntilCancelled())
     }
 }
 

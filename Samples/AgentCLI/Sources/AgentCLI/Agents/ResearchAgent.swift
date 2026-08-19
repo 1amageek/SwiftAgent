@@ -17,17 +17,20 @@ public struct ClaudeResearchConfiguration: Sendable {
     public let modelName: String
     public let verbose: Bool
     public let workingDirectory: String
+    public let webDocumentFetcher: (any WebDocumentFetching)?
 
     public init(
         apiKey: String,
         modelName: String = "claude-sonnet-4-5-20250929",
         verbose: Bool = false,
-        workingDirectory: String = FileManager.default.currentDirectoryPath
+        workingDirectory: String = FileManager.default.currentDirectoryPath,
+        webDocumentFetcher: (any WebDocumentFetching)? = nil
     ) {
         self.apiKey = apiKey
         self.modelName = modelName
         self.verbose = verbose
         self.workingDirectory = workingDirectory
+        self.webDocumentFetcher = webDocumentFetcher
     }
 
     public func createSession(
@@ -111,12 +114,14 @@ private struct ClaudeResearchStep: Step {
 
     func run(_ query: String) async throws -> String {
         // Select tools optimized for research tasks
-        let tools: [any Tool] = [
-            URLFetchTool(),
+        var tools: [any Tool] = [
             ReadTool(workingDirectory: configuration.workingDirectory),
             GrepTool(workingDirectory: configuration.workingDirectory),
             GlobTool(workingDirectory: configuration.workingDirectory),
         ]
+        if let fetcher = configuration.webDocumentFetcher {
+            tools.append(URLFetchTool(fetcher: fetcher))
+        }
 
         let session = configuration.createSession(
             tools: tools,

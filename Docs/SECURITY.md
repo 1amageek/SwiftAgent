@@ -161,8 +161,11 @@ Claude Code互換のパターン構文をサポートします。
 
 | パターン | マッチ対象 |
 |---------|----------|
-| `"mcp:*"` | 全てのMCPツール |
-| `"mcp:github:*"` | github MCPサーバーの全ツール |
+| `"mcp__*"` | 全ての model-facing MCP ツール |
+| `try MCPPermissionRules.allTools(on: "github")` | github MCPサーバーの全ツール |
+
+サーバー単位のルールは名前エンコードを複製せず、`SwiftAgentMCP` の
+`MCPPermissionRules` から生成します。
 
 ### 大文字小文字の区別
 

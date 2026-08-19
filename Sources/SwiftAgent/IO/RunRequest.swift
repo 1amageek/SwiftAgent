@@ -101,15 +101,10 @@ public struct ContextPayload: Sendable, Codable {
     /// Steering messages to inject before this turn.
     public let steering: [String]?
 
-    /// System-level overrides for this turn only.
-    public let systemOverrides: [String: String]?
-
     public init(
-        steering: [String]? = nil,
-        systemOverrides: [String: String]? = nil
+        steering: [String]? = nil
     ) {
         self.steering = steering
-        self.systemOverrides = systemOverrides
     }
 }
 
@@ -120,9 +115,6 @@ public struct ExecutionPolicy: Sendable, Codable {
     /// Maximum duration for the entire turn.
     public let timeout: Duration?
 
-    /// Maximum number of tool calls allowed in a single turn.
-    public let maxToolCalls: Int?
-
     /// Whether to allow interactive approval.
     ///
     /// When `false`, the runtime auto-denies any tool that requires `.ask`
@@ -131,11 +123,9 @@ public struct ExecutionPolicy: Sendable, Codable {
 
     public init(
         timeout: Duration? = nil,
-        maxToolCalls: Int? = nil,
         allowInteractiveApproval: Bool = true
     ) {
         self.timeout = timeout
-        self.maxToolCalls = maxToolCalls
         self.allowInteractiveApproval = allowInteractiveApproval
     }
 }

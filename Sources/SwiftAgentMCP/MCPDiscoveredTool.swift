@@ -18,18 +18,23 @@ import MCP
 public struct MCPDiscoveredTool: Sendable {
     public let serverName: String
     public let tool: MCPTool
+    /// Stable host-qualified tool name used for model-facing tool routing.
+    public let qualifiedName: String
 
     private let client: MCPClient
 
-    public init(serverName: String, tool: MCPTool, client: MCPClient) {
+    public init(
+        serverName: String,
+        tool: MCPTool,
+        client: MCPClient
+    ) throws {
         self.serverName = serverName
         self.tool = tool
         self.client = client
-    }
-
-    /// Stable host-qualified tool name used for model-facing tool routing.
-    public var qualifiedName: String {
-        "mcp:\(serverName):\(tool.name)"
+        self.qualifiedName = try MCPToolNamespace.qualifiedName(
+            serverName: serverName,
+            toolName: tool.name
+        )
     }
 
     /// Original MCP tool name exposed by the server.
@@ -48,7 +53,7 @@ public struct MCPDiscoveredTool: Sendable {
     }
 
     /// Executes the underlying MCP tool using the server-native tool name.
-    public func call(arguments: [String: MCPValue]?) async throws -> ([MCP.Tool.Content], Bool) {
+    public func call(arguments: [String: MCPValue]?) async throws -> MCPToolResult {
         try await client.callTool(name: tool.name, arguments: arguments)
     }
 
@@ -70,7 +75,20 @@ extension MCPClient {
     public func discoveredTools() async throws -> [MCPDiscoveredTool] {
         let mcpTools = try await listTools()
         let serverName = self.name
-        return mcpTools.map { MCPDiscoveredTool(serverName: serverName, tool: $0, client: self) }
+        var names: Set<String> = []
+        return try mcpTools.map { tool in
+            guard names.insert(tool.name).inserted else {
+                throw MCPToolError.duplicateToolName(
+                    server: serverName,
+                    tool: tool.name
+                )
+            }
+            return try MCPDiscoveredTool(
+                serverName: serverName,
+                tool: tool,
+                client: self
+            )
+        }
     }
 
     /// Convenience bridge for using discovered MCP tools with `LanguageModelSession`.

@@ -17,7 +17,7 @@ struct AgentTaskEnvelopeTests {
             turnID: "turn-1",
             input: .text("summarize this"),
             context: ContextPayload(steering: ["be concise"]),
-            policy: ExecutionPolicy(maxToolCalls: 3, allowInteractiveApproval: false),
+            policy: ExecutionPolicy(allowInteractiveApproval: false),
             metadata: ["source": "test"]
         )
 

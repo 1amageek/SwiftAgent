@@ -287,7 +287,7 @@ struct EmittingStepTests {
         let step = Transform<String, String> { $0.uppercased() }
             .emit(.testCompleted)
 
-        let result = try await EventBusContext.withValue(eventBus) {
+        let result = try await EventBus.withValue(eventBus) {
             try await step.run("hello")
         }
 
@@ -311,7 +311,7 @@ struct EmittingStepTests {
             return input.uppercased()
         }.emit(.testStarted, on: .before)
 
-        let result = try await EventBusContext.withValue(eventBus) {
+        let result = try await EventBus.withValue(eventBus) {
             try await step.run("hello")
         }
 
@@ -332,7 +332,7 @@ struct EmittingStepTests {
         let step = Transform<String, String> { $0.uppercased() }
             .emit(.testCompleted) { output in output }
 
-        _ = try await EventBusContext.withValue(eventBus) {
+        _ = try await EventBus.withValue(eventBus) {
             try await step.run("hello")
         }
 
@@ -356,7 +356,7 @@ struct EmittingStepTests {
             .emit(.testStarted, on: .before)
             .emit(.testCompleted, on: .after)
 
-        _ = try await EventBusContext.withValue(eventBus) {
+        _ = try await EventBus.withValue(eventBus) {
             try await step.run("hello")
         }
 
@@ -377,7 +377,7 @@ struct EmittingStepTests {
             return input
         }.emit(.testCompleted)  // No timing specified, should be .after
 
-        _ = try await EventBusContext.withValue(eventBus) {
+        _ = try await EventBus.withValue(eventBus) {
             try await step.run("test")
         }
 
@@ -397,7 +397,7 @@ struct EmittingStepTests {
         let step = Transform<String, String> { $0.uppercased() }
             .emit(.testCompleted)
 
-        _ = try await EventBusContext.withValue(eventBus) {
+        _ = try await EventBus.withValue(eventBus) {
             try await step.run("hello")
         }
 
@@ -429,7 +429,7 @@ struct EventIntegrationTests {
         eventBus.on(.testStarted) { event in await collector.append(event) }
         eventBus.on(.testCompleted) { event in await collector.append(event) }
 
-        let result = try await EventBusContext.withValue(eventBus) {
+        let result = try await EventBus.withValue(eventBus) {
             try await TestStep().run("HELLO")
         }
 
@@ -453,7 +453,7 @@ struct EventIntegrationTests {
                 .emit(.testCompleted) { $0 }
         }
 
-        let result = try await EventBusContext.withValue(eventBus) {
+        let result = try await EventBus.withValue(eventBus) {
             try await pipeline.run(5)
         }
 
@@ -483,7 +483,7 @@ struct EventIntegrationTests {
         .emit(.testStarted, on: .before)
         .emit(.testCompleted, on: .after)
 
-        let result = try await EventBusContext.withValue(eventBus) {
+        let result = try await EventBus.withValue(eventBus) {
             try await gate.run("hello")
         }
 

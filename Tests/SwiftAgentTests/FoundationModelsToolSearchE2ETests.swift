@@ -262,8 +262,6 @@ struct FoundationModelsToolSearchE2ETests {
                 return ["\(indent)<structure> \(s.content)"]
             case .attachment(let attachment):
                 return ["\(indent)<attachment> \(attachment)"]
-            case .custom(let custom):
-                return ["\(indent)<custom> \(custom)"]
             @unknown default:
                 return ["\(indent)<unknown segment>"]
             }

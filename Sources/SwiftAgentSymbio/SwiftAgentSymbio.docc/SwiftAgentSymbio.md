@@ -1,172 +1,172 @@
 # ``SwiftAgentSymbio``
 
-Distributed runtime primitives for agent membership, situated affordances, routing, invocation, and peer observation.
+Transport-independent participant ownership, trust, routing, and invocation runtime.
 
 ## Overview
 
-SwiftAgentSymbio separates the philosophical concept of a *community* (described in `PHILOSOPHY.md`) from the concrete runtime that executes local work. ``SymbioRuntime`` is the implementation surface that owns local agents, observes remote peers, and routes work through a transport boundary.
-
-`Community` is not required for every interaction. Direct one-to-one conversation can remain direct, and even multi-party coordination can sometimes be handled by a capable mediator without creating an explicit shared substrate. In Symbio, community is a coordination *affordance*: a shared surface for claims, observations, tasks, reviews, memory, and situated affordances when direct communication is not enough.
-
-### Capabilities vs Affordances
-
-A **capability** is a relatively stable action contract — what an agent is *able* to do. An **affordance** is situated: what a member appears able to contribute *now* under current constraints. A robot may have a camera capability but may not currently see the target; a high-compute agent may analyze observations but cannot act physically. Symbio keeps these differences visible so mixed communities of robots, models, memory services, and people can complement one another.
-
-### Architecture
+`SwiftAgentSymbio` no longer owns a distributed-actor system or any concrete
+networking framework. ``SymbioRuntime`` owns participant state and local
+endpoints. ``SymbioLink`` is the narrow remote boundary, and adapters own wire
+formats and network resources.
 
 ```text
-Layer 4: Agent (Communicable)
-    ↓
-Layer 3: SymbioRuntime (members, lifecycle, routing, observations, affordances)
-    ↓
-Layer 2: SymbioActorSystem + SymbioProtocol envelopes
-    ↓
-Layer 1: SymbioTransport
-    ↓
-Layer 0: PeerConnectivity, in-process, or custom transports
+Application or SwiftAgent adapter
+    -> ParticipantEndpoint / ParticipantHandle
+        -> SymbioRuntime
+            -> ParticipantClaimVerifier
+            -> InboundInvocationAuthorizer
+            -> SymbioLink
+                -> concrete network adapter
 ```
 
-### Operation Capabilities
+### Identity Boundaries
 
-| Operation | Local | Remote |
-|-----------|:-----:|:------:|
-| `spawn` | yes | no |
-| `terminate` | yes | no |
-| `send` | yes | yes |
-| `invoke` | yes | yes |
+The following identities are intentionally distinct:
 
-Remote behavior is provided through ``SymbioTransport``. The default ``LocalOnlySymbioTransport`` keeps runtime behavior deterministic for local-only tests and applications. Use the `SwiftAgentSymbioPeerConnectivity` product when a runtime should use a `PeerConnectivitySession` as its remote transport.
+| Identity | Owner | Purpose |
+|----------|-------|---------|
+| ``ParticipantID`` | application/runtime | stable logical participant |
+| ``ParticipantHandle`` | runtime | unforgeable local registration authority |
+| ``TransportPeerID`` | link adapter | network connection peer |
+| ``VerifiedParticipantBinding`` | claim verifier | verified participant-to-peer binding |
 
-### Creating a Runtime
+A network announcement produces a ``SymbioPeerClaim``. It never makes a remote
+participant routable by itself. The default ``RejectingParticipantClaimVerifier``
+fails closed. ``PinnedParticipantClaimVerifier`` requires the transport peer,
+participant, authentication method, and authentication subject to match.
+
+### Runtime Lifecycle
 
 ```swift
-let actorSystem = SymbioActorSystem()
-let runtime = SymbioRuntime(actorSystem: actorSystem)
+let identity = ParticipantDescriptor(
+    id: "runtime.local",
+    kind: .service
+)
+let runtime = try SymbioRuntime(identity: identity)
+let endpoint = EchoEndpoint()
+let handle = try await runtime.register(endpoint)
 
 try await runtime.start()
-defer { Task { try? await runtime.stop() } }
-
-let worker = try await runtime.spawn {
-    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
-}
-
-try await runtime.send(
-    WorkSignal(task: "process"),
-    to: worker.id,
-    perception: "work"
+let result = try await runtime.invoke(
+    "echo",
+    on: handle.participantID,
+    representation: .typedPayload(schema: "echo"),
+    with: payload,
+    from: runtime.localHandle
 )
-
-for await change in await runtime.changes {
-    switch change {
-    case .joined(let participant): print("Joined: \(participant.id)")
-    case .left(let id):           print("Left: \(id)")
-    default: break
-    }
-}
+try await runtime.stop()
 ```
 
-`runtime.start()` wires the transport's invocation handler and begins descriptor monitoring. `runtime.stop()` terminates local agents and finishes the change stream.
+The runtime control identity can originate work but cannot advertise executable
+capabilities. Executable capabilities belong to registered
+``ParticipantEndpoint`` instances. An endpoint must reject new work during
+shutdown and drain work it already owns before `shutdown()` returns.
 
-### Implementing a Communicable Agent
+Runtime construction validates the control identity, execution budget, and
+bounded work capacities. Invalid configuration fails with
+``SymbioRuntimeError`` before any runtime state or transport ownership exists.
 
-```swift
-distributed actor WorkerAgent: Communicable, Terminatable {
-    typealias ActorSystem = SymbioActorSystem
+Local publication uses a complete desired-catalog snapshot. Registration and
+withdrawal transitions are serialized so a suspended older snapshot cannot
+overwrite a newer catalog.
 
-    let runtime: SymbioRuntime
+Runtime shutdown is owned by one internal cleanup task. Caller cancellation
+does not abandon link or endpoint cleanup, concurrent `stop()` calls await the
+same result, and a typed cleanup failure can be retried.
 
-    init(runtime: SymbioRuntime, actorSystem: SymbioActorSystem) {
-        self.runtime = runtime
-        self.actorSystem = actorSystem
-    }
+Descriptor-declared affordances and runtime observations have independent
+provenance inside the runtime. Replacing a descriptor replaces the declared
+set exactly, while observations survive until their observation owner changes
+them. ``ParticipantView`` exposes the deterministic merge: the declared owner
+and contract remain authoritative, and observed availability and evidence can
+only make the effective state more conservative.
 
-    nonisolated var perceptions: [any Perception] {
-        [WorkPerception()]
-    }
+Aggregate membership is an acyclic graph. Availability roll-up excludes
+expired member observations and iterates to a fixed point, so nested aggregates
+cannot depend on dictionary iteration order.
 
-    distributed func receive(_ data: Data, perception: String) async throws -> Data? {
-        let signal = try JSONDecoder().decode(WorkSignal.self, from: data)
-        // …handle signal…
-        return nil
-    }
+### Incoming Invocations
 
-    nonisolated func terminate() async {}
-}
+Incoming work passes every boundary in order:
+
+```text
+link event
+    -> connected transport peer check
+    -> verified participant binding check
+    -> local endpoint and capability-contract check
+    -> [ InboundInvocationAuthorizer
+    -> binding and lifecycle revalidation
+    -> endpoint invocation ] within one total execution budget
+    -> typed reply
 ```
 
-### Observing Affordances and Evidence
+The default ``RejectingInboundInvocationAuthorizer`` denies incoming work.
+``AllowingInboundInvocationAuthorizer`` is an explicit opt-in intended for
+already trusted environments or tests. The smaller of the envelope execution
+budget and the runtime limit covers authorization through endpoint completion;
+authorization cannot hold an inbound slot outside that budget.
 
-The runtime tracks per-participant ``ParticipantView`` state including affordances, evidence, claims, trust views, and availability. Use the `observe(...)` overloads to feed in new observations:
+A verified participant binding is scoped to its transport connection. Peer
+disconnect, withdrawal, link termination, runtime shutdown, or binding
+replacement cancels inbound work derived from the stale binding. Authorizers
+and endpoints must cooperate with task cancellation.
 
-```swift
-runtime.observe(myEvidence)
-runtime.observe(myAffordance)
-runtime.observe(myTrustView)
-runtime.updateAvailability(of: peerID, to: .ready)
-runtime.block(peerID, reason: "rate-limited")
-```
+### Routing and Policy
 
-### Planning a Route
+``SymbioRuntime/planRoute(for:)`` produces a ``RoutePlan``. Before execution,
+the runtime verifies sender authority, message expiry, availability expiry,
+policy coverage, policy-decision expiry, the current capability contract, and
+the current participant binding. If authorization or remote I/O suspends, the
+sender and destination are checked again before dispatching or accepting a
+result.
 
-``SymbioRuntime/planRoute(for:)`` produces a ``RoutePlan`` containing the candidate ``RoutePlanStep`` sequence, policy decisions, and evidence references. Plans are advisory: callers decide whether to dispatch the message based on the embedded policy outcome.
+### Payload Ownership
 
-```swift
-let plan = runtime.planRoute(for: message)
-guard plan.policyDecision.state == .approved else {
-    throw RoutingDenied(reasons: plan.policyDecision.reasons)
-}
-// Dispatch the steps in `plan.steps` through `runtime.send` / `invoke`
-// according to your application's delivery policy.
-```
+Core payloads use `NetworkingCore.OwnedBytes`. Foundation `Data`, Codable wire
+DTOs, and SwiftAgent-specific protocols belong in adapter targets. This keeps
+the core independent and makes copies visible at serialization boundaries.
 
 ## Topics
 
-### Runtime
+### Runtime and Ownership
 
 - ``SymbioRuntime``
 - ``SymbioRuntimeChange``
-- ``SymbioActorSystem``
+- ``SymbioRuntimeError``
+- ``ParticipantEndpoint``
+- ``ParticipantHandle``
 
-### Participants
+### Trust and Authorization
+
+- ``ParticipantClaimVerifier``
+- ``PinnedParticipantClaimVerifier``
+- ``VerifiedParticipantBinding``
+- ``InboundInvocationAuthorizer``
+- ``PolicyAuthorizer``
+
+### Link Boundary
+
+- ``SymbioLink``
+- ``SymbioLinkEvent``
+- ``LocalOnlySymbioLink``
+- ``TransportPeerID``
+- ``SymbioInvocationEnvelope``
+- ``SymbioInvocationReply``
+
+### Participant Model
 
 - ``ParticipantID``
 - ``ParticipantDescriptor``
-- ``AggregateParticipantDescriptor``
 - ``ParticipantView``
-
-### Affordances and Capabilities
-
 - ``Affordance``
 - ``CapabilityContract``
-- ``DeliveryOption``
+- ``Availability``
 - ``Evidence``
 - ``TrustView``
 
-### Routing and Messaging
+### Routing
 
 - ``Message``
 - ``MessageRepresentation``
 - ``RoutePlan``
 - ``RoutePlanStep``
-
-### Transport
-
-- ``SymbioTransport``
-- ``SymbioTransportEvent``
-- ``SymbioInvocationEnvelope``
-- ``SymbioInvocationReply``
-- ``LocalOnlySymbioTransport``
-
-### Agent Protocols
-
-- ``Communicable``
-- ``Terminatable``
-- ``Replicable``
-
-### Addressing
-
-- ``Address``
-
-### Tools
-
-- ``ReplicateTool``

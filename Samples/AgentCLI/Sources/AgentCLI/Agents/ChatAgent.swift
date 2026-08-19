@@ -80,7 +80,7 @@ public struct ChatSessionFactory {
     }
 }
 
-/// Interactive chat agent using Conversation + StdioTransport pattern.
+/// Interactive chat agent using Conversation + StdioConnection pattern.
 ///
 /// Usage:
 /// ```swift
@@ -89,8 +89,9 @@ public struct ChatSessionFactory {
 /// let conversation = Conversation(languageModelSession: languageModelSession) {
 ///     ChatAgent()
 /// }
-/// let transport = StdioTransport(prompt: "You: ")
-/// let runtime = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+/// let connection = StdioConnection(prompt: "You: ")
+/// let approvals = StdioApprovalHandler(connection: connection)
+/// let runtime = AgentSession(connection: connection, approvalHandler: approvals)
 /// try await runtime.run(conversation)
 /// ```
 public struct InteractiveChatAgent {

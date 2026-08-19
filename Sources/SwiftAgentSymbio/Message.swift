@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import NetworkingCore
 
 public enum MessageAddressing: Sendable, Codable, Hashable {
     case direct(ParticipantID)
@@ -11,12 +12,12 @@ public enum MessageAddressing: Sendable, Codable, Hashable {
     case open
 }
 
-public struct Message: Identifiable, Sendable, Codable, Hashable {
+public struct Message: Identifiable, Sendable, Hashable {
     public let id: String
     public let senderID: ParticipantID
     public let addressing: MessageAddressing
     public let representation: MessageRepresentation
-    public let payload: Data
+    public let payload: OwnedBytes
     public let intent: String?
     public let createdAt: Date
     public let expiresAt: Date?
@@ -27,7 +28,7 @@ public struct Message: Identifiable, Sendable, Codable, Hashable {
         senderID: ParticipantID,
         addressing: MessageAddressing,
         representation: MessageRepresentation,
-        payload: Data,
+        payload: OwnedBytes,
         intent: String? = nil,
         createdAt: Date = Date(),
         expiresAt: Date? = nil,

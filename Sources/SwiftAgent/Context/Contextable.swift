@@ -5,23 +5,20 @@
 //  Created by SwiftAgent on 2025/01/07.
 //
 
-import Foundation
-
 // MARK: - Contextable Protocol
 
 /// A protocol that indicates a type can be propagated through nested Steps via TaskLocal.
 ///
-/// Conform to this protocol to enable automatic `ContextKey` generation
-/// via the `@Contextable` macro. This allows sharing configuration or state
-/// across deeply nested Step hierarchies without explicit parameter passing.
+/// Conform to this protocol to share configuration or state across deeply
+/// nested Step hierarchies without explicit parameter passing.
 ///
 /// ## Defining a Contextable Type
 ///
-/// Use the `@Contextable` macro to automatically generate the required `ContextKey`:
+/// Declare the conformance directly. Type-indexed TaskLocal behavior is
+/// provided automatically unless the type implements a custom context scope.
 ///
 /// ```swift
-/// @Contextable
-/// struct CrawlerConfig {
+/// struct CrawlerConfig: Contextable {
 ///     let maxDepth: Int
 ///     let timeout: TimeInterval
 ///
@@ -31,9 +28,8 @@ import Foundation
 /// }
 /// ```
 ///
-/// The macro generates:
-/// - `CrawlerConfigContext` enum conforming to ``ContextKey``
-/// - `typealias ContextKeyType = CrawlerConfigContext` on `CrawlerConfig`
+/// The default type-indexed scope isolates `CrawlerConfig` values from every
+/// other context type while preserving TaskLocal inheritance and restoration.
 ///
 /// ## Accessing Context in Steps
 ///
@@ -72,13 +68,12 @@ import Foundation
 ///
 /// ## Reference Types for Mutable State
 ///
-/// Use classes when you need mutable shared state:
+/// Use an actor when you need mutable shared state:
 ///
 /// ```swift
-/// @Contextable
-/// class WorkspaceContext {
-///     let workingDirectory: String
-///     var processedFiles: Set<String> = []
+/// actor WorkspaceContext: Contextable {
+///     nonisolated let workingDirectory: String
+///     private var processedFiles: Set<String> = []
 ///
 ///     static var defaultValue: WorkspaceContext {
 ///         WorkspaceContext(workingDirectory: ".")
@@ -86,9 +81,28 @@ import Foundation
 /// }
 /// ```
 public protocol Contextable: Sendable {
-    /// The associated ContextKey type that manages TaskLocal storage.
-    associatedtype ContextKeyType: ContextKey where ContextKeyType.Value == Self
-
     /// The default value used when no context is explicitly provided.
     static var defaultValue: Self { get }
+
+    /// The value in the current task scope, or ``defaultValue`` when absent.
+    static var current: Self { get }
+
+    /// Runs an operation with this value installed in the current task scope.
+    static func withValue<Result: Sendable>(
+        _ value: Self,
+        operation: nonisolated(nonsending) () async throws -> Result
+    ) async rethrows -> Result
+}
+
+extension Contextable {
+    public static var current: Self {
+        ContextValueKey<Self>.current
+    }
+
+    public static func withValue<Result: Sendable>(
+        _ value: Self,
+        operation: nonisolated(nonsending) () async throws -> Result
+    ) async rethrows -> Result {
+        try await ContextValueKey<Self>.withValue(value, operation: operation)
+    }
 }

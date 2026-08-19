@@ -15,7 +15,7 @@ struct AgentCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent",
         abstract: "SwiftAgent CLI - AI Agent powered by OpenAI and Claude",
-        version: "2.0.0",
+        version: "2.0.1",
         subcommands: [Chat.self, Code.self, Research.self],
         defaultSubcommand: Chat.self
     )

@@ -176,7 +176,7 @@ extension PermissionRequest {
 // MARK: - Built-in Handlers
 
 /// A handler that always allows (for testing or trusted environments).
-public struct AlwaysAllowHandler: ApprovalHandler {
+public struct AlwaysAllowHandler: TurnGatedApprovalHandler {
 
     public init() {}
 
@@ -189,7 +189,7 @@ public struct AlwaysAllowHandler: ApprovalHandler {
 }
 
 /// A handler that always denies (for read-only modes).
-public struct AlwaysDenyHandler: ApprovalHandler {
+public struct AlwaysDenyHandler: TurnGatedApprovalHandler {
 
     public init() {}
 

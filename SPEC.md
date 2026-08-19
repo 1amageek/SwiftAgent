@@ -1,223 +1,178 @@
-# SwiftAgent I/O and Harness Specification
+# SwiftAgent Connection and Runtime Specification
 
-## 1. Purpose
+## 1. Status
 
-本仕様は、SwiftAgent の Agent 入出力と Tool Harness を以下の観点で定義する。
+This specification describes the current, intentionally breaking Agent I/O
+architecture. It replaces the previous `AgentTransport`, placeholder HTTP/SSE
+and WebSocket transports, and `WaitForInput`-driven CLI integration.
 
-- 現在実装されている仕様の明文化
-- `stdin/stdout` 依存からの拡張可能な設計方針
-- 互換性を維持した段階的移行計画
+## 2. Responsibility Boundaries
 
----
+| Layer | Owns | Does not own |
+|---|---|---|
+| Agent core | `Step`, `Conversation`, model/tool execution | wire framing, sockets, process I/O |
+| `AgentSession` | request routing, sequential turn execution, cancellation, event emission | serialization and connection resources |
+| `AgentConnection` | one bidirectional connection lifetime | conversation state and tool policy |
+| concrete adapter | framing, serialization, handles/sockets, backpressure | agent orchestration |
+| tool runtime | middleware, permission, sandbox, hooks | transport lifecycle |
 
-## 2. Scope
+```text
+wire or terminal
+    -> concrete AgentConnection
+    -> RunRequest
+    -> AgentSession
+    -> Conversation / ToolRuntime
+    -> RunEvent
+    -> the same connection owner
+```
 
-本仕様の対象は次のモジュールとサンプル実装。
+## 3. Connection Contracts
 
-- Core: `SwiftAgent` (`Step`, `Conversation`, `ToolPipeline`, Security)
-- Tools: `AgentTools`
-- CLI: `Samples/AgentCLI`
-
-本仕様は LLM モデル実装（OpenAI/Claude SDK の詳細）には踏み込まない。
-
----
-
-## 3. Current Implementation (As-Is)
-
-### 3.1 Input/Output
-
-- CLI の対話入力は `readLine()` ベース (`WaitForInput`)。
-- 出力は `print` による `stdout` ストリーミング。
-- インタラクション単位は「文字列入力 -> 文字列出力」が中心。
-- `Agent` プロトコルは `Input == String`, `Output == Never`（無限ループ型）を前提とし、出力は `AsyncStream<String>.Continuation` に流す。
-
-### 3.2 Session Runtime
-
-- `Conversation` は `send(_:)`, `input(_:)`, `waitForInput()` を提供。
-- 並行送信は内部 `Mutex` で逐次化（FIFO wait queue）。
-- `EventBus` に `promptSubmitted` / `responseCompleted` を発行。
-- `LanguageModelSession` は TaskLocal (`SessionContext`) で伝搬。
-
-### 3.3 Tool Execution
-
-- 標準ツールは `AgentTools` モジュールが提供 (`ReadTool`, `WriteTool`, `EditTool`, `GrepTool`, `GlobTool`, `ExecuteCommandTool`, `GitTool`, `URLFetchTool` など)。使う側が直接 `[any Tool]` を構築する。
-- 実行は `ToolPipeline` によるミドルウェアチェーン。
-- `PermissionMiddleware` と `SandboxMiddleware` が主要セキュリティ境界。
-
-### 3.4 Security Model
-
-- 権限は `PermissionConfiguration` で `allow/deny/finalDeny/overrides/defaultAction` を評価。
-- 評価順は `finalDeny -> session memory -> overrides -> deny -> allow -> default`。
-- `SandboxExecutor` は macOS `sandbox-exec` を使用し、`ExecuteCommandTool` に TaskLocal で注入される。
-
-### 3.5 Current Limitations
-
-- 入出力契約が実質的に CLI (`readLine` + `print`) に強く結合。
-- 出力ストリームの意味論が `String` 中心で、構造化イベントが標準化されていない。
-- 承認（approval）イベントが I/O プロトコルとして明示されていない。
-- CLI 以外（HTTP/SSE/WebSocket/Queue）への展開時に再実装コストが高い。
-
----
-
-## 4. Target Architecture (To-Be)
-
-### 4.1 Design Principles
-
-- Agent Core をトランスポート非依存にする。
-- I/O は「文字列」ではなく「構造化イベント」に統一する。
-- Tool 実行境界（権限・sandbox・監査）を Harness に集約する。
-- 既存 CLI は最初の Transport Adapter として維持する。
-
-### 4.2 Logical Layers
-
-1. Agent Core  
-`Step` / planning / generation。外部 I/O を知らない。
-
-2. Runtime  
-`Session`, `Turn`, cancel, timeout, retry, idempotency を管理。
-
-3. Tool Harness  
-Tool registry, middleware pipeline, permission, sandbox, audit trail を管理。
-
-4. Transport Adapter  
-`Stdio`, `HTTP+SSE`, `WebSocket`, `Queue`, `MCP bridge` を差し替え可能。
-
-### 4.3 Canonical I/O Contract
-
-#### RunRequest
-
-- `session_id: String`
-- `turn_id: String`
-- `input: InputPayload`
-- `context: ContextPayload?`
-- `policy: ExecutionPolicy?`
-- `metadata: [String: String]?`
-
-#### AgentEvent (stream)
-
-- `run_started`
-- `token_delta`
-- `tool_call`
-- `tool_result`
-- `approval_required`
-- `approval_resolved`
-- `warning`
-- `error`
-- `run_completed`
-
-#### RunResult
-
-- `session_id: String`
-- `turn_id: String`
-- `status: completed | failed | cancelled | denied | timed_out`
-- `final_output: OutputPayload?`
-- `usage: TokenUsage?`
-- `tool_trace: [ToolTrace]`
-- `error: ErrorPayload?`
-
-### 4.4 Transport Interface
+The application-level boundary is split so one-way integrations do not depend
+on an artificial bidirectional transport abstraction.
 
 ```swift
-public protocol AgentTransport: Sendable {
-    associatedtype Request: Sendable
-    associatedtype Event: Sendable
+public protocol AgentRequestSource: Sendable {
+    var supportsConcurrentReceive: Bool { get }
+    func receive() async throws -> RunRequest?
+}
 
-    func receive() async throws -> Request
-    func send(_ event: Event) async throws
-    func close() async
+public protocol AgentEventWriter: Sendable {
+    func send(_ event: RunEvent) async throws
+}
+
+public protocol AgentConnection: AgentRequestSource, AgentEventWriter {
+    func shutdown() async throws
 }
 ```
 
-要件:
+### Required Semantics
 
-- Transport は framing/serialization を担当し、Agent Core には渡さない。
-- backpressure と cancellation を扱えること。
-- half-close（入力終了後に出力継続）に対応できること。
+| Operation | Contract |
+|---|---|
+| `receive()` value | one decoded application request |
+| `receive()` returns `nil` | clean input EOF |
+| `receive()` throws | decoding, framing, I/O, or overload failure |
+| `send()` returns | event delivery accepted by the adapter |
+| `send()` throws | output cannot be delivered; never silently discarded |
+| `shutdown()` | one idempotent owner operation; all owned readers/writers and waiters are finished independently of caller cancellation |
+| `supportsConcurrentReceive` | whether approval/cancel messages can arrive during turn execution |
 
-### 4.5 Harness Interface
+The protocol contains no HTTP, SSE, WebSocket, NIO, or terminal types. A server
+or GUI integration belongs in its own adapter target and injects a concrete
+connection.
 
-```swift
-public protocol ToolHarness: Sendable {
-    func execute(_ call: ToolCall, in context: HarnessContext) async throws -> ToolResult
-}
+## 4. Session Execution
+
+`AgentSession` receives requests separately from sequential turn execution.
+Concurrent receive keeps approval and cancellation messages responsive while a
+model turn is running. Connections that share a single interactive input
+resource set `supportsConcurrentReceive` to `false`; the session then gates
+receiving while the turn owns that resource. Such a connection accepts only a
+`TurnGatedApprovalHandler`; an arbitrary handler is rejected because it may
+open a competing reader for the same physical input.
+
+```text
+receive task
+    -> text -----------------------> bounded FIFO turn queue
+    -> approvalResponse ----------> correlation handler
+    -> cancel ---------------------> active or pending cancellation state
+
+bounded FIFO turn queue
+    -> one active Conversation turn
+    -> ordered RunEvent writes
 ```
 
-要件:
+The turn queue and completed/cancellation tracking are bounded. Queue overflow,
+input failure, and output failure terminate the session explicitly.
 
-- 全 Tool 呼び出しは Harness 経由を強制。
-- `PermissionMiddleware` と `SandboxMiddleware` を Harness の標準構成とする。
-- 監査ログ（timestamp, tool, args digest, decision, duration, exit_code）を標準出力可能にする。
+## 5. Stdio Adapter
 
----
+`StdioConnection` is a CLI adapter, not the universal transport. It owns:
 
-## 5. Approval and Security Requirements
+- the asynchronous stdin reader;
+- a bounded line buffer;
+- CLI command interpretation (`exit` and `quit`);
+- rendering `RunEvent` values to stdout/stderr;
+- interactive approval input through `StdioApprovalHandler`;
+- reader cancellation and waiter completion during shutdown.
 
-- `approval_required` イベントは transport 共通で必須。
-- 承認応答は `approval_id` で相関づける。
-- `defaultAction == .ask` の場合、transport が承認不能なら明示的に `denied` として終了。
-- sandbox が利用可能な環境では `ExecuteCommandTool` を原則 sandbox 実行。
-- `finalDeny` 違反時は即時失敗し、再試行しない。
+It declares `supportsConcurrentReceive == false` because interactive approval
+shares stdin. `StdioConnection` remains the sole stdin owner: both normal
+requests and approval choices pass through its `StdioLineSource`. Passing
+`CLIPermissionHandler` to this connection is rejected because `readLine()`
+would create a second, uncoordinated reader. It never uses a placeholder
+network implementation.
 
----
+## 6. Approval
 
-## 6. Backward Compatibility
+`ApprovalHandler` remains transport-neutral. `ConnectionApprovalHandler`
+correlates an emitted approval request with a later
+`RunRequest.approvalResponse`. A headless integration that cannot obtain
+approval uses `AutoDenyApprovalHandler`; it does not turn an unanswered request
+into success.
 
-- 既存 `Samples/AgentCLI` は `StdioTransport` として温存。
-- `WaitForInput` は deprecated 候補とし、新規実装は Transport 経由を推奨。
-- 既存 `Step<String, String>` は adapter 層で `InputPayload.text` にマップして継続利用可能にする。
+`StdioApprovalHandler` is the adapter-specific alternative for
+`StdioConnection`. `TurnGatedApprovalHandler` is an explicit safety contract:
+the handler may run while the receive loop is paused and must not acquire the
+connection input through another reader.
 
----
+```text
+PermissionMiddleware (.ask)
+    -> approvalRequired RunEvent
+    -> ConnectionApprovalHandler waits by approval ID
+    -> connection receives approvalResponse
+    -> resolve or fail the pending approval
+```
 
-## 7. Migration Plan
+Closing a session must reject all unresolved approvals before returning.
 
-### Phase 1: Protocol Introduction
+## 7. Tool and Network Boundaries
 
-- `RunRequest`, `AgentEvent`, `RunResult` を追加。
-- `AgentTransport` と `ToolHarness` を導入。
-- 既存 CLI を壊さず `StdioTransport` 実装を追加。
+All tool calls continue through `ToolRuntime` and its middleware. Network tools
+are not granted ambient destination access:
 
-### Phase 2: Runtime Consolidation
+- `URLFetchTool` requires a `WebDocumentFetching` implementation or an exact
+  trusted-origin set;
+- redirects are handled by the policy-enforced fetcher and each destination is
+  reauthorized;
+- an HTTP client performs exactly one non-redirecting request and enforces a
+  maximum body size;
+- caller headers are validated, discarded on cross-origin redirects, and
+  disable response caching;
+- cache hits are reauthorized and rechecked against the caller's body limit;
+- cancellation does not return until the URLSession transaction invalidates;
+- arbitrary untrusted destinations require an application-owned client with
+  endpoint binding or an equivalent anti-rebinding guarantee.
 
-- `Conversation` のイベントを `AgentEvent` に正規化。
-- Tool 実行ログを `tool_trace` に統合。
-- 承認フローを `approval_required` / `approval_resolved` で統一。
+## 8. Extension Rules
 
-### Phase 3: Multi-Transport
+New connection adapters must:
 
-- `HTTP+SSE` を追加（サーバー/GUI連携用）。
-- 必要に応じて `WebSocket` / `Queue` を拡張。
+1. live outside Agent core when they introduce a framework dependency;
+2. own all wire/process resources for the connection lifetime;
+3. bound inbound and outbound buffering;
+4. surface clean EOF separately from failure;
+5. propagate write errors;
+6. document concurrent receive and half-close behavior;
+7. make shutdown one idempotent owner operation that outlives caller cancellation and drains or cancels owned work.
 
----
+Adding a new adapter must not add transport cases or framework imports to
+`AgentSession`.
 
-## 8. Non-Goals
+## 9. Verification Conditions
 
-- 本仕様では UI/UX デザイン（TUI/Web UI）自体は定義しない。
-- 本仕様では各 LLM プロバイダ固有パラメータは標準化しない。
-- 本仕様では分散エージェント（Symbio）のプロトコルまでは統合しない。
+| Path | Required behavior |
+|---|---|
+| clean EOF | queued turns finish, then session shuts down |
+| input decode/I/O failure | session reports failure and cancels owned work |
+| output failure | turn/session fail; event is not reported as delivered |
+| request overload | typed bounded-capacity failure |
+| cancel before turn | pending cancellation applies to the matching turn only |
+| cancel during turn | active cancellation token is signaled |
+| connection close during approval | pending approval resumes with failure |
+| non-concurrent input | only a turn-gated handler may use the connection-owned input |
+| shutdown | readers, continuations, approvals, and event output are finalized |
 
----
-
-## 9. Acceptance Criteria
-
-- CLI が既存同等に動作する（回帰なし）。
-- 同一 Agent Core を `StdioTransport` と `HTTP+SSE` の両方で実行可能。
-- Tool 実行の全経路が Harness 経由で監査可能。
-- 承認が必要なケースで `approval_required` イベントが必ず発行される。
-- `finalDeny` は transport を問わず常に優先適用される。
-
----
-
-## 10. References (Current Code)
-
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Agent.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Conversation.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/WaitForInput.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Middleware/ToolPipeline.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Security/PermissionMiddleware.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Security/PermissionConfiguration.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Security/SandboxMiddleware.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/SwiftAgent/Security/SandboxExecutor.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Sources/AgentTools/ExecuteCommandTool.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Samples/AgentCLI/Sources/AgentCLI/AgentCommand.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Samples/AgentCLI/Sources/AgentCLI/Agents/ChatAgent.swift`
-- `/Users/1amageek/Desktop/SwiftAgent/Samples/AgentCLI/Sources/AgentCLI/Agents/CodingAgent.swift`
+Compilation or type existence alone is insufficient; success and failure paths
+must be exercised when execution permission is granted.

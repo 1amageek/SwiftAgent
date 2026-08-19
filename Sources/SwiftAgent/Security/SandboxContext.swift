@@ -32,5 +32,15 @@ public enum SandboxContext: ContextKey {
 
 extension SandboxExecutor.Configuration: Contextable {
     public static var defaultValue: SandboxExecutor.Configuration { .none }
-    public typealias ContextKeyType = SandboxContext
+
+    public static var current: SandboxExecutor.Configuration {
+        SandboxContext.current
+    }
+
+    public static func withValue<Result: Sendable>(
+        _ value: SandboxExecutor.Configuration,
+        operation: nonisolated(nonsending) () async throws -> Result
+    ) async rethrows -> Result {
+        try await SandboxContext.withValue(value, operation: operation)
+    }
 }

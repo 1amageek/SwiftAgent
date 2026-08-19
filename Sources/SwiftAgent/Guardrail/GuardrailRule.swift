@@ -41,7 +41,7 @@ public protocol GuardrailRule: Sendable {
 /// .guardrail {
 ///     Allow(.tool("Read"))
 ///     Allow(.bash("git:*"))
-///     Allow(.mcp("github"))
+///     Allow(.tool("Search"))
 /// }
 /// ```
 public struct Allow: GuardrailRule {

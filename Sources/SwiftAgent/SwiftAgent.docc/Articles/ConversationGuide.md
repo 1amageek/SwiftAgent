@@ -54,7 +54,9 @@ let tools: [any Tool] = [
     GrepTool(workingDirectory: workingDir),
     ExecuteCommandTool(workingDirectory: workingDir),
     GitTool(),
-    URLFetchTool(),
+    URLFetchTool(trustedOrigins: [
+        try WebOrigin(scheme: "https", host: "docs.example.com")
+    ]),
 ]
 
 let session = LanguageModelSession(model: .default, tools: tools) {

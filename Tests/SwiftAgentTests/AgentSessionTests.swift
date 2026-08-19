@@ -16,12 +16,92 @@ import OpenFoundationModels
 @Suite("AgentSession Tests")
 struct AgentSessionTests {
 
+    @Test("Input failures terminate the session", .timeLimit(.minutes(1)))
+    func inputFailureTerminatesSession() async throws {
+        let connection = MockConnection()
+        let session = AgentSession(connection: connection)
+        connection.failInput("input failed")
+
+        await #expect(throws: MockConnectionError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (input: Prompt) in "unused" }
+            }
+        }
+    }
+
+    @Test("Unexpected input cancellation terminates the session", .timeLimit(.minutes(1)))
+    func unexpectedInputCancellationTerminatesSession() async throws {
+        let connection = MockConnection()
+        let session = AgentSession(connection: connection)
+        connection.cancelInputUnexpectedly()
+
+        await #expect(throws: CancellationError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (_: Prompt) in "unused" }
+            }
+        }
+    }
+
+    @Test("Input failure cancels the active turn", .timeLimit(.minutes(1)))
+    func inputFailureCancelsActiveTurn() async throws {
+        let connection = MockConnection()
+        let session = AgentSession(connection: connection)
+        let turnStarted = OneShotSignal()
+        let invocationCount = InvocationCount()
+        connection.enqueue(RunRequest(input: .text("Hello")))
+        connection.enqueue(RunRequest(input: .text("Must not start")))
+
+        let run = Task {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Wait")
+            } step: {
+                Transform { (input: Prompt) in
+                    await invocationCount.increment()
+                    await turnStarted.signal()
+                    guard let token = TurnCancellationContext.current else {
+                        return "missing cancellation context"
+                    }
+                    _ = await token.waitForCancellation()
+                    try token.checkCancellation()
+                    return "unreachable"
+                }
+            }
+        }
+        await turnStarted.wait()
+        connection.failInput("input failed during turn")
+
+        await #expect(throws: MockConnectionError.self) {
+            try await run.value
+        }
+        #expect(await invocationCount.value == 1)
+    }
+
+    @Test("Event delivery failures terminate the session", .timeLimit(.minutes(1)))
+    func eventDeliveryFailureTerminatesSession() async throws {
+        let connection = MockConnection()
+        let session = AgentSession(connection: connection)
+        connection.failOutput("output failed")
+        connection.enqueueAndFinish(RunRequest(input: .text("Hello")))
+
+        await #expect(throws: AgentSessionError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (input: Prompt) in "unused" }
+            }
+        }
+    }
+
     @Test("Text request produces runStarted and runCompleted events", .timeLimit(.minutes(1)))
     func textRequestProducesEvents() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
-        transport.enqueueAndClose(RunRequest(input: .text("Hello")))
+        transport.enqueueAndFinish(RunRequest(input: .text("Hello")))
 
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
@@ -47,8 +127,8 @@ struct AgentSessionTests {
 
     @Test("Cancel request produces cancelled status", .timeLimit(.minutes(1)))
     func cancelProducesCancelledStatus() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -88,8 +168,8 @@ struct AgentSessionTests {
 
     @Test("Duplicate turnID is skipped", .timeLimit(.minutes(1)))
     func duplicateTurnIDSkipped() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -118,10 +198,10 @@ struct AgentSessionTests {
 
     @Test("Gated transport works correctly", .timeLimit(.minutes(1)))
     func gatedTransportWorks() async throws {
-        let transport = MockTransport(supportsBackgroundReceive: false)
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection(supportsConcurrentReceive: false)
+        let session = AgentSession(connection: transport)
 
-        transport.enqueueAndClose(RunRequest(input: .text("Hello")))
+        transport.enqueueAndFinish(RunRequest(input: .text("Hello")))
 
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
@@ -140,12 +220,67 @@ struct AgentSessionTests {
         #expect(hasRunCompleted)
     }
 
+    @Test("A session consumes its connection exactly once", .timeLimit(.minutes(1)))
+    func sessionConsumesConnectionOnce() async throws {
+        let connection = MockConnection()
+        let session = AgentSession(connection: connection)
+        connection.finishInput()
+
+        try await session.run(model: MockLanguageModel()) {
+            Instructions("Echo")
+        } step: {
+            Transform { (_: Prompt) in "unused" }
+        }
+
+        await #expect(throws: AgentSessionError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (_: Prompt) in "unused" }
+            }
+        }
+    }
+
+    @Test("Connection approval requires concurrent receive")
+    func connectionApprovalRequiresConcurrentReceive() async {
+        let connection = MockConnection(supportsConcurrentReceive: false)
+        let session = AgentSession(
+            connection: connection,
+            approvalHandler: ConnectionApprovalHandler()
+        )
+
+        await #expect(throws: AgentSessionError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (_: Prompt) in "unused" }
+            }
+        }
+    }
+
+    @Test("Independent stdin readers are rejected for gated connections")
+    func independentStdinReaderIsRejected() async {
+        let connection = MockConnection(supportsConcurrentReceive: false)
+        let session = AgentSession(
+            connection: connection,
+            approvalHandler: CLIPermissionHandler(output: { _ in })
+        )
+
+        await #expect(throws: AgentSessionError.self) {
+            try await session.run(model: MockLanguageModel()) {
+                Instructions("Echo")
+            } step: {
+                Transform { (_: Prompt) in "unused" }
+            }
+        }
+    }
+
     // MARK: - TurnID Matching Tests
 
     @Test("Cross-turn cancel does not affect unrelated turn", .timeLimit(.minutes(1)))
     func crossTurnCancelDoesNotAffectUnrelatedTurn() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnA = UUID().uuidString
         let turnB = UUID().uuidString
@@ -194,8 +329,8 @@ struct AgentSessionTests {
 
     @Test("Pre-emptive cancel before turn starts produces cancelled status", .timeLimit(.minutes(1)))
     func preemptiveCancelProducesCancelledStatus() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -229,8 +364,8 @@ struct AgentSessionTests {
 
     @Test("Cancel for completed turn is harmless", .timeLimit(.minutes(1)))
     func cancelForCompletedTurnIsHarmless() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -272,8 +407,8 @@ struct AgentSessionTests {
 
     @Test("Cancel for nonexistent turn is harmless", .timeLimit(.minutes(1)))
     func cancelForNonexistentTurnIsHarmless() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let realTurnID = UUID().uuidString
         let fakeTurnID = UUID().uuidString
@@ -303,8 +438,8 @@ struct AgentSessionTests {
 
     @Test("Late cancel after cancelled turn does not poison retry", .timeLimit(.minutes(1)))
     func lateCancelDoesNotPoisonRetry() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -349,8 +484,8 @@ struct AgentSessionTests {
 
     @Test("Duplicate cancel for same turn is idempotent", .timeLimit(.minutes(1)))
     func duplicateCancelIsIdempotent() async throws {
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -392,9 +527,9 @@ struct AgentSessionTests {
 
     @Test("Approval response without handler emits warning", .timeLimit(.minutes(1)))
     func approvalResponseWithoutHandlerEmitsWarning() async throws {
-        // No transportApprovalHandler configured
-        let transport = MockTransport()
-        let session = AgentSession(transport: transport)
+        // No connectionApprovalHandler configured
+        let transport = MockConnection()
+        let session = AgentSession(connection: transport)
 
         let turnID = UUID().uuidString
 
@@ -402,7 +537,7 @@ struct AgentSessionTests {
         // then a text request so the session can shut down.
         let approval = ApprovalResponse(approvalID: "test-approval", decision: .allowOnce)
         transport.enqueue(RunRequest(turnID: turnID, input: .approvalResponse(approval)))
-        transport.enqueueAndClose(RunRequest(input: .text("Hello")))
+        transport.enqueueAndFinish(RunRequest(input: .text("Hello")))
 
         try await session.run(model: MockLanguageModel()) {
             Instructions("Echo")
@@ -419,6 +554,44 @@ struct AgentSessionTests {
         }
 
         #expect(hasWarning, "Should emit non-fatal warning when approval response has no handler")
+    }
+}
+
+private actor OneShotSignal {
+    private var isSignalled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        guard !isSignalled else {
+            return
+        }
+        isSignalled = true
+        let waiters = self.waiters
+        self.waiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func wait() async {
+        guard !isSignalled else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            if isSignalled {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
+        }
+    }
+}
+
+private actor InvocationCount {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
     }
 }
 

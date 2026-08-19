@@ -1,20 +1,19 @@
 import Testing
 import Foundation
+import Synchronization
 @testable import SwiftAgent
 
 // MARK: - Test Contextable Types
 
 /// A simple counter for testing
-@Contextable
-struct Counter: Equatable {
+struct Counter: Contextable, Equatable {
     let value: Int
 
     static var defaultValue: Counter { Counter(value: 0) }
 }
 
 /// A configuration for testing
-@Contextable
-struct TestConfig: Equatable {
+struct TestConfig: Contextable, Equatable {
     let name: String
     let maxRetries: Int
 
@@ -22,29 +21,21 @@ struct TestConfig: Equatable {
 }
 
 /// A tracker for testing shared state
-@Contextable
-final class URLTracker: @unchecked Sendable {
+final class URLTracker: Sendable, Contextable {
     static var defaultValue: URLTracker { URLTracker() }
 
-    private var _visitedURLs: Set<URL> = []
-    private let lock = NSLock()
+    private let visitedURLsState = Mutex<Set<URL>>([])
 
     var visitedURLs: Set<URL> {
-        lock.lock()
-        defer { lock.unlock() }
-        return _visitedURLs
+        visitedURLsState.withLock { $0 }
     }
 
     func markVisited(_ url: URL) {
-        lock.lock()
-        defer { lock.unlock() }
-        _visitedURLs.insert(url)
+        visitedURLsState.withLock { _ = $0.insert(url) }
     }
 
     func hasVisited(_ url: URL) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _visitedURLs.contains(url)
+        visitedURLsState.withLock { $0.contains(url) }
     }
 }
 
@@ -55,51 +46,53 @@ struct ContextTests {
 
     @Test("Context returns defaultValue by default")
     func contextDefaultValueByDefault() {
-        #expect(CounterContext.current.value == 0)
+        #expect(Counter.current.value == 0)
     }
 
-    @Test("withContext sets value for operation")
-    func withContextSetsValue() async throws {
-        let result = await withContext(CounterContext.self, value: Counter(value: 42)) {
-            CounterContext.current
+    @Test("withValue sets value for operation")
+    func withValueSetsValue() async throws {
+        let result = await Counter.withValue(Counter(value: 42)) {
+            Counter.current
         }
 
         #expect(result.value == 42)
     }
 
-    @Test("withContext restores defaultValue after operation")
-    func withContextRestoresAfter() async throws {
-        _ = await withContext(CounterContext.self, value: Counter(value: 100)) {
-            #expect(CounterContext.current.value == 100)
+    @Test("withValue restores defaultValue after operation")
+    func withValueRestoresAfter() async throws {
+        _ = await Counter.withValue(Counter(value: 100)) {
+            #expect(Counter.current.value == 100)
         }
 
-        #expect(CounterContext.current.value == 0)
+        #expect(Counter.current.value == 0)
     }
 
-    @Test("withContext returns operation result")
-    func withContextReturnsResult() async throws {
-        let result = await withContext(CounterContext.self, value: Counter(value: 10)) {
-            CounterContext.current.value * 2
+    @Test("withValue returns operation result")
+    func withValueReturnsResult() async throws {
+        let result = await Counter.withValue(Counter(value: 10)) {
+            Counter.current.value * 2
         }
 
         #expect(result == 20)
     }
 
-    @Test("withContext propagates errors")
-    func withContextPropagatesErrors() async throws {
+    @Test("withValue propagates errors")
+    func withValuePropagatesErrors() async throws {
         struct TestError: Error {}
 
         await #expect(throws: TestError.self) {
-            try await withContext(CounterContext.self, value: Counter(value: 1)) {
+            try await Counter.withValue(Counter(value: 1)) {
                 throw TestError()
             }
         }
+
+        #expect(Counter.current.value == 0)
     }
 
     @Test("defaultValue is used when no context is set")
     func defaultValueIsUsed() async throws {
-        #expect(CounterContext.current.value == 0)
-        #expect(TestConfigContext.current.name == "")
+        #expect(Counter.current.value == 0)
+        #expect(TestConfig.current.name == "")
     }
 }
 
@@ -173,16 +166,16 @@ struct NestedContextTests {
         #expect(result == 40)
     }
 
-    @Test("Nested withContext overrides outer context")
-    func nestedWithContextOverrides() async throws {
-        let result = await withContext(CounterContext.self, value: Counter(value: 10)) {
-            let outer = CounterContext.current
+    @Test("Nested withValue overrides outer context")
+    func nestedWithValueOverrides() async throws {
+        let result = await Counter.withValue(Counter(value: 10)) {
+            let outer = Counter.current
 
-            let inner = await withContext(CounterContext.self, value: Counter(value: 100)) {
-                CounterContext.current
+            let inner = await Counter.withValue(Counter(value: 100)) {
+                Counter.current
             }
 
-            let afterInner = CounterContext.current
+            let afterInner = Counter.current
 
             return (outer.value, inner.value, afterInner.value)
         }
@@ -282,11 +275,33 @@ struct ContextReferenceTypeTests {
 @Suite("Context Concurrent Access Tests")
 struct ContextConcurrentTests {
 
+    @Test("Context value is inherited by child tasks")
+    func contextValueIsInheritedByChildTasks() async {
+        let values = await Counter.withValue(Counter(value: 42)) {
+            await withTaskGroup(of: Int.self, returning: [Int].self) { group in
+                for _ in 0..<4 {
+                    group.addTask {
+                        Counter.current.value
+                    }
+                }
+
+                var values: [Int] = []
+                for await value in group {
+                    values.append(value)
+                }
+                return values
+            }
+        }
+
+        #expect(values == [42, 42, 42, 42])
+        #expect(Counter.current.value == 0)
+    }
+
     @Test("Context is accessible in concurrent tasks")
     func contextInConcurrentTasks() async throws {
         let tracker = URLTracker()
 
-        await withContext(URLTrackerContext.self, value: tracker) {
+        await URLTracker.withValue(tracker) {
             await withTaskGroup(of: Void.self) { group in
                 for i in 0..<10 {
                     group.addTask {
@@ -303,9 +318,8 @@ struct ContextConcurrentTests {
 
 // MARK: - Contextable Protocol Tests
 
-/// Test configuration using @Contextable macro
-@Contextable
-struct CrawlerSettings: Equatable {
+/// Test configuration using the default type-indexed context key.
+struct CrawlerSettings: Contextable, Equatable {
     let maxDepth: Int
     let timeout: Int
 
@@ -323,18 +337,18 @@ struct ContextableTests {
         #expect(CrawlerSettings.defaultValue.timeout == 30)
     }
 
-    @Test("Generated ContextKey returns defaultValue")
-    func generatedContextKeyDefaultValue() {
-        #expect(CrawlerSettingsContext.defaultValue.maxDepth == 3)
-        #expect(CrawlerSettingsContext.current.maxDepth == 3)
+    @Test("Default ContextKey returns defaultValue")
+    func defaultContextKeyDefaultValue() {
+        #expect(ContextValueKey<CrawlerSettings>.defaultValue.maxDepth == 3)
+        #expect(CrawlerSettings.current.maxDepth == 3)
     }
 
-    @Test("Generated ContextKey works with withContext")
-    func generatedContextKeyWithContext() async throws {
+    @Test("Default ContextKey installs a scoped value")
+    func defaultContextKeyWithValue() async throws {
         let custom = CrawlerSettings(maxDepth: 10, timeout: 60)
 
-        let result = await withContext(CrawlerSettingsContext.self, value: custom) {
-            CrawlerSettingsContext.current
+        let result = await CrawlerSettings.withValue(custom) {
+            CrawlerSettings.current
         }
 
         #expect(result == custom)
@@ -342,16 +356,15 @@ struct ContextableTests {
         #expect(result.timeout == 60)
     }
 
-    @Test("Generated ContextKey restores after withContext")
-    func generatedContextKeyRestores() async throws {
+    @Test("Default ContextKey restores its parent scope")
+    func defaultContextKeyRestores() async throws {
         let custom = CrawlerSettings(maxDepth: 10, timeout: 60)
 
-        _ = await withContext(CrawlerSettingsContext.self, value: custom) {
-            #expect(CrawlerSettingsContext.current == custom)
+        _ = await CrawlerSettings.withValue(custom) {
+            #expect(CrawlerSettings.current == custom)
         }
 
-        // Should be back to default
-        #expect(CrawlerSettingsContext.current.maxDepth == 3)
+        #expect(CrawlerSettings.current.maxDepth == 3)
     }
 }
 
@@ -368,12 +381,12 @@ struct ContextableStepTests {
         }
     }
 
-    @Test("Step accesses Contextable via generated ContextKey")
+    @Test("Step accesses Contextable via its default ContextKey")
     func stepAccessesContextable() async throws {
         let step = SettingsAccessingStep()
         let custom = CrawlerSettings(maxDepth: 5, timeout: 120)
 
-        let result = try await withContext(CrawlerSettingsContext.self, value: custom) {
+        let result = try await CrawlerSettings.withValue(custom) {
             try await step.run("example.com")
         }
 
@@ -396,7 +409,7 @@ struct ContextableStepTests {
     func stepUsesDefaultValue() async throws {
         let step = SettingsAccessingStep()
 
-        // No withContext - should use defaultValue
+        // No context is installed, so the Step should use defaultValue.
         let result = try await step.run("test.com")
 
         #expect(result == "Crawling test.com with maxDepth=3, timeout=30")
@@ -422,7 +435,7 @@ struct ContextableStepTests {
         }
 
         let custom = CrawlerSettings(maxDepth: 7, timeout: 90)
-        let result = try await withContext(CrawlerSettingsContext.self, value: custom) {
+        let result = try await CrawlerSettings.withValue(custom) {
             try await OuterStep().run("site.com")
         }
 

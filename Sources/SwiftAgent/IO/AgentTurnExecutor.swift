@@ -10,6 +10,15 @@ import Foundation
 /// This is the shared primitive behind transport-backed `AgentSession` turns
 /// and programmatic `AgentSessionRunner` tasks.
 struct AgentTurnExecutor: Sendable {
+    private enum TimeoutOutcome<Value: Sendable>: Sendable {
+        case operation(
+            Result<Value, any Error>,
+            TurnCancellationToken.Terminal
+        )
+        case terminal(TurnCancellationToken.Terminal?)
+        case timerFinished
+    }
+
     private let conversation: Conversation
     private let approvalHandler: (any ApprovalHandler)?
     private let eventHandler: @Sendable (RunEvent) async -> Void
@@ -103,7 +112,8 @@ struct AgentTurnExecutor: Sendable {
                 }
             }
             #if DEBUG
-            debugLog("[AgentTurnExecutor] conversation.send completed sessionID=\(request.sessionID) turnID=\(request.turnID) outputLength=\(response.content.count) hasTextualStream=\(sink.hasTextualStream)")
+            let hasTextualStream = sink.hasTextualStream
+            debugLog("[AgentTurnExecutor] conversation.send completed sessionID=\(request.sessionID) turnID=\(request.turnID) outputLength=\(response.content.count) hasTextualStream=\(hasTextualStream)")
             #endif
 
             if !response.content.isEmpty && !sink.hasTextualStream {
@@ -128,7 +138,7 @@ struct AgentTurnExecutor: Sendable {
             #endif
             let status: RunStatus = switch error {
             case .timedOut: .timedOut
-            case .unsupportedInput: .failed
+            case .unsupportedInput, .unexpectedCancellation: .failed
             }
             return await finish(
                 request: request,
@@ -217,7 +227,7 @@ struct AgentTurnExecutor: Sendable {
         #if DEBUG
         debugLog("[AgentTurnExecutor] runCompleted sessionID=\(request.sessionID) turnID=\(request.turnID) status=\(status) duration=\(ContinuousClock.now - start) finalOutputLength=\(finalOutput?.count ?? 0) error=\(String(describing: error))")
         #endif
-        sink.finish()
+        await sink.finish()
 
         return RunResult(
             sessionID: request.sessionID,
@@ -234,45 +244,130 @@ struct AgentTurnExecutor: Sendable {
         cancellationToken: TurnCancellationToken,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        guard let timeout else {
-            return try await operation()
+        if let reason = cancellationToken.cancellationReason {
+            try throwCancellation(reason)
         }
+        if let timeout, timeout <= .zero {
+            cancellationToken.cancelForTimeout(timeout)
+            try throwCancellation(
+                cancellationToken.cancellationReason ?? .timedOut(timeout)
+            )
+        }
+        let clock = ContinuousClock()
+        let deadline = timeout.map { clock.now.advanced(by: $0) }
 
-        return try await withTaskCancellationHandler {
-            let stream = AsyncThrowingStream<T, Error> { continuation in
-                let operationTask = Task {
+        let result = await withTaskCancellationHandler {
+            await withTaskGroup(
+                of: TimeoutOutcome<T>.self,
+                returning: Result<T, any Error>.self
+            ) { group in
+                group.addTask {
+                    let result: Result<T, any Error>
                     do {
-                        continuation.yield(try await operation())
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
-                    }
-                }
-
-                let timeoutTask = Task {
-                    do {
-                        try await Task.sleep(for: timeout)
-                        cancellationToken.cancel()
-                        operationTask.cancel()
-                        continuation.finish(throwing: AgentTurnExecutorError.timedOut(timeout))
+                        result = .success(try await operation())
                     } catch is CancellationError {
+                        if Task.isCancelled
+                            || cancellationToken.cancellationReason != nil {
+                            result = .failure(CancellationError())
+                        } else {
+                            result = .failure(
+                                AgentTurnExecutorError.unexpectedCancellation
+                            )
+                        }
                     } catch {
-                        continuation.finish(throwing: error)
+                        result = .failure(error)
+                    }
+                    let terminal = cancellationToken.settleOperation(
+                        completedAt: clock.now,
+                        deadline: deadline,
+                        timeout: timeout
+                    )
+                    return .operation(result, terminal)
+                }
+
+                group.addTask {
+                    .terminal(await cancellationToken.waitForTerminal())
+                }
+
+                if let timeout, let deadline {
+                    group.addTask {
+                        let remaining = clock.now.duration(to: deadline)
+                        if remaining > .zero {
+                            do {
+                                try await Task.sleep(for: remaining)
+                            } catch {
+                                return .timerFinished
+                            }
+                        }
+                        guard !Task.isCancelled else {
+                            return .timerFinished
+                        }
+                        cancellationToken.cancelForTimeout(timeout)
+                        return .terminal(cancellationToken.terminal)
                     }
                 }
 
-                continuation.onTermination = { @Sendable _ in
-                    timeoutTask.cancel()
-                    operationTask.cancel()
-                }
-            }
+                while let outcome = await group.next() {
+                    switch outcome {
+                    case .operation(let operationResult, let terminal):
+                        group.cancelAll()
+                        switch terminal {
+                        case .operationCompleted:
+                            return operationResult
+                        case .cancelled(let reason):
+                            return .failure(Self.error(for: reason))
+                        }
 
-            for try await value in stream {
-                return value
+                    case .terminal(let observedTerminal):
+                        let terminal = observedTerminal
+                            ?? cancellationToken.terminal
+                        guard let terminal else {
+                            if Task.isCancelled {
+                                group.cancelAll()
+                                return .failure(CancellationError())
+                            }
+                            continue
+                        }
+                        switch terminal {
+                        case .operationCompleted:
+                            continue
+                        case .cancelled(let reason):
+                            group.cancelAll()
+                            return .failure(Self.error(for: reason))
+                        }
+
+                    case .timerFinished:
+                        continue
+                    }
+                }
+                return .failure(CancellationError())
             }
-            throw CancellationError()
         } onCancel: {
             cancellationToken.cancel()
+        }
+
+        return try result.get()
+    }
+
+    private static func error(
+        for reason: TurnCancellationToken.CancellationReason
+    ) -> any Error {
+        switch reason {
+        case .requested:
+            return CancellationError()
+        case .timedOut(let duration):
+            return AgentTurnExecutorError.timedOut(duration)
+        }
+    }
+
+    private func throwCancellation(
+        _ reason: TurnCancellationToken.CancellationReason
+    ) throws -> Never {
+        switch reason {
+        case .requested:
+            throw CancellationError()
+        case .timedOut(let duration):
+            throw AgentTurnExecutorError.timedOut(duration)
         }
     }
 }

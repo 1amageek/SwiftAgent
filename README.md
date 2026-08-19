@@ -4,8 +4,8 @@
 
 # SwiftAgent
 
-[![Swift 6.2](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
-[![Platforms](https://img.shields.io/badge/Platforms-iOS%2026%20|%20macOS%2026%20|%20tvOS%2026-blue.svg)](https://developer.apple.com)
+[![Swift 6.4](https://img.shields.io/badge/Swift-6.4-orange.svg)](https://swift.org)
+[![Platforms](https://img.shields.io/badge/Platforms-iOS%2026%20|%20macOS%2026-blue.svg)](https://developer.apple.com)
 [![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/Documentation-DocC-blue)](https://1amageek.github.io/SwiftAgent/documentation/swiftagent/)
@@ -22,11 +22,11 @@ A type-safe, declarative framework for building AI agents in Swift, built on App
 - **Built on FoundationModels** - Native Apple AI integration
 - **Structured Output** - Generate typed data with `@Generable`
 - **Security Built-in** - Permission, Sandbox, and Guardrail systems
-- **Extensible** - MCP integration, distributed agents, skills system
+- **Extensible** - MCP integration, participant runtimes, skills system
 
 ## Installation
 
-**Requirements:** Swift 6.2+ / iOS 26+ / macOS 26+ / Xcode 26+
+**Requirements:** Swift 6.4+ / iOS 26+ / macOS 26+ / a matching Swift 6.4 toolchain and SDK
 
 ```swift
 dependencies: [
@@ -337,7 +337,7 @@ if let saved = try await store.load(id: conversation.id) {
 
 ### AgentSession (CLI)
 
-`AgentSession` is the entry point for interactive applications. It connects a `Conversation` to a transport layer (stdio, WebSocket, HTTP SSE).
+`AgentSession` is the entry point for interactive applications. It connects a `Conversation` to an application-level connection. Wire protocols belong to separate adapters.
 
 ```swift
 import SwiftAgent
@@ -356,11 +356,15 @@ let conversation = Conversation(languageModelSession: lms) {
     GenerateText { (input: String) in Prompt(input) }
 }
 
-// 3. Create an AgentSession with transport and run
-let transport = StdioTransport(prompt: "> ")
-let session = AgentSession(transport: transport, approvalHandler: CLIPermissionHandler())
+// 3. Create an AgentSession with a concrete connection and run
+let connection = StdioConnection(prompt: "> ")
+let approvals = StdioApprovalHandler(connection: connection)
+let session = AgentSession(connection: connection, approvalHandler: approvals)
 try await session.run(conversation)
 ```
+
+`StdioConnection` is the sole owner of stdin. Do not pair it with
+`CLIPermissionHandler`, which opens an independent `readLine()` reader.
 
 ### SwiftUI
 
@@ -454,8 +458,7 @@ let readOnly = $count.readOnly { $0 * 2 }
 Propagate configuration through the step hierarchy via TaskLocal. Attach with `.context()` and read with `@Context`.
 
 ```swift
-@Contextable
-struct CrawlerConfig {
+struct CrawlerConfig: Contextable {
     let maxDepth: Int
     let timeout: Int
     static var defaultValue: CrawlerConfig { CrawlerConfig(maxDepth: 3, timeout: 30) }
@@ -584,6 +587,14 @@ Claude Code-style tool naming for file system and web operations.
 | `WebSearch` | Web search |
 | `Notebook` | In-memory key-value scratchpad |
 | `Dispatch` | Sub-LLM session delegation |
+
+`WebFetch` has no unrestricted default. Applications inject a
+`WebDocumentFetching` implementation or construct it with exact trusted
+origins. Redirects are re-authorized per hop; a trusted-origin allowlist is not
+DNS pinning for arbitrary untrusted hosts and accepts only HTTPS or loopback
+HTTP. Caller headers are removed on cross-origin redirects, response bodies are
+bounded while streaming, and cache hits are reauthorized and rechecked against
+the caller's body limit.
 
 ```swift
 let session = LanguageModelSession(
@@ -893,7 +904,7 @@ let config = PermissionConfiguration(
 | `"Read"` | Read tool |
 | `"Bash(git:*)"` | git commands |
 | `"Write(/tmp/*)"` | Writes under /tmp/ |
-| `"mcp:*"` | All MCP tools |
+| `"mcp__*"` | All model-facing MCP tools |
 
 ### Sandbox (macOS)
 
@@ -951,55 +962,84 @@ MyStep().guardrail(.standard)
 
 ### SwiftAgentMCP
 
-MCP (Model Context Protocol) integration with Claude Code-compatible tool naming.
+MCP (Model Context Protocol) integration with host-qualified tool naming.
+
+The dependency baseline is MCP Swift SDK 0.12.1 (protocol 2025-11-25).
+Lifecycle generations prevent results or aggregate discovery snapshots from
+crossing a disconnect/replacement boundary.
+Client receive is single-owner and bounded. A request timeout or caller
+cancellation drains and closes the whole MCP connection; reconnect before
+issuing more requests.
+Client disconnect is one owner operation across the SDK transport and any
+spawned process, so concurrent callers share one result and caller cancellation
+does not abandon cleanup.
+Server hosting waits for the receive loop, surfaces terminal transport errors,
+uses a bounded receive boundary, treats unexpected EOF as failure, and cancels
+and drains a bounded set of owned tool invocations before returning.
 
 ```swift
 import SwiftAgentMCP
 
-let manager = try await MCPClientManager.loadDefault()  // .mcp.json
+let manager = try await MCPClientManager.load(searchPaths: [".mcp.json"])
 let discoveredTools = try await manager.allTools()
-let tools = try discoveredTools.swiftAgentTools()  // mcp:server:tool format
+let tools = try discoveredTools.swiftAgentTools()
+// Names use mcp__<server-byte-count>_<server>__<tool>.
 
 // Permission integration
-.allowing(.mcp("github"))
-.denying(.mcp("filesystem"))
+.allowing(try MCPPermissionRules.allTools(on: "github"))
+.denying(try MCPPermissionRules.allTools(on: "filesystem"))
 ```
 
-See [docs/MCP.md](docs/MCP.md) for configuration and transport options.
+See [SwiftAgentMCP documentation](Sources/SwiftAgentMCP/SwiftAgentMCP.docc/SwiftAgentMCP.md) for configuration and transport options.
 
 ### SwiftAgentSymbio
 
-Distributed agent communication using Swift Distributed Actors. `Community` is
-the philosophical social substrate described in `PHILOSOPHY.md`; the concrete
-runtime API is `SymbioRuntime`.
+Transport-independent participant ownership, trust, routing, and invocation.
+`Community` remains the philosophical social substrate described in
+`PHILOSOPHY.md`; the concrete runtime API is `SymbioRuntime`.
 
 ```swift
 import SwiftAgentSymbio
+import SwiftAgentSymbioAgentAdapter
 
-let actorSystem = SymbioActorSystem()
-let runtime = SymbioRuntime(actorSystem: actorSystem)
-try await runtime.start()  // required to begin transport observation
+let runtime = try SymbioRuntime(
+    identity: ParticipantDescriptor(id: "runtime.local", kind: .service)
+)
+let worker = WorkerAgent()
+let endpoint = try AgentParticipantEndpoint(agent: worker)
+let workerHandle = try await runtime.register(endpoint)
+let changes = await runtime.changes()
+try await runtime.start()
 
-let worker = try await runtime.spawn {
-    WorkerAgent(runtime: runtime, actorSystem: actorSystem)
-}
-
-try await runtime.send(WorkSignal(task: "process"), to: worker.id, perception: "work")
-
-for await change in await runtime.changes {
-    switch change {
-    case .joined(let member): print("Joined: \(member.id)")
-    case .left(let member): print("Left: \(member.id)")
-    default: break
+let observationTask = Task {
+    for try await change in changes {
+        switch change {
+        case .joined(let member): print("Joined: \(member.id)")
+        case .left(let id): print("Left: \(id.rawValue)")
+        default: break
+        }
     }
 }
+
+try await runtime.send(
+    WorkSignal(task: "process"),
+    to: workerHandle.participantID,
+    perception: "work",
+    from: runtime.localHandle
+)
+
+try await runtime.stop()
+_ = try await observationTask.value
 ```
 
-Remote communication is supplied through the `SymbioTransport` boundary. The
+Remote communication is supplied through the `SymbioLink` boundary. Network
+announcements remain untrusted `SymbioPeerClaim` values until a
+`ParticipantClaimVerifier` creates a binding. The
 `SwiftAgentSymbioPeerConnectivity` module adapts `PeerConnectivitySession` to
-that boundary.
+that boundary, while SwiftAgent-specific types remain in
+`SwiftAgentSymbioAgentAdapter`.
 
-See [Docs/SYMBIOSIS.md](Docs/SYMBIOSIS.md) for protocols and SubAgent spawning.
+See [Docs/SYMBIOSIS.md](Docs/SYMBIOSIS.md) for ownership, trust, routing, and adapter boundaries.
 
 ### Skills
 
@@ -1043,20 +1083,24 @@ See [Docs/PLUGINS.md](Docs/PLUGINS.md) for the manifest contract and unsupported
 ## Architecture
 
 ```
-                    FoundationModels (default)
-                    OpenFoundationModels (--traits OpenFoundationModels)
-                           |
-                       SwiftAgent
-                      /    |    \
-        SwiftAgentMCP  AgentTools  SwiftAgentSymbio
-              |                          |
-         MCP (swift-sdk)         swift-actor-runtime
-                                         |
-                                  SymbioTransport
-                                         |
-                         SwiftAgentSymbioPeerConnectivity
-                                         |
-                              swift-peer-connectivity
+FoundationModels / OpenFoundationModels
+                  ^
+                  |
+              SwiftAgent <------ SwiftAgentMCP ------> MCP Swift SDK
+                  ^
+                  |
+     SwiftAgentSymbioAgentAdapter
+                  |
+                  v
+          SwiftAgentSymbio ------> NetworkingCore
+                  ^
+                  |
+ SwiftAgentSymbioPeerConnectivity ------> swift-peer-connectivity
+
+AgentTools ------> SwiftAgent
+    |
+    v
+Web policy + HTTP adapter
 ```
 
 ## License

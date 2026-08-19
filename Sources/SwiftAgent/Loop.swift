@@ -30,9 +30,8 @@ import Foundation
 /// Example of infinite loop:
 /// ```swift
 /// Loop { input in
-///     WaitForInput(prompt: "Enter command: ")
-///     Transform { command in
-///         processCommand(command)
+///     Transform { value in
+///         await pollForNextValue(after: value)
 ///     }
 /// }
 /// ```

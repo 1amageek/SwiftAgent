@@ -33,7 +33,7 @@ import Foundation
 /// ```swift
 /// // Automatic: AgentSession sets AgentSessionContext + EventSinkContext,
 /// // and the middleware emits events during tool execution.
-/// let session = AgentSession(transport: transport)
+/// let session = AgentSession(connection: connection)
 /// try await session.run(conversation)
 /// ```
 public struct EventEmittingMiddleware: ToolMiddleware {

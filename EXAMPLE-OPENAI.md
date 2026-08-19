@@ -52,13 +52,14 @@ print(response)
 ```swift
 struct ResearchStep: Step {
     let apiKey: String
+    let webFetcher: any WebDocumentFetching
 
     public var body: some Step<String, String> {
         StringModelStep<String>(
             session: LanguageModelSession(
                 model: OpenAIModelFactory.gpt4o(apiKey: apiKey),
                 tools: [
-                    URLFetchTool(),
+                    URLFetchTool(fetcher: webFetcher),
                     FileSystemTool()
                 ],
                 instructions: Instructions("You are a research assistant.")

@@ -115,7 +115,9 @@ struct AgentsTests {
 
     @Test("URLFetchTool Creation")
     func urlFetchToolCreation() async throws {
-        let tool = URLFetchTool()
+        let tool = URLFetchTool(trustedOrigins: [
+            try WebOrigin(scheme: "https", host: "example.com")
+        ])
         #expect(tool.name == "WebFetch")
         #expect(!tool.description.isEmpty)
     }

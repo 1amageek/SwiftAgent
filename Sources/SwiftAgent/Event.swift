@@ -184,8 +184,7 @@ public typealias AgentEvent = CommunityEvent
 ///     .emit(.started, on: .before)
 ///     .emit(.completed, on: .after)
 /// ```
-@Contextable
-public final class EventBus: Sendable {
+public final class EventBus: Sendable, Contextable {
 
     public typealias Handler = @Sendable (any Event) async -> Void
 
@@ -255,7 +254,7 @@ public struct EmittingStep<Base: Step>: Step {
 
     public func run(_ input: Input) async throws -> Output {
         // Get EventBus from context
-        let eventBus = EventBusContext.current
+        let eventBus = EventBus.current
 
         // Emit before events
         for (name, payloadBuilder) in beforeEvents {

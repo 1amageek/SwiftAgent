@@ -78,8 +78,6 @@ let config = PermissionConfiguration(
 | `"Bash(git:*)"` | git commands (git, git status, git-flow) |
 | `"Bash(git status)"` | Exact command |
 | `"Write(/tmp/*)"` | Write to /tmp paths |
-| `"mcp:*"` | All MCP tools |
-| `"mcp:github:*"` | GitHub MCP server tools |
 
 The `prefix:*` pattern requires a separator character (space, dash, tab, etc.) after the prefix. `git:*` matches `git status` but not `gitsomething`.
 
@@ -91,8 +89,10 @@ The `prefix:*` pattern requires a separator character (space, dash, tab, etc.) a
 .write("/tmp/*")        // Write(/tmp/*)
 .edit("/src/*")         // Edit(/src/*)
 .read("/secrets/*")     // Read(/secrets/*)
-.mcp("github")          // mcp:github:*
 ```
+
+Integration-specific factories, including MCP server rules, belong to their
+adapter modules rather than SwiftAgent core.
 
 ### Loading from File
 
@@ -249,6 +249,12 @@ struct MyApprovalHandler: ApprovalHandler {
 }
 ```
 
+When an ``AgentConnection`` reports that it cannot receive concurrently, its
+approval handler must conform to ``TurnGatedApprovalHandler`` and must not open
+a competing reader for the connection input. Pair ``StdioConnection`` with
+``StdioApprovalHandler``; `CLIPermissionHandler` owns an independent
+`readLine()` path and is intentionally rejected for that pairing.
+
 Response types:
 
 | Response | Effect |
@@ -318,6 +324,8 @@ SecurityConfiguration.standard
 ### Handler
 
 - ``ApprovalHandler``
+- ``TurnGatedApprovalHandler``
+- ``StdioApprovalHandler``
 - ``CLIPermissionHandler``
 - ``ClosurePermissionHandler``
 - ``AlwaysAllowHandler``

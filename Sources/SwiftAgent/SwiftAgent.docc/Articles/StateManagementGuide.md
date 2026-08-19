@@ -53,8 +53,7 @@ struct CrawlStep: Step {
 ``Context`` propagates values through TaskLocal storage. Child Steps access values without explicit parameter passing.
 
 ```swift
-@Contextable
-struct CrawlerConfig {
+struct CrawlerConfig: Contextable {
     let maxDepth: Int
     let timeout: TimeInterval
 
@@ -135,8 +134,7 @@ $processedCount.increment()
 Use both mechanisms together for complex pipelines:
 
 ```swift
-@Contextable
-struct ProjectConfig {
+struct ProjectConfig: Contextable {
     let projectPath: String
     let maxIssues: Int
     static var defaultValue: ProjectConfig { ... }
@@ -186,7 +184,7 @@ try await AnalysisPipeline()
 | Direction | Read/Write | Read-only (typically) |
 | Scope | Steps with Relay | Entire hierarchy |
 | Purpose | Mutable state | Configuration/Services |
-| Definition | `@Memory var x = ...` | `@Contextable struct` |
+| Definition | `@Memory var x = ...` | `struct X: Contextable` |
 | Access | `$x` for Relay | `@Context var x` |
 
 ## Topics

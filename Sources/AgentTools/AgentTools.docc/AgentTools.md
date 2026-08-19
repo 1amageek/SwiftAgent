@@ -34,9 +34,26 @@ let tools: [any Tool] = [
     GrepTool(workingDirectory: "/path/to/work"),
     ExecuteCommandTool(workingDirectory: "/path/to/work"),
     GitTool(),
-    URLFetchTool(),
+    URLFetchTool(trustedOrigins: [
+        try WebOrigin(scheme: "https", host: "docs.example.com")
+    ]),
 ]
 ```
+
+`WebFetch` has no unrestricted initializer. The application must inject a
+``WebDocumentFetching`` implementation or enumerate exact trusted origins.
+Redirects are disabled in the HTTP client and re-authorized by the document
+fetcher one hop at a time. A trusted-origin policy is an administrative trust
+boundary, accepts HTTPS or loopback HTTP only, and is not DNS pinning;
+arbitrary untrusted destinations require a custom endpoint-binding
+``WebHTTPClient``.
+
+The default HTTP adapter validates caller headers, drains URLSession
+invalidation before cancellation returns, and enforces the body limit while
+bytes arrive. Cross-origin redirects discard all caller headers. The bounded
+cache is used only for header-free successful requests, rejects `Vary`,
+cookie-bearing and private/no-store responses, reauthorizes cached redirect
+destinations, and reapplies each caller's body limit.
 
 ### Security Integration
 
@@ -81,3 +98,6 @@ let security = SecurityConfiguration.standard
 
 - ``URLFetchTool``
 - ``WebSearchTool``
+- ``WebDocumentFetching``
+- ``WebURLPolicy``
+- ``WebHTTPClient``

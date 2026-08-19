@@ -1,15 +1,15 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.4
 
 import PackageDescription
-import CompilerPluginSupport
 
 let package = Package(
     name: "SwiftAgent",
-    platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26), .tvOS(.v26)],
+    platforms: [.iOS(.v26), .macOS(.v26)],
     products: [
         .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
         .library(name: "SwiftAgentSkills", targets: ["SwiftAgentSkills"]),
         .library(name: "SwiftAgentSymbio", targets: ["SwiftAgentSymbio"]),
+        .library(name: "SwiftAgentSymbioAgentAdapter", targets: ["SwiftAgentSymbioAgentAdapter"]),
         .library(name: "SwiftAgentSymbioPeerConnectivity", targets: ["SwiftAgentSymbioPeerConnectivity"]),
         .library(name: "SwiftAgentMCP", targets: ["SwiftAgentMCP"]),
         .library(name: "SwiftAgentPlugins", targets: ["SwiftAgentPlugins"]),
@@ -20,35 +20,26 @@ let package = Package(
         .default(enabledTraits: []),
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "602.0.0"),
-        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
-        .package(url: "https://github.com/apple/swift-metrics.git", "1.0.0" ..< "3.0.0"),
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.91.0"),
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.1"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
-        .package(url: "https://github.com/1amageek/swift-actor-runtime.git", from: "0.2.0"),
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
+        .package(url: "https://github.com/apple/swift-metrics.git", "2.11.0" ..< "3.0.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.101.3"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.15.0"),
+        .package(url: "https://github.com/apple/swift-system.git", from: "1.8.1"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
         .package(url: "https://github.com/1amageek/swift-skills.git", from: "0.2.1"),
-        .package(url: "https://github.com/1amageek/swift-peer-connectivity.git", from: "0.2.5"),
-        .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.4.3"),
+        .package(url: "https://github.com/1amageek/swift-peer-connectivity.git", .upToNextMinor(from: "0.3.0")),
+        .package(url: "https://github.com/1amageek/swift-networking.git", .upToNextMinor(from: "0.1.0")),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.5.0"),
         .package(url: "https://github.com/1amageek/OpenFoundationModels.git", from: "1.18.0"),
     ],
     targets: [
-        .macro(
-            name: "SwiftAgentMacros",
-            dependencies: [
-                .product(name: "SwiftSyntax", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
-                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
-            ]
-        ),
         .target(
             name: "SwiftAgent",
             dependencies: [
-                "SwiftAgentMacros",
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "Metrics", package: "swift-metrics"),
-                .product(name: "ActorRuntime", package: "swift-actor-runtime"),
                 .product(name: "OpenFoundationModels", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
                 .product(name: "OpenFoundationModelsExtra", package: "OpenFoundationModels", condition: .when(traits: ["OpenFoundationModels"])),
             ],
@@ -70,8 +61,17 @@ let package = Package(
         .target(
             name: "SwiftAgentSymbio",
             dependencies: [
+                .product(name: "NetworkingCore", package: "swift-networking"),
+            ],
+            swiftSettings: []
+        ),
+        .target(
+            name: "SwiftAgentSymbioAgentAdapter",
+            dependencies: [
                 "SwiftAgent",
-                .product(name: "ActorRuntime", package: "swift-actor-runtime"),
+                "SwiftAgentSymbio",
+                .product(name: "NetworkingCore", package: "swift-networking"),
+                .product(name: "NetworkingFoundationCompat", package: "swift-networking"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
@@ -83,6 +83,9 @@ let package = Package(
                 "SwiftAgentSymbio",
                 .product(name: "PeerConnectivity", package: "swift-peer-connectivity"),
                 .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NetworkingCore", package: "swift-networking"),
+                .product(name: "NetworkingFoundationCompat", package: "swift-networking"),
+                .product(name: "NetworkingTime", package: "swift-networking"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
@@ -92,7 +95,9 @@ let package = Package(
             name: "SwiftAgentMCP",
             dependencies: [
                 "SwiftAgent",
+                .product(name: "Logging", package: "swift-log"),
                 .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "SystemPackage", package: "swift-system"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
@@ -146,6 +151,8 @@ let package = Package(
             dependencies: [
                 "SwiftAgent",
                 "SwiftAgentSymbio",
+                "SwiftAgentSymbioAgentAdapter",
+                .product(name: "NetworkingCore", package: "swift-networking"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
@@ -158,6 +165,8 @@ let package = Package(
                 "SwiftAgentSymbioPeerConnectivity",
                 .product(name: "PeerConnectivity", package: "swift-peer-connectivity"),
                 .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NetworkingCore", package: "swift-networking"),
+                .product(name: "NetworkingTime", package: "swift-networking"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
@@ -168,6 +177,18 @@ let package = Package(
             dependencies: [
                 "SwiftAgent",
                 "SwiftAgentSkills",
+            ],
+            swiftSettings: [
+                .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
+            ]
+        ),
+        .testTarget(
+            name: "SwiftAgentMCPTests",
+            dependencies: [
+                "SwiftAgent",
+                "SwiftAgentMCP",
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "MCP", package: "swift-sdk"),
             ],
             swiftSettings: [
                 .define("OpenFoundationModels", .when(traits: ["OpenFoundationModels"])),
